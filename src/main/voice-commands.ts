@@ -328,6 +328,55 @@ export const COMMANDS: VoiceCommand[] = [
     dangerous: false,
     description: '저장'
   },
+
+  // --- System Info ---
+  {
+    id: 'memory_info',
+    patterns: [
+      /(현재\s*)?메모리\s*(얼마|사용량|사용|상태|현황|확인|알려줘|어때|몇)/,
+      /(현재\s*)?램\s*(얼마|사용량|사용|상태|확인|알려줘)/,
+      /메모리.*사용/,
+      /memory\s*(status|usage|check)/i,
+    ],
+    action: async () => sc.getMemoryInfo(),
+    dangerous: false,
+    description: '메모리 사용량 확인'
+  },
+  {
+    id: 'cpu_info',
+    patterns: [
+      /(현재\s*)?cpu\s*(얼마|사용량|사용|상태|확인|알려줘|어때)/i,
+      /(현재\s*)?씨피유\s*(얼마|사용|상태|확인)/,
+      /cpu.*사용/i,
+      /프로세서\s*(상태|사용|확인)/,
+    ],
+    action: async () => sc.getCpuUsage(),
+    dangerous: false,
+    description: 'CPU 사용률 확인'
+  },
+  {
+    id: 'disk_info',
+    patterns: [
+      /(현재\s*)?디스크\s*(얼마|사용량|사용|상태|용량|확인|알려줘)/,
+      /(현재\s*)?저장\s*공간\s*(얼마|남았|확인|알려줘)/,
+      /디스크.*용량/,
+      /disk\s*(usage|status|check)/i,
+    ],
+    action: async () => sc.getDiskInfo(),
+    dangerous: false,
+    description: '디스크 사용량 확인'
+  },
+  {
+    id: 'system_info',
+    patterns: [
+      /(현재\s*)?시스템\s*(상태|정보|현황|확인|알려줘)/,
+      /(현재\s*)?컴퓨터\s*(상태|정보|사양|어때)/,
+      /system\s*(status|info|check)/i,
+    ],
+    action: async () => sc.getSystemInfo(),
+    dangerous: false,
+    description: '시스템 전체 정보'
+  },
 ]
 
 // ==================== Command Parser ====================
@@ -359,7 +408,7 @@ Given a user's voice input, determine if it's a PC control command.
 If it IS a command, respond with ONLY a JSON object: {"action":"<action_id>","target":"<actual_app_name>"}
 IMPORTANT: For target, use the ACTUAL application name, not the Korean alias.
 Known app aliases: ${appList}
-Possible actions: open_app, close_app, switch_app, minimize, maximize, volume_up, volume_down, mute, unmute, new_tab, browser_back, refresh, web_search, screenshot, lock, sleep, copy, paste, undo, save, select_all, open_url
+Possible actions: open_app, close_app, switch_app, minimize, maximize, volume_up, volume_down, mute, unmute, new_tab, browser_back, refresh, web_search, screenshot, lock, sleep, copy, paste, undo, save, select_all, open_url, memory_info, cpu_info, disk_info, system_info
 For web_search, put the search query in "target".
 For open_url, put the URL in "target". For "네이버" use "https://naver.com", for "구글" use "https://google.com", for "유튜브" use "https://youtube.com".
 If it is NOT a command (just regular speech), respond with: {"action":"none"}
