@@ -4,7 +4,7 @@ import { getHistory, searchHistory, deleteTranscription, saveTranscription } fro
 import { transcribe, getModelsDir, getAvailableModels } from './whisper'
 import { injectText } from './injector'
 import { getOverlayWindow, hideOverlay, getCapturedSelectedText, getPreviousAppName, getPreviousBundleId } from './appState'
-import { processWithAI, processWithClaude, searchWithGemini, processImageWithGemini, processImageWithOllama, isOllamaAvailable, getProviderStatus, startDiscussion, startParallel, startAgent, startHive, startConductor, summarizeWithGemini, checkAllProviders } from './nco-client'
+import { processWithAI, processWithClaude, searchWithGemini, processImageWithGemini, processImageWithOllama, isOllamaAvailable, getProviderStatus, startDiscussion, startParallel, startAgent, startHive, startConductor, summarizeWithGemini, checkAllProviders, processWithNCOTask } from './nco-client'
 import { parseVoiceCommand, parseCommand } from './voice-commands'
 import { showNotification, captureScreenBase64 } from './system-control'
 import { pipelineSpeak, pipelineSpeakStreaming, getPipelineStatus, initPipeline, setPipelineConfig, getPipelineConfig } from './pipeline'
@@ -628,81 +628,156 @@ JSON만:`
               ? `${NCO_CODING_CONTEXT}\n\n## 사용자 요청\n${text}`
               : `${NCO_FULL_CONTEXT}\n\n## 사용자 음성 요청\n${text}`
 
-            // NCO 결과 TTS 헬퍼 — 긴 결과의 첫 2-3문장만 읽어줌
-            const speakNCOResult = (text: string, label: string) => {
-              if (!text?.trim()) return
-              // 마크다운 제거 후 첫 150자만
-              const stripped = text
-                .replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1')
-                .replace(/```[\s\S]*?```/g, '').replace(/`([^`]+)`/g, '$1')
-                .replace(/^#+\s+/gm, '').replace(/^[-*•]\s+/gm, '')
-                .replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()
-              // 코드 블록이 주인 경우 알림만
-              const hasCode = text.includes('```') || text.includes('function ') || text.includes('const ')
+            // 마크다운 스트립 헬퍼
+            const stripMdForTTS = (s: string) => s
+              .replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1')
+              .replace(/```[\s\S]*?```/g, '').replace(/`([^`]+)`/g, '$1')
+              .replace(/^#+\s+/gm, '').replace(/^[-*•]\s+/gm, '')
+              .replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()
+
+            // NCO 결과 TTS 헬퍼 — 최종 결과 요약 읽기
+            const speakNCOResult = (resultText: string, label: string) => {
+              if (!resultText?.trim()) return
+              const stripped = stripMdForTTS(resultText)
+              const hasCode = resultText.includes('```') || resultText.includes('function ') || resultText.includes('const ')
               const ttsSnippet = hasCode
-                ? `${label} 완료. 결과를 확인하세요.`
-                : stripped.substring(0, 150)
+                ? `${label} 완료. 결과를 화면에서 확인하세요.`
+                : stripped.substring(0, 200)
               smartSpeak(ttsSnippet, { lang: 'ko' }).catch(e => console.error('[TTS NCO]', (e as Error).message))
             }
 
-            try {
-              if (ncoSubtype === 'code') {
-                // 코딩 → conductor (복잡도 분석 후 aider/codex 자동 선택)
-                console.log('[Smart→NCO Code] conductor 라우팅')
-                debugBroadcast('info', '[NCO] code → conductor (aider/codex 자동 선택)')
-                const r = await startConductor(ncoPrompt)
-                finalText = r.text
-                aiResult = `[Smart→NCO:Code] ${r.text}`
-                debugBroadcast('success', `[NCO] Code 완료 (${r.mode}, ${r.text.length}자)`)
-                speakNCOResult(r.text, 'NCO 코딩')
-              } else if (ncoSubtype === 'discuss') {
-                console.log('[Smart→NCO Discussion]')
-                debugBroadcast('info', '[NCO] discussion 시작 (다중 AI 토론)...')
-                const r = await startDiscussion(ncoPrompt)
-                finalText = r.text
-                aiResult = `[Smart→Discussion] ${r.text}`
-                debugBroadcast('success', `[NCO] Discussion 완료 (참가자: ${r.participants?.join(', ')})`)
-                speakNCOResult(r.text, `토론 완료 (${r.participants?.length || 0}명 참가)`)
-              } else if (ncoSubtype === 'team') {
-                console.log('[Smart→NCO Team]')
-                debugBroadcast('info', '[NCO] parallel 시작 (병렬 처리)...')
-                const r = await startParallel(ncoPrompt)
-                finalText = r.text
-                aiResult = `[Smart→Team] ${r.text}`
-                debugBroadcast('success', `[NCO] Parallel 완료 (${r.text.length}자)`)
-                speakNCOResult(r.text, 'NCO 팀')
-              } else if (ncoSubtype === 'agent') {
-                console.log('[Smart→NCO Agent]')
-                debugBroadcast('info', '[NCO] agent 시작 (자율 작업)...')
-                const r = await startAgent(ncoPrompt)
-                finalText = r.text
-                aiResult = `[Smart→Agent] ${r.text}`
-                debugBroadcast('success', `[NCO] Agent 완료 (session: ${r.sessionId})`)
-                speakNCOResult(r.text, 'NCO 에이전트')
-              } else if (ncoSubtype === 'hive') {
-                console.log('[Smart→NCO Hive]')
-                debugBroadcast('info', '[NCO] hive 시작 (전체 AI 동원)...')
-                const r = await startHive(ncoPrompt)
-                finalText = r.text
-                aiResult = `[Smart→Hive] ${r.text}`
-                debugBroadcast('success', `[NCO] Hive 완료 (${r.text.length}자)`)
-                speakNCOResult(r.text, '하이브 완료')
-              } else {
-                // subtype 미지정 → conductor (자동 모드+AI 선택)
-                console.log('[Smart→NCO Conductor (auto)]')
-                debugBroadcast('info', '[NCO] conductor 시작 (자동 모드 선택)...')
-                const r = await startConductor(ncoPrompt)
-                finalText = r.text
-                aiResult = `[Smart→NCO:${r.mode}] ${r.text}`
-                debugBroadcast('success', `[NCO] Conductor 완료 (모드: ${r.mode}, ${r.text.length}자)`)
-                speakNCOResult(r.text, `NCO ${r.mode}`)
+            // 장기 작업(discuss/team/agent/hive): 백그라운드 실행 → IPC 즉시 반환
+            // 단기 작업(code/conductor): await 유지 (~5-30초)
+            const isLongTask = ['discuss', 'team', 'agent', 'hive'].includes(ncoSubtype || '')
+            if (isLongTask) {
+              // 즉시 확인 TTS — 요청 접수 알림
+              const confirmMsg = ncoSubtype === 'discuss'
+                ? '네, AI들이 토론을 시작합니다. 완료되면 결과를 알려드릴게요.'
+                : ncoSubtype === 'team' ? '네, AI 팀이 병렬 작업을 시작합니다.'
+                : ncoSubtype === 'agent' ? '네, 자율 에이전트가 작업을 시작합니다.'
+                : '네, 전체 AI를 동원합니다. 잠시 기다려주세요.'
+              smartSpeak(confirmMsg, { lang: 'ko' }).catch(() => {})
+              debugBroadcast('info', `[NCO] 작업 확인 — "${text.substring(0, 60)}..." 백그라운드 시작`)
+
+              // 클로저 캡처 (비동기 완료 시 결과 push에 사용)
+              const bgOrigText = text
+              const bgLang = result.language
+              const bgDuration = result.duration
+              const bgAiMode = aiMode
+
+              ;(async () => {
+                let progressInterval: ReturnType<typeof setInterval> | null = null
+                let progressCount = 0
+                if (ncoSubtype === 'discuss' || ncoSubtype === 'hive') {
+                  progressInterval = setInterval(() => {
+                    progressCount++
+                    const msgs = [
+                      'AI들이 아직 토론 중입니다.',
+                      '토론이 계속되고 있습니다. 조금만 더 기다려주세요.',
+                      '깊이 있는 토론이 진행 중입니다.',
+                    ]
+                    smartSpeak(msgs[Math.min(progressCount - 1, msgs.length - 1)], { lang: 'ko' }).catch(() => {})
+                    debugBroadcast('info', `[NCO] 진행 중... (${progressCount * 30}초 경과)`)
+                  }, 30000)
+                }
+                try {
+                  let bgText = ''
+                  let bgAiResult = ''
+                  if (ncoSubtype === 'discuss') {
+                    console.log('[Smart→NCO Discussion] 백그라운드')
+                    debugBroadcast('info', '[NCO] discussion 시작 (최대 10분)...')
+                    let r
+                    try {
+                      r = await startDiscussion(ncoPrompt, undefined, (msg, level = 'info') => debugBroadcast(level, msg))
+                    } catch (discussErr) {
+                      const errMsg = (discussErr as Error).message
+                      debugBroadcast('warn', `[NCO] Discussion 실패: ${errMsg} → gemini 폴백`)
+                      const fallbackResult = await processWithNCOTask(ncoPrompt, 'gemini')
+                      r = { text: fallbackResult, participants: ['gemini'], mode: 'task' }
+                    }
+                    bgText = r.text
+                    bgAiResult = `[Smart→Discussion] ${r.text}`
+                    debugBroadcast('success', `[NCO] Discussion 완료 (참가자: ${r.participants?.join(', ')}, ${r.text.length}자)`)
+                    smartSpeak(`토론 완료. 결과 요약: ${stripMdForTTS(r.text).substring(0, 250)}`, { lang: 'ko' }).catch(() => {})
+                  } else if (ncoSubtype === 'team') {
+                    console.log('[Smart→NCO Team] 백그라운드')
+                    const r = await startParallel(ncoPrompt)
+                    bgText = r.text
+                    bgAiResult = `[Smart→Team] ${r.text}`
+                    debugBroadcast('success', `[NCO] Parallel 완료 (${r.text.length}자)`)
+                    speakNCOResult(r.text, 'NCO 팀')
+                  } else if (ncoSubtype === 'agent') {
+                    console.log('[Smart→NCO Agent] 백그라운드')
+                    const r = await startAgent(ncoPrompt)
+                    bgText = r.text
+                    bgAiResult = `[Smart→Agent] ${r.text}`
+                    debugBroadcast('success', `[NCO] Agent 완료 (session: ${r.sessionId})`)
+                    speakNCOResult(r.text, 'NCO 에이전트')
+                  } else if (ncoSubtype === 'hive') {
+                    console.log('[Smart→NCO Hive] 백그라운드')
+                    const r = await startHive(ncoPrompt)
+                    bgText = r.text
+                    bgAiResult = `[Smart→Hive] ${r.text}`
+                    debugBroadcast('success', `[NCO] Hive 완료 (${r.text.length}자)`)
+                    speakNCOResult(r.text, '하이브 완료')
+                  }
+                  // 완료 시 결과를 UI에 push
+                  if (bgText) {
+                    const bgResult: TranscriptionResult = {
+                      id: crypto.randomUUID(),
+                      text: bgOrigText,
+                      language: bgLang,
+                      duration: bgDuration,
+                      timestamp: Date.now(),
+                      modelUsed: settings.modelName,
+                      aiMode: bgAiMode,
+                      aiResult: bgAiResult,
+                    }
+                    saveTranscription(bgResult)
+                    if (!mainWindow.isDestroyed()) {
+                      mainWindow.webContents.send('transcription:result', bgResult)
+                    }
+                  }
+                } catch (e) {
+                  const errMsg = (e as Error).message
+                  debugBroadcast('error', `[NCO] 백그라운드 실패 (${ncoSubtype}): ${errMsg.substring(0, 100)}`)
+                  smartSpeak('NCO 처리에 실패했습니다.', { lang: 'ko' }).catch(() => {})
+                } finally {
+                  if (progressInterval) clearInterval(progressInterval)
+                }
+              })()
+
+              // IPC 핸들러 즉시 반환 — 다음 음성 명령 즉시 수락 가능
+              finalText = ''
+              aiResult = `[Smart→NCO:${ncoSubtype}:처리중]`
+            } else {
+              // 단기 작업 (code, conductor) — await 유지
+              try {
+                if (ncoSubtype === 'code') {
+                  console.log('[Smart→NCO Code] conductor 라우팅')
+                  debugBroadcast('info', '[NCO] code → conductor (aider/codex 자동 선택)')
+                  const r = await startConductor(ncoPrompt)
+                  finalText = r.text
+                  aiResult = `[Smart→NCO:Code] ${r.text}`
+                  debugBroadcast('success', `[NCO] Code 완료 (${r.mode}, ${r.text.length}자)`)
+                  speakNCOResult(r.text, 'NCO 코딩')
+                } else {
+                  // subtype 미지정 → conductor (자동 모드+AI 선택)
+                  console.log('[Smart→NCO Conductor (auto)]')
+                  debugBroadcast('info', '[NCO] conductor 시작 (자동 모드 선택)...')
+                  const r = await startConductor(ncoPrompt)
+                  finalText = r.text
+                  aiResult = `[Smart→NCO:${r.mode}] ${r.text}`
+                  debugBroadcast('success', `[NCO] Conductor 완료 (모드: ${r.mode}, ${r.text.length}자)`)
+                  speakNCOResult(r.text, `NCO ${r.mode}`)
+                }
+              } catch (e) {
+                const errMsg = (e as Error).message
+                aiResult = `[NCO Error] ${errMsg}`
+                debugBroadcast('error', `[NCO] 실패 (${ncoSubtype}): ${errMsg.substring(0, 100)}`)
+                console.error(`[Smart→NCO] ${ncoSubtype} failed:`, errMsg)
+                smartSpeak(`처리 중 오류가 발생했습니다. ${errMsg.substring(0, 50)}`, { lang: 'ko' }).catch(() => {})
               }
-            } catch (e) {
-              const errMsg = (e as Error).message
-              aiResult = `[NCO Error] ${errMsg}`
-              debugBroadcast('error', `[NCO] 실패 (${ncoSubtype}): ${errMsg.substring(0, 100)}`)
-              console.error(`[Smart→NCO] ${ncoSubtype} failed:`, errMsg)
-              smartSpeak('NCO 처리에 실패했습니다.', { lang: 'ko' }).catch(() => {})
             }
           }
 
