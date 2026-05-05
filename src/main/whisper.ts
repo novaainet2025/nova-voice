@@ -208,19 +208,31 @@ async function transcribeWithCLI(
     throw new Error('Whisper binary not found. Install via: brew install whisper-cpp')
   }
 
-  // 초기 프롬프트: 자주 사용하는 고유명사/키워드를 미리 알려줘서 인식률 향상
-  // Whisper는 이 프롬프트의 어휘를 문맥으로 활용해 동음이의어/외래어 정확도를 높임
+  // 초기 프롬프트: 한영 혼용 발화 품질 향상
+  // - 영어 고유명사는 영어 원문으로 직접 기재 → Whisper가 그대로 출력
+  // - 한국어 명령 키워드 병행 → 한국어 인식률 유지
   const initialPrompt = [
-    // 앱 이름 (외래어 → 정확한 한글 표기)
-    '크롬', '사파리', '파인더', '터미널', '카카오톡', '슬랙', '디스코드',
-    '노션', '스포티파이', '비주얼 스튜디오 코드', '커서', '계산기', '줌', '팀즈',
-    // PC 명령 키워드
+    // ── 영어 고유명사 (이 단어들은 영어 그대로 출력됨) ──
+    // AI / NCO 용어
+    'NCO', 'AI', 'API', 'Claude', 'Gemini', 'GPT', 'LLM',
+    'Whisper', 'Codex', 'Aider', 'Cursor', 'Copilot',
+    // 개발 도구
+    'terminal', 'git', 'GitHub', 'VS Code', 'npm', 'node', 'Python',
+    'TypeScript', 'JavaScript', 'React', 'Electron',
+    'SSH', 'URL', 'JSON', 'UI', 'UX', 'PR', 'commit', 'push', 'pull',
+    // 앱 이름
+    'Chrome', 'Safari', 'Finder', 'Slack', 'Discord', 'Notion', 'Zoom',
+    'Spotify', 'Teams', 'Figma', 'Docker',
+    // NOVA Voice 전용
+    'Nova', 'Nova Voice', 'TTS', 'STT', 'MLX', 'PTY',
+    // ── 한국어 명령 키워드 (한국어 인식률 유지) ──
     '열어', '닫아', '실행', '종료', '볼륨', '올려', '내려', '음소거',
     '스크린샷', '캡처', '최소화', '최대화', '검색', '새로고침',
     '복사', '붙여넣기', '실행 취소', '저장', '전체 선택',
-    // NCO 키워드
+    '카카오톡', '파인더', '계산기',
+    // NCO 한국어 키워드
     '토론', '팀', '병렬', '에이전트', '하이브', '분석',
-    // 일반 질문 키워드
+    // 일반 질문
     '알려줘', '설명해', '뭐야', '어때', '추천', '번역',
   ].join(', ')
 
@@ -233,22 +245,22 @@ async function transcribeWithCLI(
     // 정확도 향상 파라미터
     '-bs', '5',                   // beam-size 5 (후보 탐색 넓힘)
     '-bo', '5',                   // best-of 5 (5개 후보 중 최선 선택)
-    '-tp', '0',                   // temperature 0 (결정론적 디코딩, 할루시네이션 감소)
+    '-tp', '0',                   // temperature 0 (결정론적 디코딩)
     '--no-fallback',              // temperature fallback 비활성화
-    // Anti-hallucination settings
-    '--no-speech-thold', '0.6',   // 음성이 아닌 구간 감지 임계값 (높을수록 엄격)
-    '--entropy-thold', '2.4',     // 엔트로피 임계값 (낮을수록 엄격, 기본 2.4)
+    // Anti-hallucination — 완화된 값 (너무 엄격하면 실제 음성도 차단)
+    '--no-speech-thold', '0.3',   // 0.6→0.3: 짧은 발화·작은 목소리 살림 (기본 0.6)
+    '--entropy-thold', '2.8',     // 2.4→2.8: 약간 완화 (한국어 발화 다양성 허용)
     '--logprob-thold', '-1.0',    // 로그 확률 임계값
     '--max-len', '0'              // 세그먼트 최대 길이 제한 없음
   ]
 
-  // Set language for Korean recognition
+  // 한영 혼용: auto 모드로 Whisper가 세그먼트별 언어 자동 감지
+  // - 'ko'로 고정하면 영어 단어가 한글로 음사(音寫)됨
+  // - 'auto'에서 large-v3-turbo는 한/영 코드스위칭을 잘 처리함
   if (options.language && options.language !== 'auto') {
     args.push('-l', options.language)
-  } else {
-    // Default to Korean for this app
-    args.push('-l', 'ko')
   }
+  // else: 언어 플래그 없음 = Whisper 내부 auto-detect (SuperWhisper 동일 방식)
 
   console.log(`Transcribing: ${whisperBinaryPath} ${args.join(' ')}`)
 
@@ -270,6 +282,9 @@ async function transcribeWithCLI(
   // Common hallucination patterns: repeated text, non-Korean gibberish, known phantom phrases
   text = filterHallucinations(text)
 
+  // 한글 음사 → 영어 원문 복원 (auto 모드에서 간혹 음사되는 경우 안전망)
+  text = restoreEnglishTerms(text)
+
   // Try to detect language from stderr output
   let detectedLang = 'ko'
   const langMatch = stderr.match(/auto-detected language: (\w+)/)
@@ -278,6 +293,57 @@ async function transcribeWithCLI(
   }
 
   return { text, language: detectedLang }
+}
+
+// 한글 음사(音寫) → 영어 원문 복원
+// auto 모드에서도 가끔 음사로 출력되는 기술 용어를 교정하는 안전망
+// SuperWhisper와 동일한 방식 (고유명사 사전 교정)
+const ENGLISH_RESTORE_MAP: [RegExp, string][] = [
+  // AI / NCO
+  [/\bNCO\b|엔씨오\b/g,                    'NCO'],
+  [/\bAI\b|에이아이\b|에이 아이\b/g,         'AI'],
+  [/\bAPI\b|에이피아이\b|에이 피 아이\b/g,   'API'],
+  [/클로드\b/g,                             'Claude'],
+  [/제미나이\b|재미나이\b|지미나이\b/g,       'Gemini'],
+  [/\bGPT\b|지피티\b/g,                    'GPT'],
+  [/\bLLM\b|엘엘엠\b/g,                    'LLM'],
+  [/위스퍼\b/g,                             'Whisper'],
+  [/코덱스\b/g,                             'Codex'],
+  [/에이더\b|아이더\b/g,                    'Aider'],
+  [/코파일럿\b/g,                           'Copilot'],
+  // 개발 도구
+  [/깃허브\b/g,                             'GitHub'],
+  [/\b깃\b(?!허브)/g,                       'git'],
+  [/비에스코드\b|브이에스코드\b/g,            'VS Code'],
+  [/\bnpm\b|엔피엠\b/g,                     'npm'],
+  [/\bSSH\b|에스에스에이치\b/g,              'SSH'],
+  [/\bURL\b|유알엘\b/g,                     'URL'],
+  [/\bJSON\b|제이슨\b(?!씨)/g,              'JSON'],
+  [/\bUI\b|유아이\b/g,                      'UI'],
+  [/\bUX\b|유엑스\b/g,                      'UX'],
+  [/\bPR\b|피알\b/g,                        'PR'],
+  // 앱 이름
+  [/크롬\b/g,                               'Chrome'],
+  [/사파리\b(?!공원)/g,                      'Safari'],
+  [/슬랙\b/g,                               'Slack'],
+  [/디스코드\b/g,                            'Discord'],
+  [/노션\b/g,                               'Notion'],
+  [/피그마\b/g,                              'Figma'],
+  [/도커\b/g,                               'Docker'],
+  // NOVA Voice
+  [/\bTTS\b|티티에스\b/g,                   'TTS'],
+  [/\bSTT\b|에스티티\b/g,                   'STT'],
+  [/\bMLX\b|엠엘엑스\b/g,                   'MLX'],
+  [/\bPTY\b|피티와이\b/g,                   'PTY'],
+]
+
+function restoreEnglishTerms(text: string): string {
+  if (!text) return text
+  let result = text
+  for (const [pattern, replacement] of ENGLISH_RESTORE_MAP) {
+    result = result.replace(pattern, replacement)
+  }
+  return result
 }
 
 // Filter out common Whisper hallucination patterns
@@ -329,6 +395,39 @@ function filterHallucinations(text: string): string {
   }
 
   return text
+}
+
+// 첫 실제 녹음 전에 모델을 warm up — cold start 1.5s → warm ~0.8s
+export async function warmupWhisper(modelPath: string): Promise<void> {
+  try {
+    // 최소한의 유효 WAV 헤더 (44바이트) + 0.5초 무음 (16kHz mono 16bit)
+    const sampleRate = 16000
+    const duration = 0.5
+    const numSamples = Math.floor(sampleRate * duration)
+    const dataSize = numSamples * 2 // 16-bit
+    const wavBuf = Buffer.alloc(44 + dataSize, 0)
+    // WAV header
+    wavBuf.write('RIFF', 0); wavBuf.writeUInt32LE(36 + dataSize, 4)
+    wavBuf.write('WAVE', 8); wavBuf.write('fmt ', 12)
+    wavBuf.writeUInt32LE(16, 16); wavBuf.writeUInt16LE(1, 20)
+    wavBuf.writeUInt16LE(1, 22); wavBuf.writeUInt32LE(sampleRate, 24)
+    wavBuf.writeUInt32LE(sampleRate * 2, 28); wavBuf.writeUInt16LE(2, 32)
+    wavBuf.writeUInt16LE(16, 34); wavBuf.write('data', 36)
+    wavBuf.writeUInt32LE(dataSize, 40)
+
+    console.log('[Whisper] Warming up model...')
+    const tempDir = app.getPath('temp')
+    const tmpWav = path.join(tempDir, `nova-warmup-${Date.now()}.wav`)
+    fs.writeFileSync(tmpWav, wavBuf)
+    try {
+      await transcribeWithCLI(tmpWav, { modelPath, language: 'ko' })
+    } finally {
+      try { fs.unlinkSync(tmpWav) } catch { /* ignore */ }
+    }
+    console.log('[Whisper] Warmup complete')
+  } catch {
+    // warmup 실패는 무시 (기능에 영향 없음)
+  }
 }
 
 export function isReady(): boolean {
