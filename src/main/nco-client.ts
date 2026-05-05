@@ -4,6 +4,7 @@ import http from 'http'
 import https from 'https'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
+import { isProviderHealthy, recordProviderSuccess, recordProviderFailure } from './self-heal'
 
 const execFile = promisify(execFileCb)
 
@@ -26,9 +27,44 @@ function loadGeminiKeys(): string[] {
 }
 const GEMINI_KEYS = loadGeminiKeys()
 let _geminiIdx = 0
+// Per-key cooldown: key → epoch ms when it can be used again
+const _keyCooldowns = new Map<string, number>()
+
 function nextGeminiKey(): string | null {
   if (!GEMINI_KEYS.length) return null
-  return GEMINI_KEYS[_geminiIdx++ % GEMINI_KEYS.length]
+  const now = Date.now()
+  // Find next available key (not in cooldown)
+  for (let attempt = 0; attempt < GEMINI_KEYS.length; attempt++) {
+    const key = GEMINI_KEYS[_geminiIdx % GEMINI_KEYS.length]
+    _geminiIdx++
+    if (now >= (_keyCooldowns.get(key) ?? 0)) return key
+  }
+  // All keys in cooldown — return the one expiring soonest
+  let best = GEMINI_KEYS[0]
+  let bestUntil = _keyCooldowns.get(best) ?? 0
+  for (const k of GEMINI_KEYS) {
+    const u = _keyCooldowns.get(k) ?? 0
+    if (u < bestUntil) { best = k; bestUntil = u }
+  }
+  console.warn(`[Gemini] All ${GEMINI_KEYS.length} keys in cooldown. Soonest in ${Math.ceil((bestUntil - Date.now()) / 1000)}s`)
+  return best
+}
+
+// Park a key after 429. Parses Gemini's retryDelay if present.
+function markKeyExhausted(key: string, errorBody: string): void {
+  let coolSec = 65
+  try {
+    const j = JSON.parse(errorBody.replace(/^HTTP \d+: /, ''))
+    const retryDelay: string | undefined = j?.error?.details?.find(
+      (d: { retryDelay?: string }) => d.retryDelay
+    )?.retryDelay
+    if (retryDelay) {
+      const m = retryDelay.match(/(\d+)/)
+      if (m) coolSec = parseInt(m[1]) + 5  // parsed seconds + buffer
+    }
+  } catch { /* use default */ }
+  _keyCooldowns.set(key, Date.now() + coolSec * 1000)
+  console.warn(`[Gemini] Key …${key.slice(-6)} parked for ${coolSec}s`)
 }
 
 // Simple HTTP/HTTPS request helper (no external deps)
@@ -164,45 +200,69 @@ export async function processWithAI(options: AIProcessOptions): Promise<AIProces
 
   // Standard auto: try NCO → Ollama → Claude CLI → Gemini CLI
   if (provider === 'auto' || provider === 'nco') {
-    try {
-      if (await isNCOAvailable()) {
-        const result = await processWithNCO(fullPrompt, options.model)
-        return { ...result, duration: (Date.now() - start) / 1000 }
+    if (isProviderHealthy('nco')) {
+      try {
+        if (await isNCOAvailable()) {
+          const result = await processWithNCO(fullPrompt, options.model)
+          recordProviderSuccess('nco')
+          return { ...result, duration: (Date.now() - start) / 1000 }
+        }
+      } catch (e) {
+        recordProviderFailure('nco', (e as Error).message)
+        console.log('NCO failed, falling back:', (e as Error).message)
       }
-    } catch (e) {
-      console.log('NCO failed, falling back:', (e as Error).message)
+    } else {
+      console.log('[self-heal] NCO in cooldown, skipping')
     }
     if (provider === 'nco') throw new Error('NCO is not available')
   }
 
   if (provider === 'auto' || provider === 'ollama') {
-    try {
-      if (await isOllamaAvailable()) {
-        const result = await processWithOllama(fullPrompt, options.model)
-        return { ...result, duration: (Date.now() - start) / 1000 }
+    if (isProviderHealthy('ollama')) {
+      try {
+        if (await isOllamaAvailable()) {
+          const result = await processWithOllama(fullPrompt, options.model)
+          recordProviderSuccess('ollama')
+          return { ...result, duration: (Date.now() - start) / 1000 }
+        }
+      } catch (e) {
+        recordProviderFailure('ollama', (e as Error).message)
+        console.log('Ollama failed, falling back:', (e as Error).message)
       }
-    } catch (e) {
-      console.log('Ollama failed, falling back:', (e as Error).message)
+    } else {
+      console.log('[self-heal] Ollama in cooldown, skipping')
     }
     if (provider === 'ollama') throw new Error('Ollama is not available')
   }
 
   if (provider === 'auto' || provider === 'claude') {
-    try {
-      const result = await processWithClaude(fullPrompt)
-      return { ...result, duration: (Date.now() - start) / 1000 }
-    } catch (e) {
-      console.log('Claude CLI failed, falling back:', (e as Error).message)
+    if (isProviderHealthy('claude')) {
+      try {
+        const result = await processWithClaude(fullPrompt)
+        recordProviderSuccess('claude')
+        return { ...result, duration: (Date.now() - start) / 1000 }
+      } catch (e) {
+        recordProviderFailure('claude', (e as Error).message)
+        console.log('Claude CLI failed, falling back:', (e as Error).message)
+      }
+    } else {
+      console.log('[self-heal] Claude CLI in cooldown, skipping')
     }
     if (provider === 'claude') throw new Error('Claude CLI is not available')
   }
 
   if (provider === 'auto' || provider === 'gemini') {
-    try {
-      const result = await processWithGemini(fullPrompt)
-      return { ...result, duration: (Date.now() - start) / 1000 }
-    } catch (e) {
-      console.log('Gemini CLI failed:', (e as Error).message)
+    if (isProviderHealthy('gemini')) {
+      try {
+        const result = await processWithGemini(fullPrompt)
+        recordProviderSuccess('gemini')
+        return { ...result, duration: (Date.now() - start) / 1000 }
+      } catch (e) {
+        recordProviderFailure('gemini', (e as Error).message)
+        console.log('Gemini CLI failed:', (e as Error).message)
+      }
+    } else {
+      console.log('[self-heal] Gemini CLI in cooldown, skipping')
     }
     if (provider === 'gemini') throw new Error('Gemini CLI is not available')
   }
@@ -213,6 +273,12 @@ export async function processWithAI(options: AIProcessOptions): Promise<AIProces
 // ============================================================
 // Provider implementations
 // ============================================================
+
+// Exported wrapper for fallback use in ipc.ts discuss error path
+export async function processWithNCOTask(prompt: string, ai: string): Promise<string> {
+  const result = await processWithNCO(prompt, ai)
+  return result.text
+}
 
 async function processWithNCO(prompt: string, preferredAI?: string): Promise<Omit<AIProcessResult, 'duration'>> {
   console.log(`[NCO] Processing with ${preferredAI || 'conductor'}...`)
@@ -255,15 +321,16 @@ async function pollNCOTask(taskId: string, maxWait = 30000): Promise<Omit<AIProc
   const start = Date.now()
   while (Date.now() - start < maxWait) {
     try {
-      const data = await httpRequest(`${NCO_URL}/api/tasks/${taskId}`, { method: 'GET', timeout: 5000 })
-      const task = JSON.parse(data)
-
-      if (task.status === 'completed' || task.status === 'done') {
-        const text = task.result || task.response || task.output || ''
-        return { text, provider: 'nco', model: task.ai || task.agent }
+      const data = await httpRequest(`${NCO_URL}/api/tasks/${taskId}/status`, { method: 'GET', timeout: 5000 })
+      const raw = JSON.parse(data)
+      // /api/tasks/:id/status returns { taskId, status, result, ... }
+      const status = raw.status
+      if (status === 'completed' || status === 'done') {
+        const text = raw.result || raw.response || raw.output || ''
+        return { text, provider: 'nco', model: raw.agentId || raw.ai }
       }
-      if (task.status === 'failed' || task.status === 'error') {
-        throw new Error(task.error || 'NCO task failed')
+      if (status === 'failed' || status === 'error') {
+        throw new Error(raw.error || 'NCO task failed')
       }
     } catch (e) {
       if ((e as Error).message.includes('NCO task failed')) throw e
@@ -315,21 +382,34 @@ export async function processImageWithOllama(base64: string, prompt: string): Pr
 
 // Gemini 텍스트 요약 — PTY 캡처 응답을 2-3문장 음성용으로 요약
 export async function summarizeWithGemini(text: string): Promise<string> {
-  const key = nextGeminiKey()
-  if (!key) throw new Error('No Gemini API key')
-
   const prompt = `다음 내용을 핵심만 2-3문장으로 자연스럽게 요약해줘. 음성 출력용이라 간결하고 자연스럽게:\n\n${text.substring(0, 3000)}`
   const body = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: { temperature: 0.2, maxOutputTokens: 200 }
   })
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`
-  const data = await httpRequest(url, { method: 'POST', body, timeout: 15000 })
-  const result = JSON.parse(data)
-  const summary = result.candidates?.[0]?.content?.parts?.[0]?.text
-  if (!summary) throw new Error('Empty Gemini summary')
-  return summary.trim()
+  const maxTries = Math.min(GEMINI_KEYS.length, 3)
+  let lastErr = 'No Gemini API key'
+  for (let i = 0; i < maxTries; i++) {
+    const key = nextGeminiKey()
+    if (!key) break
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`
+      const data = await httpRequest(url, { method: 'POST', body, timeout: 15000 })
+      const result = JSON.parse(data)
+      const summary = result.candidates?.[0]?.content?.parts?.[0]?.text
+      if (!summary) throw new Error('Empty Gemini summary')
+      return summary.trim()
+    } catch (e) {
+      lastErr = (e as Error).message
+      if (lastErr.includes('429') || lastErr.includes('RESOURCE_EXHAUSTED') || lastErr.includes('quota')) {
+        markKeyExhausted(key, lastErr)
+        continue
+      }
+      throw e
+    }
+  }
+  throw new Error(`summarizeWithGemini failed: ${lastErr}`)
 }
 
 // Gemini Vision — uses gemini-2.5-flash with API key rotation
@@ -351,36 +431,32 @@ export async function processImageWithGemini(base64: string, mimeType: string, p
     }]
   })
 
-  // Try gemini-2.5-flash first, fallback to gemini-2.0-flash
+  // Try gemini-2.5-flash first, fallback to gemini-2.0-flash; rotate keys on 429
   const models = ['gemini-2.5-flash', 'gemini-2.0-flash']
   let lastError = ''
+  let activeKey = key
 
   for (const model of models) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`
-      console.log(`[Gemini Vision] Using ${model}...`)
-      const data = await httpRequest(url, { method: 'POST', body, timeout: 60000 })
-      const result = JSON.parse(data)
-      const text = result.candidates?.[0]?.content?.parts?.[0]?.text
-      if (!text) throw new Error('Empty response from Gemini')
-      console.log(`[Gemini Vision] Done (${text.length} chars)`)
-      return text
-    } catch (e) {
-      lastError = (e as Error).message
-      console.log(`[Gemini Vision] ${model} failed: ${lastError}`)
-      // Try next key on quota error
-      if (lastError.includes('429') || lastError.includes('quota')) {
-        const nextKey = nextGeminiKey()
-        if (nextKey && nextKey !== key) {
-          // Retry same model with different key
-          try {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${nextKey}`
-            const data = await httpRequest(url, { method: 'POST', body, timeout: 60000 })
-            const result = JSON.parse(data)
-            const text = result.candidates?.[0]?.content?.parts?.[0]?.text
-            if (text) return text
-          } catch { /* try next model */ }
+    // Up to GEMINI_KEYS.length key attempts per model
+    const maxKeyTries = Math.max(1, GEMINI_KEYS.length)
+    for (let k = 0; k < maxKeyTries; k++) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${activeKey}`
+        console.log(`[Gemini Vision] ${model} key…${activeKey.slice(-6)}`)
+        const data = await httpRequest(url, { method: 'POST', body, timeout: 60000 })
+        const result = JSON.parse(data)
+        const text = result.candidates?.[0]?.content?.parts?.[0]?.text
+        if (!text) throw new Error('Empty response from Gemini')
+        console.log(`[Gemini Vision] Done (${text.length} chars)`)
+        return text
+      } catch (e) {
+        lastError = (e as Error).message
+        if (lastError.includes('429') || lastError.includes('RESOURCE_EXHAUSTED') || lastError.includes('quota')) {
+          markKeyExhausted(activeKey, lastError)
+          const next = nextGeminiKey()
+          if (next) { activeKey = next; continue }
         }
+        break  // non-rate-limit error — try next model
       }
     }
   }
@@ -399,7 +475,7 @@ export async function searchWithGemini(query: string): Promise<string> {
     generationConfig: { temperature: 0.1 }
   })
 
-  const maxTries = Math.min(GEMINI_KEYS.length, 3)
+  const maxTries = Math.min(GEMINI_KEYS.length, 5)
   let lastError: Error = new Error('No Gemini API key')
 
   for (let i = 0; i < maxTries; i++) {
@@ -417,11 +493,11 @@ export async function searchWithGemini(query: string): Promise<string> {
     } catch (e) {
       lastError = e as Error
       const msg = lastError.message
-      if (msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED')) {
-        console.warn(`[Gemini Search] Key ${i + 1} quota exceeded, trying next key...`)
+      if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota')) {
+        markKeyExhausted(key, msg)  // park this key, try next
         continue
       }
-      throw e  // non-quota errors: fail fast
+      throw e  // non-rate-limit errors: fail fast
     }
   }
 
@@ -501,24 +577,68 @@ export interface NCOCollabResult {
   mode: string
 }
 
-// Poll discussion session until completed (max 3 min)
-async function pollDiscussion(sessionId: string, maxWait = 180000): Promise<NCOCollabResult> {
+// Progress callback type for long-running operations
+export type ProgressCallback = (msg: string, level?: 'info' | 'warn' | 'success') => void
+
+// Poll discussion session until completed (max 10 min)
+async function pollDiscussion(
+  sessionId: string,
+  maxWait = 600000,
+  onProgress?: ProgressCallback
+): Promise<NCOCollabResult> {
   const start = Date.now()
+  let lastProgressReport = 0
+  const PROGRESS_INTERVAL = 30000 // Report progress every 30s
+
   while (Date.now() - start < maxWait) {
+    const elapsed = Date.now() - start
+
+    // Periodic progress update every 30s
+    if (elapsed - lastProgressReport >= PROGRESS_INTERVAL) {
+      const elapsedSec = Math.round(elapsed / 1000)
+      onProgress?.(`[NCO] 토론 진행 중... ${elapsedSec}초 경과 (session: ${sessionId.slice(-8)})`)
+      lastProgressReport = elapsed
+    }
+
     try {
       const data = await httpRequest(`${NCO_URL}/api/discussions/${sessionId}`, { method: 'GET', timeout: 5000 })
       const d = JSON.parse(data)
       const disc = d.discussion || d
+
+      // Report round progress
+      if (disc.current_round > 0) {
+        onProgress?.(`[NCO] 토론 ${disc.current_round}라운드 완료, 다음 라운드 대기 중...`, 'info')
+      }
+
       if (disc.status === 'completed') {
-        // report column has the synthesis text
         let text = disc.report || ''
-        // if report is small, also check messages
-        if (!text && disc.result_json) {
+        // Try result_json first for structured synthesis
+        if (disc.result_json) {
           try {
             const rj = JSON.parse(disc.result_json)
-            text = rj.adoptedProposal || rj.result || ''
+            // result_json has rounds[].responses and a synthesis
+            const synthesis = rj.synthesis || rj.adoptedProposal || rj.result || ''
+            if (synthesis && synthesis.length > text.length) text = synthesis
           } catch { /* ignore */ }
         }
+        // Read messages to find the synthesis (last Korean markdown message)
+        try {
+          const msgData = await httpRequest(`${NCO_URL}/api/discussions/${sessionId}/messages`, { method: 'GET', timeout: 5000 })
+          const msgs = JSON.parse(msgData)
+          const messages: Array<{role: string; content: string}> = msgs.messages || []
+          // Synthesis is usually the last message with "합성 결과" or "##" sections
+          for (let i = messages.length - 1; i >= 0; i--) {
+            const content = messages[i]?.content || ''
+            if (content.includes('합성') || content.includes('결론') || content.includes('##')) {
+              if (content.length > text.length) { text = content; break }
+            }
+          }
+          // If still nothing useful, concat all AI responses
+          if (!text || text.length < 50) {
+            const aiMessages = messages.filter(m => m.role && m.content && !m.content.startsWith('```json'))
+            text = aiMessages.map(m => `[${m.role}]: ${m.content}`).join('\n\n')
+          }
+        } catch { /* ignore */ }
         let participants: string[] = []
         try { participants = JSON.parse(disc.participants_json || '[]') } catch { /* ignore */ }
         return {
@@ -533,9 +653,9 @@ async function pollDiscussion(sessionId: string, maxWait = 180000): Promise<NCOC
     } catch (e) {
       if ((e as Error).message.startsWith('Discussion failed')) throw e
     }
-    await new Promise(r => setTimeout(r, 2000))
+    await new Promise(r => setTimeout(r, 3000))
   }
-  throw new Error('NCO Discussion timeout (3 min)')
+  throw new Error('NCO Discussion timeout (10 min)')
 }
 
 // Poll task table until completed (used by conductor + hive)
@@ -557,21 +677,28 @@ async function pollTask(taskId: string, maxWait = 180000): Promise<string> {
 }
 
 // Multi-AI Discussion
-export async function startDiscussion(prompt: string, ais?: string[]): Promise<NCOCollabResult> {
+export async function startDiscussion(
+  prompt: string,
+  ais?: string[],
+  onProgress?: ProgressCallback
+): Promise<NCOCollabResult> {
   if (!(await isNCOAvailable())) throw new Error('NCO is not running')
 
+  // 1 round, use reliable providers (claude-code + gemini are stable; ollama gets stuck)
+  const providers = ais || ['claude-code', 'gemini']
   const body = JSON.stringify({
     prompt,
-    providers: ais,
-    rounds: 2,
+    providers,
+    rounds: 1,
     mode: 'discussion'
   })
   const data = await httpRequest(`${NCO_URL}/api/realtime/discussion`, { method: 'POST', body, timeout: 15000 })
   const result = JSON.parse(data)
   const sessionId = result.sessionId || result.discussionId
 
-  console.log(`[NCO Discussion] Started session=${sessionId}, polling for result...`)
-  return await pollDiscussion(sessionId)
+  console.log(`[NCO Discussion] Started session=${sessionId}, polling for result (max 10min)...`)
+  onProgress?.(`[NCO] 토론 시작됨 (session: ${sessionId.slice(-8)}) — 1라운드, AI들이 토론 중...`)
+  return await pollDiscussion(sessionId, 600000, onProgress)
 }
 
 // Parallel Team Execution
@@ -640,7 +767,7 @@ export async function startHive(prompt: string): Promise<NCOCollabResult> {
   const sessionId = result.sessionId
 
   console.log(`[NCO Hive] Started session=${sessionId}, polling discussion result...`)
-  return await pollDiscussion(sessionId, 240000)  // hive takes longer (4 min)
+  return await pollDiscussion(sessionId, 600000)  // hive takes longer (max 10 min)
 }
 
 // ============================================================
@@ -770,20 +897,34 @@ export async function checkAllProviders(): Promise<ProviderHealthResult[]> {
 export async function startConductor(prompt: string): Promise<NCOCollabResult> {
   if (!(await isNCOAvailable())) throw new Error('NCO is not running')
 
-  const body = JSON.stringify({ prompt })
-  // /api/conductor returns immediately with { taskId, mode, providers, status:'dispatched' }
-  const data = await httpRequest(`${NCO_URL}/api/conductor`, { method: 'POST', body, timeout: 15000 })
+  // Voice fast-path: skip the slow multi-agent conductor (5~15 min).
+  // Use claude-code directly — fast (~15s), reliable, knows the nova-voice codebase.
+  // The full conductor pipeline is for autonomous coding from AI Terminal, not voice.
+  console.log('[NCO Conductor] Using claude-code fast-path for voice')
+  const novaVoiceDir = join(__dirname, '../../..')  // out/main → nova-voice root
+  const body = JSON.stringify({
+    prompt,
+    ai: 'claude-code',
+    priority: 7,
+    projectDir: novaVoiceDir
+  })
+  const data = await httpRequest(`${NCO_URL}/api/task`, { method: 'POST', body })
   const result = JSON.parse(data)
   const taskId = result.taskId
 
-  console.log(`[NCO Conductor] Dispatched taskId=${taskId} mode=${result.mode} providers=${result.providers?.join(',')}`)
-
-  // For multi-agent modes, the conductor also creates a discussion session
-  // Poll task table for the final result
-  const text = await pollTask(taskId, 180000)
-  return {
-    text: text || '(결과 없음)',
-    sessionId: taskId,
-    mode: result.mode || 'conductor'
+  console.log(`[NCO Conductor→claude-code] taskId=${taskId} projectDir=${novaVoiceDir}`)
+  try {
+    const taskResult = await pollNCOTask(taskId, 60000)  // 60s max for claude-code
+    return {
+      text: taskResult.text || '(결과 없음)',
+      sessionId: taskId,
+      participants: ['claude-code'],
+      mode: 'conductor-voice'
+    }
+  } catch {
+    // Fallback to ollama if claude-code fails
+    console.warn('[NCO Conductor] claude-code failed, falling back to ollama')
+    const ollamaResult = await processWithOllama(prompt)
+    return { text: ollamaResult.text, participants: ['ollama'], mode: 'conductor-voice-fallback' }
   }
 }
