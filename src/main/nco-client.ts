@@ -274,10 +274,27 @@ export async function processWithAI(options: AIProcessOptions): Promise<AIProces
 // Provider implementations
 // ============================================================
 
-// Exported wrapper for fallback use in ipc.ts discuss error path
+// Exported wrapper for NCO single-agent task with gemini→claude-code fallback
 export async function processWithNCOTask(prompt: string, ai: string): Promise<string> {
-  const result = await processWithNCO(prompt, ai)
-  return result.text
+  try {
+    const result = await processWithNCO(prompt, ai)
+    // Check if result is actually an error (gemini 429 gets stored as "completed" with error text)
+    if (result.text.includes('rateLimitExceeded') || result.text.includes('429') ||
+        result.text.includes('RESOURCE_EXHAUSTED') || result.text.includes('An unexpected critical error')) {
+      throw new Error('Gemini rate limited')
+    }
+    return result.text
+  } catch (e) {
+    const msg = (e as Error).message
+    if ((msg.includes('rate') || msg.includes('429') || msg.includes('Gemini')) && ai === 'gemini') {
+      // Gemini 429 → fallback to claude-code
+      console.warn('[NCO] Gemini rate limited, falling back to claude-code')
+      const novaVoiceDir = join(__dirname, '../../..')
+      const result = await processWithNCO(prompt + '\n\n(Respond concisely)', 'claude-code')
+      return result.text
+    }
+    throw e
+  }
 }
 
 async function processWithNCO(prompt: string, preferredAI?: string): Promise<Omit<AIProcessResult, 'duration'>> {
@@ -317,13 +334,17 @@ async function processWithNCO(prompt: string, preferredAI?: string): Promise<Omi
   return { text, provider: 'nco', model: result.ai || result.provider }
 }
 
-async function pollNCOTask(taskId: string, maxWait = 30000): Promise<Omit<AIProcessResult, 'duration'>> {
+async function pollNCOTask(
+  taskId: string,
+  maxWait = 30000,
+  signal?: AbortSignal
+): Promise<Omit<AIProcessResult, 'duration'>> {
   const start = Date.now()
   while (Date.now() - start < maxWait) {
+    if (signal?.aborted) throw new Error('NCO task cancelled')
     try {
       const data = await httpRequest(`${NCO_URL}/api/tasks/${taskId}/status`, { method: 'GET', timeout: 5000 })
       const raw = JSON.parse(data)
-      // /api/tasks/:id/status returns { taskId, status, result, ... }
       const status = raw.status
       if (status === 'completed' || status === 'done') {
         const text = raw.result || raw.response || raw.output || ''
@@ -333,9 +354,15 @@ async function pollNCOTask(taskId: string, maxWait = 30000): Promise<Omit<AIProc
         throw new Error(raw.error || 'NCO task failed')
       }
     } catch (e) {
-      if ((e as Error).message.includes('NCO task failed')) throw e
+      if ((e as Error).message.includes('NCO task failed') ||
+          (e as Error).message.includes('cancelled')) throw e
     }
-    await new Promise(r => setTimeout(r, 500))
+    // Interruptible sleep — breaks immediately on abort
+    await new Promise<void>((resolve, reject) => {
+      if (signal?.aborted) return reject(new Error('NCO task cancelled'))
+      const t = setTimeout(resolve, 500)
+      signal?.addEventListener('abort', () => { clearTimeout(t); reject(new Error('NCO task cancelled')) }, { once: true })
+    })
   }
   throw new Error('NCO task timeout')
 }
@@ -519,8 +546,14 @@ function findClaudeBinary(): string {
 }
 
 // 실제 Claude Code CLI 실행 — --dangerously-skip-permissions으로 bash/WebSearch 모두 사용 가능
-export async function processWithClaude(prompt: string): Promise<Omit<AIProcessResult, 'duration'>> {
+// opts.cwd: 프로젝트 컨텍스트(undefined=nova-voice) vs 일반질문(os.homedir())
+export async function processWithClaude(
+  prompt: string,
+  opts?: { cwd?: string }
+): Promise<Omit<AIProcessResult, 'duration'>> {
   const claudePath = findClaudeBinary()
+  const os = require('os')
+  const cwd = opts?.cwd ?? process.cwd()
   console.log('[Claude] Processing with Claude Code CLI (full tools)...')
   const { spawn } = require('child_process')
 
@@ -533,6 +566,7 @@ export async function processWithClaude(prompt: string): Promise<Omit<AIProcessR
       '--dangerously-skip-permissions',
       '--output-format', 'text',
     ], {
+      cwd,
       env: { ...process.env, TERM: 'dumb', NO_COLOR: '1', FORCE_COLOR: '0' },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -584,13 +618,16 @@ export type ProgressCallback = (msg: string, level?: 'info' | 'warn' | 'success'
 async function pollDiscussion(
   sessionId: string,
   maxWait = 600000,
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal
 ): Promise<NCOCollabResult> {
   const start = Date.now()
   let lastProgressReport = 0
   const PROGRESS_INTERVAL = 30000 // Report progress every 30s
 
   while (Date.now() - start < maxWait) {
+    if (signal?.aborted) throw new Error('Discussion cancelled')
+
     const elapsed = Date.now() - start
 
     // Periodic progress update every 30s
@@ -651,38 +688,29 @@ async function pollDiscussion(
       }
       if (disc.status === 'failed') throw new Error(`Discussion failed: ${disc.error || 'unknown'}`)
     } catch (e) {
-      if ((e as Error).message.startsWith('Discussion failed')) throw e
+      if ((e as Error).message.startsWith('Discussion failed') ||
+          (e as Error).message.includes('cancelled')) throw e
     }
-    await new Promise(r => setTimeout(r, 3000))
+    // Interruptible sleep
+    await new Promise<void>((resolve, reject) => {
+      if (signal?.aborted) return reject(new Error('Discussion cancelled'))
+      const t = setTimeout(resolve, 3000)
+      signal?.addEventListener('abort', () => { clearTimeout(t); reject(new Error('Discussion cancelled')) }, { once: true })
+    })
   }
   throw new Error('NCO Discussion timeout (10 min)')
 }
 
 // Poll task table until completed (used by conductor + hive)
-async function pollTask(taskId: string, maxWait = 180000): Promise<string> {
-  const start = Date.now()
-  while (Date.now() - start < maxWait) {
-    try {
-      const data = await httpRequest(`${NCO_URL}/api/tasks/${taskId}`, { method: 'GET', timeout: 5000 })
-      const d = JSON.parse(data)
-      const task = d.task || d
-      if (task.status === 'completed') return task.response || task.result || ''
-      if (task.status === 'failed') throw new Error(task.error || 'Task failed')
-    } catch (e) {
-      if ((e as Error).message === 'Task failed' || (e as Error).message.startsWith('Task failed:')) throw e
-    }
-    await new Promise(r => setTimeout(r, 1000))
-  }
-  throw new Error('NCO Task timeout')
-}
-
 // Multi-AI Discussion
 export async function startDiscussion(
   prompt: string,
   ais?: string[],
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal
 ): Promise<NCOCollabResult> {
   if (!(await isNCOAvailable())) throw new Error('NCO is not running')
+  if (signal?.aborted) throw new Error('Discussion cancelled')
 
   // 1 round, use reliable providers (claude-code + gemini are stable; ollama gets stuck)
   const providers = ais || ['claude-code', 'gemini']
@@ -698,7 +726,7 @@ export async function startDiscussion(
 
   console.log(`[NCO Discussion] Started session=${sessionId}, polling for result (max 10min)...`)
   onProgress?.(`[NCO] 토론 시작됨 (session: ${sessionId.slice(-8)}) — 1라운드, AI들이 토론 중...`)
-  return await pollDiscussion(sessionId, 600000, onProgress)
+  return await pollDiscussion(sessionId, 600000, onProgress, signal)
 }
 
 // Parallel Team Execution
@@ -893,38 +921,41 @@ export async function checkAllProviders(): Promise<ProviderHealthResult[]> {
   return results
 }
 
-// Smart Conductor (auto-selects best mode + AI)
-export async function startConductor(prompt: string): Promise<NCOCollabResult> {
-  if (!(await isNCOAvailable())) throw new Error('NCO is not running')
+// Smart Conductor (voice fast-path: local Claude CLI → Ollama fallback)
+// NCO agents run in the nco/ directory sandbox — unusable for nova-voice code questions.
+// Local Claude CLI runs in the actual nova-voice project context.
+export async function startConductor(prompt: string, signal?: AbortSignal): Promise<NCOCollabResult> {
+  if (signal?.aborted) throw new Error('Conductor cancelled')
 
-  // Voice fast-path: skip the slow multi-agent conductor (5~15 min).
-  // Use claude-code directly — fast (~15s), reliable, knows the nova-voice codebase.
-  // The full conductor pipeline is for autonomous coding from AI Terminal, not voice.
-  console.log('[NCO Conductor] Using claude-code fast-path for voice')
-  const novaVoiceDir = join(__dirname, '../../..')  // out/main → nova-voice root
-  const body = JSON.stringify({
-    prompt,
-    ai: 'claude-code',
-    priority: 7,
-    projectDir: novaVoiceDir
-  })
-  const data = await httpRequest(`${NCO_URL}/api/task`, { method: 'POST', body })
-  const result = JSON.parse(data)
-  const taskId = result.taskId
-
-  console.log(`[NCO Conductor→claude-code] taskId=${taskId} projectDir=${novaVoiceDir}`)
+  console.log('[Conductor] Voice fast-path: local Claude CLI (runs in nova-voice project)')
   try {
-    const taskResult = await pollNCOTask(taskId, 60000)  // 60s max for claude-code
+    const claudeResult = await processWithClaude(prompt)
+    if (signal?.aborted) throw new Error('Conductor cancelled')
     return {
-      text: taskResult.text || '(결과 없음)',
-      sessionId: taskId,
-      participants: ['claude-code'],
+      text: claudeResult.text || '(결과 없음)',
+      participants: ['claude'],
       mode: 'conductor-voice'
     }
-  } catch {
-    // Fallback to ollama if claude-code fails
-    console.warn('[NCO Conductor] claude-code failed, falling back to ollama')
-    const ollamaResult = await processWithOllama(prompt)
-    return { text: ollamaResult.text, participants: ['ollama'], mode: 'conductor-voice-fallback' }
+  } catch (e) {
+    if ((e as Error).message.includes('cancelled')) throw e
+    console.warn('[Conductor] Claude CLI failed, falling back to Ollama:', (e as Error).message)
+    // Fallback to Ollama
+    try {
+      const ollamaResult = await processWithOllama(prompt)
+      return { text: ollamaResult.text, participants: ['ollama'], mode: 'conductor-voice-fallback' }
+    } catch (e2) {
+      if ((e2 as Error).message.includes('cancelled')) throw e2
+      // Final fallback: NCO gemini if available
+      if (await isNCOAvailable()) {
+        const body = JSON.stringify({ prompt, ai: 'gemini', priority: 7 })
+        const data = await httpRequest(`${NCO_URL}/api/task`, { method: 'POST', body })
+        const result = JSON.parse(data)
+        if (result.taskId) {
+          const taskResult = await pollNCOTask(result.taskId, 60000, signal)
+          return { text: taskResult.text, participants: ['gemini'], mode: 'conductor-nco-fallback' }
+        }
+      }
+      throw new Error('No AI available for conductor request')
+    }
   }
 }

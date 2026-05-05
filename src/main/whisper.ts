@@ -10,6 +10,7 @@ export interface WhisperOptions {
   modelPath: string
   language?: string
   translate?: boolean
+  signal?: AbortSignal   // 취소 시 Whisper 프로세스 즉시 kill
 }
 
 export interface WhisperResult {
@@ -147,7 +148,7 @@ export async function transcribe(
     // Convert webm to 16kHz mono WAV using ffmpeg (required by whisper.cpp)
     await convertToWav(tempWebmPath, tempWavPath)
 
-    // Transcribe with whisper-cli
+    // Transcribe with whisper-cli (AbortSignal 전달 → 취소 시 즉시 kill)
     const result = await transcribeWithCLI(tempWavPath, options)
 
     const duration = (Date.now() - startTime) / 1000
@@ -187,10 +188,12 @@ async function convertToWav(inputPath: string, outputPath: string): Promise<void
   await execFile(ffmpeg, [
     '-i', inputPath,
     '-af', [
-      'highpass=f=100',     // 100Hz 이하 저주파 잡음 제거
-      'lowpass=f=8000',     // 8kHz 이상 고주파 제거
-      'anlmdn=s=7',         // AI 노이즈 리덕션 (강도 7)
-      'volume=1.5',         // 음량 부스트 (작은 목소리 보정)
+      'highpass=f=80',      // 80Hz 이하 저주파(방진/에어컨 소음) 제거
+      // lowpass 제거: 16kHz 출력의 Nyquist(8kHz)이므로 자동 처리됨
+      // anlmdn 완화: s=7은 영어 자음·한국어 자음의 고주파를 노이즈로 판단해 제거 → 인식률 급락
+      // s=0.5 이하: 배경 소음만 제거, 음성 성분 보존
+      'anlmdn=s=0.5',       // 가벼운 노이즈 리덕션 (음성 성분 보존)
+      'volume=1.2',         // 음량 부스트 최소화 (클리핑 방지)
     ].join(','),
     '-ar', '16000',       // 16kHz sample rate (whisper requirement)
     '-ac', '1',           // mono
@@ -264,9 +267,37 @@ async function transcribeWithCLI(
 
   console.log(`Transcribing: ${whisperBinaryPath} ${args.join(' ')}`)
 
-  const { stdout, stderr } = await execFile(whisperBinaryPath, args, {
-    timeout: 60000,
-    maxBuffer: 1024 * 1024
+  // spawn으로 실행 — AbortSignal 연결 시 프로세스를 즉시 kill 가능
+  const { spawn: spawnProc } = require('child_process')
+  const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    let stdoutBuf = ''
+    let stderrBuf = ''
+    const proc = spawnProc(whisperBinaryPath, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+
+    // AbortSignal 연결 — 취소 시 Whisper 프로세스 즉시 kill
+    if (options.signal) {
+      if (options.signal.aborted) {
+        proc.kill('SIGKILL')
+        return reject(new Error('Whisper cancelled'))
+      }
+      options.signal.addEventListener('abort', () => {
+        proc.kill('SIGKILL')
+        reject(new Error('Whisper cancelled'))
+      }, { once: true })
+    }
+
+    const timeout = setTimeout(() => {
+      proc.kill('SIGKILL')
+      reject(new Error('Whisper timeout (60s)'))
+    }, 60000)
+
+    proc.stdout?.on('data', (d: Buffer) => { stdoutBuf += d.toString() })
+    proc.stderr?.on('data', (d: Buffer) => { stderrBuf += d.toString() })
+    proc.on('close', (code: number) => {
+      clearTimeout(timeout)
+      resolve({ stdout: stdoutBuf, stderr: stderrBuf })
+    })
+    proc.on('error', (err: Error) => { clearTimeout(timeout); reject(err) })
   })
 
   // whisper-cli outputs text to stdout, with possible metadata lines

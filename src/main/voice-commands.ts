@@ -1,5 +1,9 @@
 import * as sc from './system-control'
-import { processWithAI } from './nco-client'
+import { processWithAI, searchWithGemini } from './nco-client'
+import { executeWithClaude } from './claude-terminal'
+import { getCapturedSelectedText, getPreviousAppName, getPreviousBundleId } from './appState'
+import { injectText } from './injector'
+import { clipboard } from 'electron'
 import type { CommandResult } from './system-control'
 import os from 'os'
 
@@ -377,6 +381,151 @@ export const COMMANDS: VoiceCommand[] = [
     dangerous: false,
     description: '시스템 전체 정보'
   },
+
+  // --- Calendar ---
+  {
+    id: 'calendar_today',
+    patterns: [
+      /오늘\s*(일정|스케줄|약속)(\s*알려줘|\s*보여줘|\s*확인|\s*뭐야|\s*있어)?/,
+      /today'?s?\s*(schedule|calendar|events?)/i,
+    ],
+    action: async () => sc.getCalendarEvents('today'),
+    dangerous: false,
+    description: '오늘 일정 확인'
+  },
+  {
+    id: 'calendar_tomorrow',
+    patterns: [
+      /내일\s*(일정|스케줄|약속)(\s*알려줘|\s*보여줘|\s*확인|\s*뭐야|\s*있어)?/,
+      /tomorrow'?s?\s*(schedule|calendar|events?)/i,
+    ],
+    action: async () => sc.getCalendarEvents('tomorrow'),
+    dangerous: false,
+    description: '내일 일정 확인'
+  },
+  {
+    id: 'calendar_week',
+    patterns: [
+      /(이번\s*주|금주)\s*(일정|스케줄|약속)(\s*알려줘|\s*보여줘|\s*확인)?/,
+      /this\s*week'?s?\s*(schedule|calendar|events?)/i,
+    ],
+    action: async () => sc.getCalendarEvents('week'),
+    dangerous: false,
+    description: '이번 주 일정 확인'
+  },
+  {
+    id: 'calendar_add',
+    patterns: [
+      /(.+?)\s*(일정|약속)\s*(추가|등록|만들어|넣어)(\s*줘)?/,
+      /add\s+(?:event|appointment)\s+(.+)/i,
+    ],
+    action: async (m) => sc.addCalendarEvent(m[1]),
+    dangerous: false,
+    description: '일정 추가'
+  },
+
+  // --- Contacts ---
+  {
+    id: 'contacts_search',
+    patterns: [
+      /(.+?)\s*(연락처|전화번호)(\s*찾아줘|\s*알려줘|\s*검색|\s*뭐야)?/,
+      /find\s+contact\s+(.+)/i,
+    ],
+    action: async (m) => sc.searchContacts(m[1]),
+    dangerous: false,
+    description: '연락처 검색'
+  },
+
+  // --- Weather ---
+  {
+    id: 'weather',
+    patterns: [
+      /^(서울|부산|대구|인천|광주|대전|수원|제주|강남|홍대|신촌|강릉|속초|경주|전주|평택|용인|성남|파주|고양|의정부|양주|구리|남양주|하남|광명|시흥|안양|안산|화성|오산|이천|여주|포천|가평|동두천|연천|과천|의왕|군포|안성|김포|광주|양평)\s*날씨(\s*알려줘|\s*어때|\s*확인)?/,
+      /^경기도?\s+(\S+?)\s*날씨(\s*알려줘|\s*어때|\s*확인)?$/,
+      /^(오늘|지금|현재)\s*날씨(\s*알려줘|\s*어때)?$/,
+      /^날씨(\s*알려줘|\s*어때|\s*확인)?$/,
+      /weather\s*(?:in|at|for)?\s*(seoul|busan|korea)/i,
+    ],
+    action: async (m) => {
+      const raw = (m[1] || '').trim()
+      const skipWords = ['지금', '현재', '오늘', '내일', '이번주', '요즘', '최근', '']
+      const location = skipWords.includes(raw) ? '서울' : (raw || '서울')
+      try {
+        // Claude Code CLI — AI Terminal 패널에 스트리밍 표시
+        const result = await executeWithClaude(
+          `${location} 현재 날씨를 알려줘. bash로 "curl -s 'wttr.in/${encodeURIComponent(location)}?format=3'" 명령을 실행하거나 WebSearch로 확인해서 기온, 날씨 상태를 1-2줄로 알려줘.`,
+          { notify: true }
+        )
+        if (result && result.trim()) {
+          return { success: true, message: result.trim() }
+        }
+        throw new Error('empty response')
+      } catch {
+        // Fallback: Open-Meteo API (free, no key)
+        return sc.getWeather(location)
+      }
+    },
+    dangerous: false,
+    description: '날씨 확인'
+  },
+
+  // --- Reminders ---
+  {
+    id: 'reminder_add',
+    patterns: [
+      /(.+?)\s*(리마인더|알림)\s*(추가|설정|만들어|등록)(\s*줘)?/,
+      /(.+?)\s*기억해줘/,
+      /remind\s+(?:me\s+(?:to\s+|about\s+))?(.+)/i,
+    ],
+    action: async (m) => sc.addReminder(m[1] || m[2] || ''),
+    dangerous: false,
+    description: '리마인더 추가'
+  },
+
+  // --- Translate Selected Text ---
+  {
+    id: 'translate_selected_en',
+    patterns: [
+      /선택(된|한)?\s*(텍스트|글|내용|것)?\s*(영어로|영문으로)\s*(번역|translate)/i,
+      /선택(된|한)?\s*(텍스트|글|내용|것)?\s*(번역|translate)\s*(영어로|영문으로|to\s*english)?/i,
+      /지금\s*(선택된|선택한)?\s*(텍스트|글|내용)?\s*(영어로|영문으로)?\s*(번역|translate)/i,
+      /translate\s*(selected|this|the)?\s*(text|selection)?\s*(to\s*english)?/i,
+      /(이\s*텍스트|이거|이것)\s*(영어로|영문으로)\s*(번역|translate)/i,
+    ],
+    action: async (): Promise<CommandResult> => {
+      // 1. 캡처된 선택 텍스트 가져오기
+      const selectedText = getCapturedSelectedText() || clipboard.readText()
+      if (!selectedText || !selectedText.trim()) {
+        return { success: false, message: '선택된 텍스트가 없습니다. 번역할 텍스트를 먼저 선택해주세요.' }
+      }
+
+      try {
+        // 2. AI로 영어 번역
+        const result = await processWithAI({
+          text: '',
+          prompt: `Translate the following text to natural English. Output only the translation:\n\n${selectedText}`,
+          provider: 'auto',
+          voiceFastPath: true
+        })
+        const translated = result.text.trim()
+        if (!translated) {
+          return { success: false, message: '번역 실패: 빈 응답' }
+        }
+
+        // 3. 번역 결과를 이전 앱에 주입 (클립보드 경유 Paste)
+        const appName = getPreviousAppName()
+        const bundleId = getPreviousBundleId()
+        await injectText(translated, appName || undefined, bundleId || undefined)
+
+        const preview = translated.length > 60 ? translated.substring(0, 60) + '…' : translated
+        return { success: true, message: `번역 완료: ${preview}` }
+      } catch (e) {
+        return { success: false, message: `번역 오류: ${(e as Error).message.substring(0, 80)}` }
+      }
+    },
+    dangerous: false,
+    description: '선택된 텍스트 영어로 번역'
+  },
 ]
 
 // ==================== Command Parser ====================
@@ -408,9 +557,10 @@ Given a user's voice input, determine if it's a PC control command.
 If it IS a command, respond with ONLY a JSON object: {"action":"<action_id>","target":"<actual_app_name>"}
 IMPORTANT: For target, use the ACTUAL application name, not the Korean alias.
 Known app aliases: ${appList}
-Possible actions: open_app, close_app, switch_app, minimize, maximize, volume_up, volume_down, mute, unmute, new_tab, browser_back, refresh, web_search, screenshot, lock, sleep, copy, paste, undo, save, select_all, open_url, memory_info, cpu_info, disk_info, system_info
+Possible actions: open_app, close_app, switch_app, minimize, maximize, volume_up, volume_down, mute, unmute, new_tab, browser_back, refresh, web_search, screenshot, lock, sleep, copy, paste, undo, save, select_all, open_url, memory_info, cpu_info, disk_info, system_info, calendar_today, calendar_tomorrow, calendar_week, calendar_add, contacts_search, weather, reminder_add, translate_selected_en
 For web_search, put the search query in "target".
 For open_url, put the URL in "target". For "네이버" use "https://naver.com", for "구글" use "https://google.com", for "유튜브" use "https://youtube.com".
+For translate_selected_en, use when user says "선택된 텍스트 영어로 번역", "이거 영어로 번역", "translate selected text to English", etc. No target needed.
 If it is NOT a command (just regular speech), respond with: {"action":"none"}
 Respond with JSON only, no explanation.
 User input: "${text}"`

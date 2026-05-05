@@ -1,6 +1,7 @@
 import { execFile as execFileCb } from 'child_process'
 import { promisify } from 'util'
 import os from 'os'
+import fs from 'fs'
 
 const execFile = promisify(execFileCb)
 const isMac = process.platform === 'darwin'
@@ -261,6 +262,16 @@ export async function takeScreenshot(): Promise<CommandResult> {
   }
 }
 
+// ── 눈(Eye): 현재 화면을 캡처하여 base64 반환 (Gemini Vision 입력용) ──
+export async function captureScreenBase64(): Promise<string> {
+  if (!isMac) throw new Error('captureScreenBase64: macOS 전용')
+  const p = `/tmp/nova-voice-screen-${Date.now()}.png`
+  await execFile('screencapture', ['-x', p])
+  const data = fs.readFileSync(p)
+  fs.unlinkSync(p)  // 임시 파일 즉시 삭제 (PNG 1장 2-5MB)
+  return data.toString('base64')
+}
+
 export async function lockScreen(): Promise<CommandResult> {
   try {
     if (isMac) {
@@ -428,5 +439,125 @@ export async function getSystemInfo(): Promise<CommandResult> {
     return { success: true, message: [mem.message, cpu.message, disk.message].join(' | ') }
   } catch (e) {
     return { success: false, message: `시스템 정보 조회 실패: ${(e as Error).message}` }
+  }
+}
+
+// ==================== CALENDAR ====================
+
+export async function getCalendarEvents(period: 'today' | 'tomorrow' | 'week' = 'today'): Promise<CommandResult> {
+  try {
+    if (!isMac) return { success: false, message: '캘린더 조회는 macOS에서만 지원됩니다' }
+    const label = period === 'today' ? '오늘' : period === 'tomorrow' ? '내일' : '이번 주'
+    const daysAhead = period === 'today' ? 1 : period === 'tomorrow' ? 2 : 7
+    const startOffset = period === 'tomorrow' ? 1 : 0
+    const script = `
+      set startDate to (current date) - (time of (current date)) + ${startOffset} * days
+      set endDate to (current date) - (time of (current date)) + ${daysAhead} * days
+      tell application "Calendar"
+        set allEvents to {}
+        repeat with c in calendars
+          set evs to every event of c whose start date >= startDate and start date < endDate
+          repeat with e in evs
+            set end of allEvents to (summary of e & " [" & time string of (start date of e) & "]")
+          end repeat
+        end repeat
+        if length of allEvents = 0 then
+          return "${label} 일정 없음"
+        else
+          set AppleScript's text item delimiters to ", "
+          return "${label} 일정: " & (allEvents as string)
+        end if
+      end tell
+    `
+    const result = await osascript(script)
+    return { success: true, message: result }
+  } catch (e) {
+    return { success: false, message: `캘린더 조회 실패 (Calendar 앱 자동화 권한 필요): ${(e as Error).message}` }
+  }
+}
+
+export async function addCalendarEvent(title: string, startTime?: string): Promise<CommandResult> {
+  try {
+    if (!isMac) return { success: false, message: 'macOS에서만 지원됩니다' }
+    const safeTitle = title.replace(/"/g, '\\"')
+    const script = `
+      tell application "Calendar"
+        tell calendar "Calendar"
+          set newEvent to make new event at end with properties {summary:"${safeTitle}", start date:(current date) + 1 * days, end date:(current date) + 1 * days + 1 * hours}
+        end tell
+        reload calendars
+      end tell
+      return "일정 추가 완료: ${safeTitle}"
+    `
+    const result = await osascript(script)
+    return { success: true, message: result }
+  } catch (e) {
+    return { success: false, message: `일정 추가 실패: ${(e as Error).message}` }
+  }
+}
+
+// ==================== CONTACTS ====================
+
+export async function searchContacts(name: string): Promise<CommandResult> {
+  try {
+    if (!isMac) return { success: false, message: 'macOS에서만 지원됩니다' }
+    const safeName = name.replace(/"/g, '\\"')
+    const script = `
+      tell application "Contacts"
+        set matches to every person whose name contains "${safeName}"
+        if length of matches = 0 then
+          return "연락처 없음: ${safeName}"
+        end if
+        set info to ""
+        repeat with p in matches
+          set pName to name of p
+          try
+            set pPhone to value of first phone of p
+          on error
+            set pPhone to "(전화 없음)"
+          end try
+          set info to info & pName & ": " & pPhone & return
+        end repeat
+        return info
+      end tell
+    `
+    const result = await osascript(script)
+    return { success: true, message: result.trim() }
+  } catch (e) {
+    return { success: false, message: `연락처 검색 실패 (연락처 앱 권한 필요): ${(e as Error).message}` }
+  }
+}
+
+// ==================== WEATHER ====================
+
+export async function getWeather(location = '서울'): Promise<CommandResult> {
+  try {
+    // wttr.in — free, no API key, plain text output
+    const { stdout } = await execFile('curl', [
+      '-s', '--max-time', '8',
+      `https://wttr.in/${encodeURIComponent(location)}?format=%l:+%C+%t+(%f)+습도+%h+바람+%w&lang=ko`
+    ], { timeout: 10000 })
+    if (stdout.trim()) {
+      return { success: true, message: `날씨 - ${stdout.trim()}` }
+    }
+    throw new Error('empty response')
+  } catch (e) {
+    return { success: false, message: `날씨 조회 실패: ${(e as Error).message}` }
+  }
+}
+
+// ==================== REMINDERS ====================
+
+export async function addReminder(title: string, dueDate?: string): Promise<CommandResult> {
+  try {
+    if (!isMac) return { success: false, message: 'macOS에서만 지원됩니다' }
+    const safeTitle = title.replace(/"/g, '\\"')
+    const script = dueDate
+      ? `tell application "Reminders" to make new reminder with properties {name:"${safeTitle}", due date:date "${dueDate}"}`
+      : `tell application "Reminders" to make new reminder with properties {name:"${safeTitle}"}`
+    await osascript(script)
+    return { success: true, message: `리마인더 추가: "${title}"` }
+  } catch (e) {
+    return { success: false, message: `리마인더 추가 실패: ${(e as Error).message}` }
   }
 }

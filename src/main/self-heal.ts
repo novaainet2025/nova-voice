@@ -89,7 +89,14 @@ interface KnownFix {
 
 const KNOWN_FIXES: KnownFix[] = [
   {
-    // Daily/billing quota exhausted — long cooldown
+    // Gemini/API 무료 티어 일일 한도 완전 소진 (limit: 0) — 자정에 리셋
+    // "FreeTier", "PerDay", "per_day", "daily" + 무료 티어 지시어
+    pattern: /FreeTier|free.tier|per.?day.*project|GenerateRequests.*Day/i,
+    cooldownMs: 86_400_000,  // 24h — 자정 리셋까지 대기
+    description: 'Gemini 무료 티어 일일 한도 소진 → 24시간 쿨다운 (유료 결제 필요)',
+  },
+  {
+    // Daily/billing quota exhausted — 1시간 쿨다운 (유료 분당 한도 등)
     pattern: /quota.*exceeded|daily.*limit|per.?day.*limit|billing.*quota/i,
     cooldownMs: 3_600_000,   // 1 hour
     description: 'API 일일 할당량 초과 → 1시간 쿨다운',
