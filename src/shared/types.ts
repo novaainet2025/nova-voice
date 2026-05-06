@@ -202,7 +202,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   aiMode: 'direct',
   aiProvider: 'auto',
   customModes: [],
-  ttsModel: 'mlx_ko',
+  ttsModel: 'qwen3',
   sayVoice: 'Yuna',
   mlxVoice: 'Ryan',
   autoEnter: false,

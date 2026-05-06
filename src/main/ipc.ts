@@ -250,6 +250,17 @@ function prepareSpeakText(text: string, aiResult?: string): string | null {
 export function setupIPC(mainWindow: BrowserWindow): void {
   // app.ready 이후이므로 이 시점에 파일 로드 가능
   settings = loadSettingsFromDisk()
+
+  // ── TTS 모델 마이그레이션 (구버전 → qwen3) ──────────────────────────────
+  // mlx / mlx_ko / mlx_mix 는 :8800/:8802 MLX 서버 필요 — 기본 비활성.
+  // @@gentop :7860 Qwen3-TTS가 항상 실행 중이므로 qwen3를 기본으로 마이그레이션.
+  const legacyMLXModels = ['mlx', 'mlx_ko', 'mlx_en', 'mlx_mix']
+  if (legacyMLXModels.includes(settings.ttsModel)) {
+    console.log(`[Settings] TTS 모델 마이그레이션: ${settings.ttsModel} → qwen3`)
+    settings.ttsModel = 'qwen3'
+    saveSettingsToDisk(settings)
+  }
+
   // 저장된 TTS 설정 즉시 적용
   setActiveTTSModel(settings.ttsModel || 'qwen3')
   setActiveSayVoice(settings.sayVoice || 'Yuna')
