@@ -300,17 +300,7 @@ export function UnifiedPanel() {
 
       addMsg('typed', `📎 ${file.name}`)
 
-      // PTY에 Claude가 실행 중이면 직접 타이핑 (인터랙티브 세션 유지)
-      try {
-        const ptyStatus = await window.electronAPI?.ptyStatus?.()
-        if (ptyStatus?.ready) {
-          await window.electronAPI.ptyType(msg)
-          setClaudeRunning(true)
-          continue
-        }
-      } catch { /* PTY 없으면 아래 claude -p 폴백 */ }
-
-      // PTY 미준비 시 claude -p 실행 (새 프로세스)
+      // claude -p 실행 — PTY bash 오염 없이 독립 프로세스로 파일 분석
       if (window.electronAPI?.claudeSend) {
         setClaudeRunning(true)
         try { await window.electronAPI.claudeSend(msg) }
