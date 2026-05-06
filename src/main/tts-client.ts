@@ -36,6 +36,56 @@ let mlxTTSVoice = 'Ryan'  // Ryan: best Korean quality (natural male voice)
 export const MLX_VOICES = ['Ryan', 'Chelsie', 'Vivian', 'Aiden', 'Ethan', 'Serena', 'Eric', 'Dylan'] as const
 export type MLXVoice = typeof MLX_VOICES[number]
 
+// UI 화자 → Kokoro :8801 voice ID 개별 매핑 (5종 실제 다화자)
+const KOKORO_VOICE_MAP: Record<string, string> = {
+  Ryan:    'am_adam',   // American male, clear/professional
+  Chelsie: 'af_bella',  // American female, bright
+  Vivian:  'af_heart',  // American female, warm
+  Aiden:   'am_adam',   // American male (energetic feel)
+  Ethan:   'bm_george', // British male, calm/stable
+  Serena:  'bf_emma',   // British female, warm
+  Eric:    'am_adam',   // American male, deep
+  Dylan:   'bm_george', // British male, casual
+}
+
+// UI 화자 → Spark :8802 voice ID 개별 매핑 (4종 실제 다화자, 한국어)
+const SPARK_VOICE_MAP: Record<string, string> = {
+  Ryan:    'ko_male',   // 한국어 남성 (기본)
+  Chelsie: 'ko_female', // 한국어 여성 (기본)
+  Vivian:  'female_1',  // 여성 variant 1 (다른 톤)
+  Aiden:   'ko_male',   // 한국어 남성
+  Ethan:   'male_1',    // 남성 variant 1 (다른 톤)
+  Serena:  'ko_female', // 한국어 여성
+  Eric:    'male_1',    // 남성 variant 1
+  Dylan:   'ko_male',   // 한국어 남성
+}
+
+// @@gentop Qwen3-TTS CustomVoice 9화자 매핑
+// 서버: http://localhost:7860/api/voices/qwen3-tts/tts
+// 화자: sohee(여), aiden(남), dylan(남), eric(남), ono_anna(여), ryan(남), serena(여), uncle_fu(남), vivian(여)
+const QWEN3_VOICE_MAP: Record<string, string> = {
+  Ryan:    'ryan',      // 남성, 직접 매핑
+  Chelsie: 'sohee',    // 여성, sohee (밝고 자연스러운 한국어 여성)
+  Vivian:  'vivian',   // 여성, 직접 매핑
+  Aiden:   'aiden',    // 남성, 직접 매핑
+  Ethan:   'uncle_fu', // 남성, uncle_fu (중후한 남성)
+  Serena:  'serena',   // 여성, 직접 매핑
+  Eric:    'eric',     // 남성, 직접 매핑
+  Dylan:   'dylan',    // 남성, 직접 매핑
+}
+
+function getKokoroVoice(mlxVoice: string): string {
+  return KOKORO_VOICE_MAP[mlxVoice] || 'am_adam'
+}
+
+function getSparkVoice(mlxVoice: string): string {
+  return SPARK_VOICE_MAP[mlxVoice] || 'ko_male'
+}
+
+function getQwen3Voice(mlxVoice: string): string {
+  return QWEN3_VOICE_MAP[mlxVoice] || 'sohee'
+}
+
 export function setMLXVoice(voice: string): void {
   mlxTTSVoice = voice
   console.log(`[TTS-MLX] Voice set to: ${voice}`)
@@ -180,15 +230,16 @@ export interface TTSResult {
 
 export async function synthesize(options: TTSOptions): Promise<TTSResult> {
   const voiceId = options.voice || 'qwen3-tts'
+  const activeSpeaker = options.speaker || mlxTTSVoice
   const body = JSON.stringify({
     text: options.text,
     lang: options.lang || 'ko',
-    speaker: options.speaker || 'sohee',
+    speaker: activeSpeaker,
     speed: options.speed || 1.0,
     instruct: options.instruct
   })
 
-  console.log(`[TTS] Synthesizing (${voiceId}/${options.speaker || 'sohee'}): "${options.text.substring(0, 50)}..."`)
+  console.log(`[TTS] Synthesizing (${voiceId}/${activeSpeaker}): "${options.text.substring(0, 50)}..."`)
 
   // Use Qwen3-TTS / VoxCPM2 voice endpoint (natural voices)
   const endpoint = voiceId === 'melo'
@@ -297,7 +348,7 @@ export async function speak(text: string, options?: Partial<TTSOptions>): Promis
 // 텍스트를 짧은 청크로 분리 → chunk[i] 재생 중에 chunk[i+1] 동시 합성
 // 효과: 첫 소리 대기 1.5-2s (기존 4-8s), 전체 시간 30-50% 단축
 
-function splitForQwen3Streaming(text: string, maxLen = 35): string[] {
+function splitForQwen3Streaming(text: string, maxLen = 45): string[] {
   // 1단계: 강한 문장 경계에서 분리 (.!?。！？ 및 줄바꿈)
   const raw = text
     .split(/(?<=[.!?。！？])\s+|(?<=\n)/)
@@ -376,6 +427,138 @@ export async function speakQwen3Chunked(text: string, options?: Partial<TTSOptio
 
     await playAudio(current.wavPath)
     // 재생 완료 시 next chunk는 이미 완성(또는 거의 완성) 상태
+  }
+}
+
+// ─── MLX-KO 청크 스트리밍 (:8800 Qwen3-TTS 전용) ─────────────────────────────
+// 파이프라인: chunk[i+1] 합성 중에 chunk[i] 재생 → 지연 최소화
+export async function speakMLXKoChunked(text: string, voice?: string, api = MLX_KO_API, model = MLX_KO_MODEL): Promise<void> {
+  const chunks = splitForQwen3Streaming(text)
+  // Qwen3-TTS(:8800) 사용 — 한국어 특화, 단일화자 (voice 파라미터 서버에서 무시됨)
+  const actualApi = api
+  const actualModel = model
+  // Qwen3-Base는 단일화자 — voice는 Kokoro fallback 시에만 사용
+  const v = (api === MLX_EN_API) ? getKokoroVoice(voice || mlxTTSVoice) : 'qwen3'
+  const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
+  if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
+
+  const synthChunk = async (t: string): Promise<string> => {
+    const normalized = normalizeKoreanNumbers(t)
+    const audioData = await synthesizeMLXSegment(normalized, actualModel, v, actualApi)
+    const p = path.join(cacheDir, `mlx-ko-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
+    fs.writeFileSync(p, audioData)
+    return p
+  }
+
+  if (chunks.length <= 1) {
+    const p = await synthChunk(text)
+    await playAudio(p)
+    return
+  }
+
+  console.log(`[MLX-KO-Chunked] ${chunks.length}청크: ${chunks.map((c, i) => `[${i}]"${c.substring(0, 18)}"`).join(' ')}`)
+
+  // 파이프라인: chunk[0] 합성 시작 → 재생 중에 chunk[1] 합성 → ...
+  const safeSynthChunk = async (t: string): Promise<string | null> => {
+    try { return await synthChunk(t) } catch (e) {
+      console.warn(`[MLX-KO-Chunked] chunk skip: "${t.substring(0, 20)}" —`, (e as Error).message)
+      return null
+    }
+  }
+
+  let pending: Promise<string | null> = safeSynthChunk(chunks[0])
+
+  for (let i = 0; i < chunks.length; i++) {
+    const currentPath = await pending
+    if (i + 1 < chunks.length) {
+      pending = safeSynthChunk(chunks[i + 1])
+    }
+    if (currentPath) await playAudio(currentPath)
+  }
+}
+
+// ─── MLX-EN 청크 스트리밍 (:8801 Kokoro-82M 전용) ────────────────────────────
+// speakMLXKoChunked와 동일 파이프라인, synthesizeMLXSegment(:8801) 사용
+export async function speakMLXEnChunked(text: string, voice?: string, api = MLX_EN_API, model = MLX_EN_MODEL): Promise<void> {
+  const chunks = splitForQwen3Streaming(text)
+  const v = voice || getKokoroVoice(mlxTTSVoice)
+  const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
+  if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
+
+  const synthChunk = async (t: string): Promise<string> => {
+    const audioData = await synthesizeMLXSegment(t, model, v, api)
+    if (audioData.length < 100) throw new Error(`Empty audio (${audioData.length} bytes)`)
+    const p = path.join(cacheDir, `mlx-en-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
+    fs.writeFileSync(p, audioData)
+    return p
+  }
+
+  const safeSynthChunkEn = async (t: string): Promise<string | null> => {
+    try { return await synthChunk(t) } catch (e) {
+      console.warn(`[MLX-EN-Chunked] chunk skip: "${t.substring(0, 20)}" —`, (e as Error).message)
+      return null
+    }
+  }
+
+  if (chunks.length <= 1) {
+    const p = await safeSynthChunkEn(text)
+    if (p) await playAudio(p)
+    return
+  }
+
+  console.log(`[MLX-EN-Chunked] ${chunks.length}청크: ${chunks.map((c, i) => `[${i}]"${c.substring(0, 18)}"`).join(' ')}`)
+
+  // 파이프라인: chunk[0] 합성 시작 → 재생 중에 chunk[1] 합성 → ...
+  let pending: Promise<string | null> = safeSynthChunkEn(chunks[0])
+
+  for (let i = 0; i < chunks.length; i++) {
+    const currentPath = await pending
+    if (i + 1 < chunks.length) {
+      pending = safeSynthChunkEn(chunks[i + 1])
+    }
+    if (currentPath) await playAudio(currentPath)
+  }
+}
+
+// ─── MLX-MIX 청크 스트리밍 (:8802 Spark-TTS 전용) ────────────────────────────
+// Spark-TTS — 한영 혼용, 다화자 (ko_male/ko_female/male_1/female_1)
+export async function speakSparkChunked(text: string, sparkVoice: string): Promise<void> {
+  const chunks = splitForQwen3Streaming(text)
+  const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
+  if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
+
+  const synthChunk = async (t: string): Promise<string> => {
+    const normalized = normalizeKoreanNumbers(t)
+    const audioData = await synthesizeMLXSegment(normalized, MLX_MIX_MODEL, sparkVoice, MLX_MIX_API)
+    if (audioData.length < 100) throw new Error(`Empty audio (${audioData.length} bytes)`)
+    const p = path.join(cacheDir, `mlx-mix-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
+    fs.writeFileSync(p, audioData)
+    return p
+  }
+
+  if (chunks.length <= 1) {
+    const p = await synthChunk(text)
+    await playAudio(p)
+    return
+  }
+
+  console.log(`[Spark-Chunked] ${chunks.length}청크 voice=${sparkVoice}: ${chunks.map((c, i) => `[${i}]"${c.substring(0, 18)}"`).join(' ')}`)
+
+  const safeSynthChunk = async (t: string): Promise<string | null> => {
+    try { return await synthChunk(t) } catch (e) {
+      console.warn(`[Spark-Chunked] chunk skip: "${t.substring(0, 20)}" —`, (e as Error).message)
+      return null
+    }
+  }
+
+  let pending: Promise<string | null> = safeSynthChunk(chunks[0])
+
+  for (let i = 0; i < chunks.length; i++) {
+    const currentPath = await pending
+    if (i + 1 < chunks.length) {
+      pending = safeSynthChunk(chunks[i + 1])
+    }
+    if (currentPath) await playAudio(currentPath)
   }
 }
 
@@ -532,6 +715,66 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(\d+)/g,        (_, n) => { const v = parseInt(n); return v < 100000 ? toSinoKorean(v) : n })
 }
 
+// ─── TTS 텍스트 정제 — 음성 출력에 부적합한 요소 제거/요약 ──────────────────────
+// 마크다운 문법, URL, 파일 경로, 긴 ID, IP 주소 등을 음성에 맞게 변환
+export function sanitizeTTSText(raw: string): string {
+  let t = raw
+
+  // 1. 마크다운 코드 블록 전체 → "코드 생략"
+  t = t.replace(/```[\s\S]*?```/g, '코드 생략.')
+
+  // 2. 인라인 코드 (`...`) → 내용만
+  t = t.replace(/`([^`\n]+)`/g, '$1')
+
+  // 3. 마크다운 헤더 (## 제목) → 제목만
+  t = t.replace(/^#{1,6}\s+(.+)$/gm, '$1')
+
+  // 4. 굵기/기울기 (**text** / *text* / __text__ / _text_) → 내용만
+  t = t.replace(/\*\*([^*]+)\*\*/g, '$1')
+  t = t.replace(/\*([^*\n]+)\*/g, '$1')
+  t = t.replace(/__([^_]+)__/g, '$1')
+  t = t.replace(/_([^_\n]+)_/g, '$1')
+
+  // 5. URL (http/https) → "링크 생략"
+  t = t.replace(/https?:\/\/[^\s)>\]"',]+/g, '링크 생략')
+
+  // 6. 파일 경로 (/path/to/file) → 파일명만
+  t = t.replace(/(?:\/[\w.-]+){3,}/g, (m) => {
+    const parts = m.split('/')
+    return parts[parts.length - 1] || m
+  })
+
+  // 7. 긴 ID / 해시 (16자 이상 영숫자 혼합) → 제거
+  t = t.replace(/\b[A-Za-z0-9_-]{16,}\b/g, '')
+
+  // 8. IP 주소 → "아이피 주소"
+  t = t.replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, '아이피 주소')
+
+  // 9. localhost:포트 → "로컬 {포트}번 포트"
+  t = t.replace(/localhost:(\d+)/g, (_, p) => `로컬 ${p}번 포트`)
+
+  // 10. 마크다운 리스트 기호 (- / * / •) → 제거
+  t = t.replace(/^[ \t]*[-*•]\s+/gm, '')
+
+  // 11. 마크다운 수평선 (--- / ***) → 제거
+  t = t.replace(/^[-*_]{3,}\s*$/gm, '')
+
+  // 12. 표 구분자 (| --- |) → 제거
+  t = t.replace(/\|[-:| ]+\|/g, '')
+  t = t.replace(/\|/g, ' ')
+
+  // 13. 괄호 안 영문 약어만 있는 경우 (예: (API), (TTS)) → 제거
+  t = t.replace(/\(([A-Z]{2,6})\)/g, '')
+
+  // 14. 연속 공백·줄바꿈 정리
+  t = t.replace(/\n{3,}/g, '\n')
+  t = t.replace(/[ \t]{2,}/g, ' ')
+  t = t.trim()
+
+  if (t !== raw) console.log(`[TTS-sanitize] "${raw.substring(0, 60).replace(/\n/g, '↵')}" → "${t.substring(0, 60).replace(/\n/g, '↵')}"`)
+  return t
+}
+
 // ─── Multilingual TTS (한영 혼재 자동 분리) ──────────────────────────────────
 
 // 텍스트를 한국어/영어 세그먼트로 분리
@@ -632,11 +875,33 @@ export async function synthesizeMLXMultilingual(text: string): Promise<string> {
   const hasLatin  = /[a-zA-Z]/.test(text)
   const start     = Date.now()
 
-  // 모든 텍스트 → Qwen3-TTS :8800 + mlxTTSVoice (화자 고정)
-  // Qwen3는 한국어·한영 혼용·순수 영어 모두 자연스럽게 처리
-  // 영어를 Kokoro로 분리하면 화자가 랜덤하게 바뀌는 것처럼 들리므로 단일 경로로 통일
-  console.log(`[TTS-MLX] ${hasKorean ? (hasLatin ? 'Mixed' : 'Korean') : 'English'} → Qwen3-TTS :8800 voice=${mlxTTSVoice}`)
-  const audioData = await synthesizeMLXSegment(text, MLX_KO_MODEL, mlxTTSVoice, MLX_KO_API)
+  // 3-Server 라우팅: 언어별 최적 서버로 분기
+  if (!hasKorean && hasLatin) {
+    // 순수 영어 → Kokoro-82M :8801 (50ms, 영어 최적화)
+    console.log(`[TTS-MLX] English → Kokoro-82M :8801 voice=${getKokoroVoice(mlxTTSVoice)}`)
+    const audioData = await synthesizeMLXSegment(text, MLX_EN_MODEL, getKokoroVoice(mlxTTSVoice), MLX_EN_API)
+    const audioPath = path.join(cacheDir, `mlx-en-${Date.now()}.wav`)
+    fs.writeFileSync(audioPath, audioData)
+    console.log(`[TTS-MLX] Done in ${Date.now() - start}ms`)
+    return audioPath
+  }
+
+  if (hasKorean && hasLatin) {
+    // 한영 혼용 → Spark-TTS :8802 (한국어+영어 동시 지원, 단일 모델)
+    const sparkVoice = getSparkVoice(mlxTTSVoice)
+    console.log(`[TTS-MLX] Mixed → Spark-TTS :8802 voice=${sparkVoice}`)
+    const normalized = normalizeKoreanNumbers(text)
+    const audioData = await synthesizeMLXSegment(normalized, MLX_MIX_MODEL, sparkVoice, MLX_MIX_API)
+    const audioPath = path.join(cacheDir, `mlx-mix-${Date.now()}.wav`)
+    fs.writeFileSync(audioPath, audioData)
+    console.log(`[TTS-MLX] Done in ${Date.now() - start}ms`)
+    return audioPath
+  }
+
+  // 한국어 only → Qwen3-TTS :8800 (한국어 전용 고품질, 단일화자)
+  console.log(`[TTS-MLX] Korean → Qwen3-TTS :8800`)
+  const normalized = normalizeKoreanNumbers(text)
+  const audioData = await synthesizeMLXSegment(normalized, MLX_KO_MODEL, 'qwen3', MLX_KO_API)
   const audioPath = path.join(cacheDir, `mlx-ko-${Date.now()}.wav`)
   fs.writeFileSync(audioPath, audioData)
   console.log(`[TTS-MLX] Done in ${Date.now() - start}ms`)
@@ -673,9 +938,11 @@ let _ttsQueue: Promise<void> = Promise.resolve()
 
 // Smart speak: 설정된 ttsModel 우선 — MLX 계열은 say로만 폴백 (다른 엔진으로 폴백 금지)
 export async function smartSpeak(text: string, options?: Partial<TTSOptions>): Promise<void> {
+  const clean = sanitizeTTSText(text)
+  if (!clean.trim()) return  // 정제 후 내용 없으면 스킵
   // 직렬화: 이전 TTS 완료 후 다음 시작
   const result = new Promise<void>((resolve, reject) => {
-    _ttsQueue = _ttsQueue.then(() => _doSmartSpeak(text, options).then(resolve, reject)).catch(() => {})
+    _ttsQueue = _ttsQueue.then(() => _doSmartSpeak(clean, options).then(resolve, reject)).catch(() => {})
   })
   return result
 }
@@ -691,75 +958,63 @@ async function _doSmartSpeak(text: string, options?: Partial<TTSOptions>): Promi
 
   if (model === 'mlx') {
     try {
-      const audioPath = await synthesizeMLX(text)
-      await playAudio(audioPath)
+      // 언어별 최적 청크 파이프라인 — chunk[N] 재생 중 chunk[N+1] 합성
+      const hasKorean = /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(text)
+      const hasLatin  = /[a-zA-Z]/.test(text)
+      if (!hasKorean && hasLatin) {
+        await speakMLXEnChunked(text, undefined, MLX_EN_API, MLX_EN_MODEL)
+      } else if (hasKorean && hasLatin) {
+        await speakSparkChunked(text, getSparkVoice(mlxTTSVoice))
+      } else {
+        await speakMLXKoChunked(text, mlxTTSVoice, MLX_KO_API, MLX_KO_MODEL)
+      }
       return
     } catch (e) {
       console.log('[TTS-MLX] Failed:', (e as Error).message)
       invalidateMLXCache()
     }
-    // MLX 계열 실패 → say(Yuna)로만 폴백 (다른 TTS 엔진 사용 금지 — 목소리 변경 방지)
-    await speakFallback(text, 'ko', 'Yuna')
+    // MLX 실패 → 침묵 (say 폴백 금지 — 목소리 혼합 방지)
+    console.warn('[TTS-MLX] 실패, 침묵 처리 (목소리 통일 정책)')
     return
   }
 
   if (model === 'mlx_ko') {
-    // isMLXAvailable 사전 체크 제거 — 2초 타임아웃 오탐으로 say 폴백 방지
-    // 합성 자체가 실패할 때만 폴백 (synthesizeMLXSegment timeout: 30s)
     try {
-      const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
-      if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
-      const audioData = await synthesizeMLXSegment(text, MLX_KO_MODEL, mlxTTSVoice, MLX_KO_API)
-      if (audioData.length < 100) throw new Error(`Empty audio (${audioData.length} bytes)`)
-      const audioPath = path.join(cacheDir, `mlx-ko-${Date.now()}.wav`)
-      fs.writeFileSync(audioPath, audioData)
-      await playAudio(audioPath)
+      await speakMLXKoChunked(text, mlxTTSVoice, MLX_KO_API, MLX_KO_MODEL)
       return
     } catch (e) {
-      console.log('[TTS-MLX-KO] Failed, falling back to say:', (e as Error).message)
-      invalidateMLXCache()  // 실패 시 캐시 무효화 → 다음 호출에서 서버 재확인
+      console.log('[TTS-MLX-KO] Failed:', (e as Error).message)
+      invalidateMLXCache()
     }
-    // mlx_ko 실패 → say(Yuna) 폴백만 허용 (qwen3/cosyvoice 폴백 금지)
-    await speakFallback(text, 'ko', 'Yuna')
+    console.warn('[TTS-MLX-KO] 실패, 침묵 처리')
     return
   }
 
   if (model === 'mlx_en') {
     try {
-      const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
-      if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
-      const audioData = await synthesizeMLXSegment(text, MLX_EN_MODEL, 'af_heart', MLX_EN_API)
-      if (audioData.length < 100) throw new Error(`Empty audio (${audioData.length} bytes)`)
-      const audioPath = path.join(cacheDir, `mlx-en-${Date.now()}.wav`)
-      fs.writeFileSync(audioPath, audioData)
-      await playAudio(audioPath)
+      await speakMLXEnChunked(text, 'af_heart', MLX_EN_API, MLX_EN_MODEL)
       return
     } catch (e) {
       console.log('[TTS-MLX-EN] Failed:', (e as Error).message)
       invalidateMLXCache()
     }
-    await speakFallback(text, 'en', 'Samantha')
+    // mlx_en 실패 → 침묵 (목소리 통일 정책)
+    console.warn('[TTS-MLX-EN] 실패, 침묵 처리')
     return
   }
 
   if (model === 'mlx_mix') {
     try {
-      const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
-      if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
-      // 숫자/날짜를 한국어로 정규화 (Spark가 영어/중국어로 읽는 문제 방지)
-      const normalized = normalizeKoreanNumbers(text)
-      if (normalized !== text) console.log(`[TTS-Spark] Normalized: "${text.substring(0,40)}" → "${normalized.substring(0,40)}"`)
-      const audioData = await synthesizeMLXSegment(normalized, MLX_MIX_MODEL, 'ko_female', MLX_MIX_API)
-      if (audioData.length < 100) throw new Error(`Empty audio (${audioData.length} bytes)`)
-      const audioPath = path.join(cacheDir, `mlx-mix-${Date.now()}.wav`)
-      fs.writeFileSync(audioPath, audioData)
-      await playAudio(audioPath)
+      const sparkVoice = getSparkVoice(mlxTTSVoice)
+      console.log(`[TTS-Spark] voice=${mlxTTSVoice} → Spark :8802 sparkVoice=${sparkVoice}`)
+      await speakSparkChunked(text, sparkVoice)
       return
     } catch (e) {
-      console.log('[TTS-MLX-MIX] Failed:', (e as Error).message)
+      console.log('[TTS-Spark-Chunked] Failed:', (e as Error).message)
       invalidateMLXCache()
     }
-    await speakFallback(text, 'ko', 'Yuna')
+    // mlx_mix 실패 → 침묵 (목소리 통일 정책)
+    console.warn('[TTS-MLX-MIX] 실패, 침묵 처리')
     return
   }
 
@@ -773,19 +1028,25 @@ async function _doSmartSpeak(text: string, options?: Partial<TTSOptions>): Promi
     } catch (e) {
       console.log('[CosyVoice2] Failed, falling back:', (e as Error).message)
     }
-    // cosyvoice 실패 → say(Yuna) 폴백만 허용 (목소리 변경 방지)
-    await speakFallback(text, 'ko', 'Yuna')
+    // cosyvoice 실패 → 침묵 (목소리 통일 정책)
+    console.warn('[CosyVoice2] 실패, 침묵 처리')
     return
   }
 
-  // qwen3 (default) — 청크 파이프라인으로 첫 소리 대기 단축
-  try {
-    if (await isTTSAvailable()) {
-      await speakQwen3Chunked(text, options)
-      return
+  // qwen3 — @@gentop :7860, 9화자 CustomVoice, 화자 매핑 후 청크 파이프라인
+  if (model === 'qwen3' || !['say','mlx','mlx_ko','mlx_en','mlx_mix','cosyvoice'].includes(model)) {
+    try {
+      if (await isTTSAvailable()) {
+        const qwen3Speaker = getQwen3Voice(mlxTTSVoice)
+        console.log(`[Qwen3-TTS] voice=${mlxTTSVoice} → speaker=${qwen3Speaker} (:7860)`)
+        await speakQwen3Chunked(text, { voice: 'qwen3-tts', speaker: qwen3Speaker, ...options })
+        return
+      }
+    } catch (e) {
+      console.log('[Qwen3-TTS] Failed:', (e as Error).message)
     }
-  } catch (e) {
-    console.log('[Qwen3-TTS] Failed, trying MLX:', (e as Error).message)
+    console.warn('[Qwen3-TTS] 실패, 침묵 처리')
+    return
   }
 
   try {
@@ -808,7 +1069,7 @@ async function _doSmartSpeak(text: string, options?: Partial<TTSOptions>): Promi
     console.log('[CosyVoice2] Failed, using say:', (e as Error).message)
   }
 
-  await speakFallback(text, options?.lang, _sayVoice)
+  console.warn('[TTS] 모든 TTS 서버 불가 → 침묵 (목소리 통일 정책)')
 }
 
 // Get available speakers
@@ -1045,32 +1306,49 @@ export async function previewTTSVoice(id: string, voice?: string): Promise<void>
   if (id === 'cosyvoice') {
     const audioPath = await synthesizeCosyVoice(PREVIEW_KO)
     await playAudio(audioPath)
-  } else if (id === 'mlx_ko' || id === 'mlx_en' || id === 'mlx_mix') {
+  } else if (id === 'mlx_ko' || id === 'mlx_en' || id === 'mlx_mix' || id === 'mlx') {
+    // 모델별 실제 사용 서버로 프리뷰 라우팅 (언어 일치 필수)
     const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
     if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
+    const selectedVoice = voice || mlxTTSVoice
     let buf: Buffer
-    if (id === 'mlx_ko') {
-      // 전역 mlxTTSVoice 변경 없이 preview voice를 직접 전달
-      buf = await synthesizeMLXSegment(PREVIEW_KO, MLX_KO_MODEL, voice || mlxTTSVoice, MLX_KO_API)
-    } else if (id === 'mlx_en') {
-      buf = await synthesizeMLXSegment(PREVIEW_EN, MLX_EN_MODEL, 'af_heart', MLX_EN_API)
+    if (id === 'mlx_en') {
+      // 영어 전용 → Kokoro :8801 + 영어 텍스트
+      const kokoroVoice = getKokoroVoice(selectedVoice)
+      console.log(`[TTS-Preview] mlx_en voice=${selectedVoice} → Kokoro :8801 voice=${kokoroVoice}`)
+      buf = await synthesizeMLXSegment(PREVIEW_EN, MLX_EN_MODEL, kokoroVoice, MLX_EN_API)
+    } else if (id === 'mlx_mix') {
+      // 혼용 → Spark-TTS :8802 + 한국어 텍스트 (화자 구분)
+      const sparkVoice = getSparkVoice(selectedVoice)
+      console.log(`[TTS-Preview] mlx_mix voice=${selectedVoice} → Spark :8802 voice=${sparkVoice}`)
+      buf = await synthesizeMLXSegment(normalizeKoreanNumbers(PREVIEW_KO), MLX_MIX_MODEL, sparkVoice, MLX_MIX_API)
     } else {
-      buf = await synthesizeMLXSegment(PREVIEW_MIX, MLX_MIX_MODEL, 'ko_female', MLX_MIX_API)
+      // mlx_ko / mlx → Qwen3-TTS :8800 + 한국어 텍스트 (단일화자, 고품질 한국어)
+      console.log(`[TTS-Preview] ${id} voice=${selectedVoice} → Qwen3-TTS :8800 (한국어 단일화자)`)
+      buf = await synthesizeMLXSegment(normalizeKoreanNumbers(PREVIEW_KO), MLX_KO_MODEL, 'qwen3', MLX_KO_API)
     }
     const audioPath = path.join(cacheDir, `preview-${id}-${Date.now()}.wav`)
     fs.writeFileSync(audioPath, buf)
     await playAudio(audioPath)
-  } else if (id === 'mlx') {
-    // 전역 mlxTTSVoice 변경 없이 preview voice를 직접 사용
-    const previewVoice = voice || mlxTTSVoice
-    const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
-    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
-    const buf = await synthesizeMLXSegment(PREVIEW_KO, MLX_KO_MODEL, previewVoice, MLX_KO_API)
-    const audioPath = path.join(cacheDir, `preview-mlx-${Date.now()}.wav`)
-    fs.writeFileSync(audioPath, buf)
-    await playAudio(audioPath)
   } else if (id === 'qwen3') {
-    const result = await synthesize({ text: PREVIEW_KO, voice: 'qwen3-tts', speaker: voice || 'sohee' })
-    await playAudio(result.wavPath)
+    // @@gentop :7860 샘플 캐시 endpoint — 미리 생성된 WAV, 빠른 응답
+    const qwen3Speaker = getQwen3Voice(voice || mlxTTSVoice)
+    console.log(`[TTS-Preview] qwen3 voice=${voice || mlxTTSVoice} → speaker=${qwen3Speaker}`)
+    try {
+      // GET /api/voices/qwen3-tts/sample/{speaker}?lang=ko → WAV 직접 반환 (캐시)
+      const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
+      if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
+      const sampleData = await httpRequest(
+        `${TTS_API}/api/voices/qwen3-tts/sample/${qwen3Speaker}?lang=ko`,
+        { method: 'GET', timeout: 15000 }
+      )
+      const samplePath = path.join(cacheDir, `preview-qwen3-${qwen3Speaker}-${Date.now()}.wav`)
+      fs.writeFileSync(samplePath, sampleData)
+      await playAudio(samplePath)
+    } catch {
+      // sample endpoint 실패 시 synthesize() fallback
+      const result = await synthesize({ text: PREVIEW_KO, voice: 'qwen3-tts', speaker: qwen3Speaker })
+      await playAudio(result.wavPath)
+    }
   }
 }

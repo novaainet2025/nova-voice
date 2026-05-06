@@ -590,6 +590,64 @@ export async function processWithClaude(
   })
 }
 
+export async function processWithClaudeStreaming(
+  prompt: string,
+  onSentence: (sentence: string) => void,
+  opts?: { cwd?: string }
+): Promise<{ text: string; provider: string; model: string }> {
+  const claudePath = findClaudeBinary()
+  const cwd = opts?.cwd ?? process.cwd()
+  const { spawn } = require('child_process')
+
+  return new Promise((resolve, reject) => {
+    let stdout = ''
+    let buffer = ''
+    let stderr = ''
+
+    const proc = spawn(claudePath, [
+      '-p', prompt,
+      '--dangerously-skip-permissions',
+      '--output-format', 'text',
+    ], {
+      cwd,
+      env: { ...process.env, TERM: 'dumb', NO_COLOR: '1', FORCE_COLOR: '0' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    proc.stdout?.on('data', (d: Buffer) => {
+      const chunk = d.toString()
+      stdout += chunk
+      buffer += chunk
+      // Detect sentence boundaries and fire callback
+      const sentenceEnd = /[.!?。！？]\s*/g
+      let match: RegExpExecArray | null
+      let lastIdx = 0
+      while ((match = sentenceEnd.exec(buffer)) !== null) {
+        const sentence = buffer.slice(lastIdx, match.index + match[0].length).trim()
+        if (sentence.length > 5) onSentence(sentence)
+        lastIdx = match.index + match[0].length
+      }
+      buffer = buffer.slice(lastIdx)
+    })
+
+    proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
+
+    proc.on('close', (code: number) => {
+      // Flush remaining buffer
+      if (buffer.trim().length > 5) onSentence(buffer.trim())
+      const text = stdout.trim()
+      if (code !== 0 && !text) {
+        reject(new Error(`Claude exit ${code}: ${stderr.substring(0, 200)}`))
+      } else {
+        resolve({ text, provider: 'claude', model: 'claude-code' })
+      }
+    })
+
+    proc.on('error', reject)
+    setTimeout(() => { proc.kill(); reject(new Error('Claude timeout')) }, 60000)
+  })
+}
+
 async function processWithGemini(prompt: string): Promise<Omit<AIProcessResult, 'duration'>> {
   console.log('[Gemini] Processing...')
   const { stdout } = await execFile('gemini', ['-p', prompt], {

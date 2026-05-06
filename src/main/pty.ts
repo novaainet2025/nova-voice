@@ -13,6 +13,10 @@ import path from 'path'
 let ptyProcess: pty.IPty | null = null
 let mainWindow: BrowserWindow | null = null
 let intentionalKill = false  // createPTY/destroyPTY 의도적 종료 시 true → 자동 재시작 억제
+let restartCount = 0          // 연속 재시작 횟수 — 무한 루프 방지
+let lastExitTime = 0          // 마지막 종료 시각 (ms) — 빠른 연속 크래시 감지
+const MAX_RESTARTS = 5        // 최대 연속 재시작 횟수
+const RESTART_WINDOW = 10000  // 이 시간(ms) 내 연속 종료 시 재시작 카운트 증가
 
 // 기본 셸: macOS는 zsh, Linux는 bash, Windows는 cmd
 const DEFAULT_SHELL = process.platform === 'win32' ? 'cmd.exe' :
@@ -49,35 +53,73 @@ export function createPTY(cols = 120, rows = 30): void {
   })
 
   intentionalKill = false  // 새 PTY 생성 완료 — 이후 비정상 종료는 자동 재시작
+  restartCount = 0          // 정상 생성 완료 — 재시작 카운터 초기화
 
   ptyProcess.onData((data: string) => {
-    mainWindow?.webContents.send('pty:data', data)
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('pty:data', data)
+    }
     // Claude 감지용 최근 출력 업데이트
     updateRecentPTYOutput(data)
     // Claude 신뢰 프롬프트 자동 승인 (1. Yes, I trust this folder)
     autoConfirmClaudeTrust()
     // 응답 캡처 중이면 버퍼에 추가 + idle 타이머 리셋
+    // (상태바 노이즈는 리셋 제외 — 계속 업데이트되면 idle 타이머가 영원히 리셋됨)
     if (capture) {
       capture.buffer += data
-      if (capture.idleTimer) clearTimeout(capture.idleTimer)
-      capture.idleTimer = setTimeout(flushCapture, capture.idleMs ?? 1500)
+      const stripped = data
+        .replace(/\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g, '')  // CSI
+        .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')            // OSC
+        .replace(/\x1b./g, '')                                          // 기타 ESC
+        .replace(/[\x00-\x1f\x7f]/g, '')                               // 제어문자
+        .trim()
+      // Claude Code 상태바 패턴 — idle 타이머 리셋 안 함
+      const isStatusBarNoise = stripped.length === 0
+        || /api\s*[x+]\s*ws|NCO.*(?:직접|↑|↓|%)|bypass\s*permission|shift.*tab.*cycle/i.test(stripped)
+        || /claude[-\s]?\d.*(?:Sonnet|Opus|Haiku|4\.\d)/i.test(stripped)
+        || /Ctx:\s*\d+%|주별|weekly|\d+%\s*[·•]\s*주별/i.test(stripped)
+      if (!isStatusBarNoise) {
+        if (capture.idleTimer) clearTimeout(capture.idleTimer)
+        capture.idleTimer = setTimeout(flushCapture, capture.idleMs ?? 1500)
+      }
     }
   })
 
   ptyProcess.onExit(({ exitCode }) => {
     console.log(`[PTY] Shell exited with code ${exitCode}`)
-    mainWindow?.webContents.send('pty:exit', exitCode)
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('pty:exit', exitCode)
+    }
+    resetClaudeLastSeen()  // Claude 감지 이력 초기화
     ptyProcess = null
 
     // 의도적 종료가 아닌 경우에만 자동 재시작 (claude 등 실행 후 셸 종료 방지)
     if (!intentionalKill) {
-      setTimeout(() => {
+      const now = Date.now()
+      if (now - lastExitTime < RESTART_WINDOW) {
+        restartCount++
+      } else {
+        restartCount = 1
+      }
+      lastExitTime = now
+
+      if (restartCount > MAX_RESTARTS) {
+        console.error(`[PTY] Max restarts (${MAX_RESTARTS}) exceeded — giving up`)
         if (mainWindow && !mainWindow.isDestroyed()) {
-          createPTY(cols, rows)
+          mainWindow.webContents.send('pty:error', `PTY 재시작 ${MAX_RESTARTS}회 초과 — 수동 재시작 필요`)
         }
-      }, 500)
+        restartCount = 0
+      } else {
+        // 지수 백오프: 500ms → 1s → 2s → 4s → 8s
+        const delay = Math.min(500 * Math.pow(2, restartCount - 1), 8000)
+        console.log(`[PTY] Restarting in ${delay}ms (attempt ${restartCount}/${MAX_RESTARTS})`)
+        setTimeout(() => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            createPTY(cols, rows)
+          }
+        }, delay)
+      }
     }
-    intentionalKill = false
   })
 
   console.log(`[PTY] Created: ${DEFAULT_SHELL} (${cols}x${rows})`)
@@ -99,11 +141,31 @@ export function destroyPTY(): void {
   }
 }
 
+/**
+ * NCO/슬래시 명령어 안정적 실행 — 3단계 타이밍 보장
+ * 문제: writeToPTY(cmd + '\r') 단일 호출 시 Claude 출력 중이면 \r 이 씹힘
+ * 해결: 라인 클리어(Ctrl+U) → 명령 입력 → 100ms 후 Enter → 600ms 후 안전망 Enter
+ */
+export async function sendCommandToPTY(command: string): Promise<void> {
+  if (!ptyProcess) {
+    createPTY()
+    await new Promise(r => setTimeout(r, 300))
+  }
+  // 1) 현재 입력 줄 클리어 (진행 중인 타이핑이 있을 경우 제거)
+  ptyProcess?.write('\x15')
+  await new Promise(r => setTimeout(r, 50))
+  // 2) 명령어 입력
+  ptyProcess?.write(command)
+  await new Promise(r => setTimeout(r, 100))
+  // 3) 첫 번째 Enter
+  ptyProcess?.write('\r')
+  // 4) 600ms 후 안전망 Enter (이미 실행된 경우 빈 줄로 무해)
+  setTimeout(() => { ptyProcess?.write('\r') }, 600)
+}
+
 // 음성 명령 → PTY에 타이핑 (Claude Code 등 실행)
 export async function typeCommandInPTY(command: string): Promise<void> {
-  if (!ptyProcess) createPTY()
-  await new Promise(r => setTimeout(r, 100))
-  writeToPTY(command + '\r')
+  await sendCommandToPTY(command)
 }
 
 export function isPTYReady(): boolean {
@@ -113,14 +175,30 @@ export function isPTYReady(): boolean {
 // ── PTY에 실행 중인 Claude가 있는지 감지 ──────────────────────────────────────
 // 최근 PTY 출력에 Claude Code 특징 패턴이 있으면 true
 let _recentPTYOutput = ''
+let _claudeLastSeen = 0          // Claude 마지막 감지 타임스탬프 (ms)
+const CLAUDE_SEEN_TTL = 300_000  // 5분 이내 감지 이력 = 실행 중으로 간주
+
 export function updateRecentPTYOutput(data: string): void {
   _recentPTYOutput = (_recentPTYOutput + data).slice(-4000)  // 최근 4KB만 유지
+  // Claude 감지 시 타임스탬프 갱신 (버퍼 침묵 중 odetection 유지용)
+  if (/claude[-\s]?\d|Claude Code|bypass permissions|Sonnet|Opus|Haiku/i.test(data) ||
+      /api.*ws.*Cla/i.test(data)) {
+    _claudeLastSeen = Date.now()
+  }
+}
+
+// Claude 이력 초기화 (PTY 종료 또는 intentional kill 시 호출)
+export function resetClaudeLastSeen(): void {
+  _claudeLastSeen = 0
 }
 
 export function isClaudeRunningInPTY(): boolean {
-  // Claude Code 특징: 상태바 패턴 or 프롬프트 패턴
-  return /claude[-\s]?\d|Claude Code|bypass permissions|Sonnet|Opus|Haiku/.test(_recentPTYOutput) ||
-         /api.*ws.*Cla/i.test(_recentPTYOutput)
+  // 1) 현재 버퍼에 Claude 패턴 존재
+  const inBuffer = /claude[-\s]?\d|Claude Code|bypass permissions|Sonnet|Opus|Haiku/.test(_recentPTYOutput) ||
+                   /api.*ws.*Cla/i.test(_recentPTYOutput)
+  // 2) 최근 5분 이내 Claude를 감지한 이력 + PTY 살아있음
+  const recentHistory = _claudeLastSeen > 0 && (Date.now() - _claudeLastSeen) < CLAUDE_SEEN_TTL && ptyProcess !== null
+  return inBuffer || recentHistory
 }
 
 // ── Claude 신뢰 프롬프트 자동 승인 ───────────────────────────────────────────
@@ -170,7 +248,10 @@ export function startPTYResponseCapture(
 ): void {
   stopPTYResponseCapture()
   capture = { buffer: '', idleTimer: null, maxTimer: null, idleMs, callback }
-  capture.maxTimer = setTimeout(flushCapture, maxMs)
+  capture.maxTimer = setTimeout(() => {
+    if (capture) (capture as any)._timedOut = true
+    flushCapture()
+  }, maxMs)
   capture.idleTimer = setTimeout(flushCapture, idleMs)
 }
 
@@ -183,18 +264,30 @@ export function stopPTYResponseCapture(): void {
 
 function flushCapture(): void {
   if (!capture) return
+  const timedOut = !!(capture as any)._timedOut
   const { buffer, callback } = capture
   stopPTYResponseCapture()
 
   // ANSI/VT 전체 제거 후 raw 텍스트 전달 (필터링은 호출자가 판단)
   const clean = buffer
-    .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')   // CSI (색상, 커서)
-    .replace(/\x1b\][^\x07\x1b]*[\x07\x1b]/g, '') // OSC (타이틀 등)
-    .replace(/\x1b./g, '')                    // 기타 ESC 시퀀스
-    .replace(/[\x00-\x09\x0b-\x1f\x7f]/g, '') // 제어문자 (줄바꿈 제외)
-    .replace(/\r/g, '')
+    // \r 처리: 줄 안에서 \r 이후 내용만 유지 (덮어쓰기 시뮬레이션)
+    .split('\n').map(line => {
+      const parts = line.split('\r')
+      return parts[parts.length - 1]  // 마지막 \r 이후 내용만
+    }).join('\n')
+    // CSI 시퀀스 (색상, 커서, 지우기 등) — ? ~ < = > ! 파라미터 포함
+    .replace(/\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g, '')
+    // OSC 시퀀스 (타이틀, 링크 등)
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    // DCS, PM, APC, SOS, SS2, SS3
+    .replace(/\x1b[PX^_][^\x1b]*\x1b\\/g, '')
+    // 나머지 단일 ESC 시퀀스
+    .replace(/\x1b./g, '')
+    // 남은 제어문자 (줄바꿈 \x0a 제외)
+    .replace(/[\x00-\x09\x0b-\x1f\x7f]/g, '')
     .trim()
 
+  if (timedOut) console.log("[PTY] Response capture timed out")
   console.log(`[PTY Capture] flushed ${clean.length} chars`)
   if (clean.length > 10) {
     callback(clean)
@@ -215,13 +308,36 @@ export function extractClaudeResponseFromPTY(raw: string, question: string): str
   lines = lines.filter(l => !/^[⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷●○◐◑◒◓\s]*$/.test(l.trim() || ' '))
   lines = lines.filter(l => !/^\s*[⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷].*(?:Thinking|Working|Analyzing|Running|Searching)/i.test(l))
 
-  // 3. Claude Code 상태바/UI 라인 제거
-  lines = lines.filter(l => !/api\s+ws.*Cla\s+Opn/i.test(l))       // 상태바
-  lines = lines.filter(l => !/NCO\s+\d+%.*직접/i.test(l))           // NCO 상태
-  lines = lines.filter(l => !/bypass permissions on/i.test(l))       // 권한 표시
-  lines = lines.filter(l => !/claude-\d+\s+\[Sonnet|Opus|Haiku/i.test(l))  // 모델 표시
-  lines = lines.filter(l => !/^\s*\d+일\s+\d+%.*주별/i.test(l))     // 비용 표시
-  lines = lines.filter(l => !/Ctx:\d+%\s*\|\s*\$/i.test(l))          // 컨텍스트 비용
+  // 3. Claude Code 상태바/UI 라인 제거 (포괄적 패턴)
+  lines = lines.filter(l => {
+    const t = l.replace(/\s+/g, ' ').trim()  // 공백 정규화 (붙어쓰기 처리)
+    if (!t) return false  // 빈 줄은 일단 유지 (후처리에서 정리)
+
+    // 상태바 첫 줄: "apix ws [Cla Opn Gem …]" 프로바이더 목록
+    if (/api\s*[x+]\s*ws\s*\[/i.test(t)) return false
+    // NCO 진행바: "NCO ░▒█ 0%(NCO:0↑직접:0↓)" — 진행바 문자 또는 %+직접 패턴
+    if (/NCO[\s\S]{0,20}(?:직접|↑|↓)/i.test(t)) return false
+    if (/NCO.*\d+%/i.test(t) && /직접|↑|↓/.test(t)) return false
+    // bypass permissions: 붙어서 나오는 경우 포함
+    if (/bypass\s*permissions?\s*on/i.test(t)) return false
+    if (/shift\s*\+?\s*tab\s*to\s*cycle/i.test(t)) return false
+    // 모델 표시: "claude-1 [Sonnet 4.6]" 또는 "claude-N [Model]"
+    if (/claude[-\s]?\d.*(?:Sonnet|Opus|Haiku|4\.\d)/i.test(t)) return false
+    // 비용/시간 표시: "1일 05/06 16:40 · 주별" or "↻ 1일"
+    if (/(?:↻|주별|weekly).*\d{2}\/\d{2}/i.test(t)) return false
+    if (/\d+일.*주별/i.test(t)) return false
+    if (/주별\s*\d{2}\/\d{2}/i.test(t)) return false
+    // 컨텍스트/비용: "Ctx:0% | $0.05" or "1% · 주별 2%"
+    if (/Ctx:\d+%\s*\|/i.test(t)) return false
+    if (/\d+%\s*[·•]\s*주별\s*\d+%/i.test(t)) return false
+    // 터미널 커서 위치 쿼리: "?20" 또는 숫자만 있는 줄
+    if (/^\??\d{1,3}$/.test(t)) return false
+    // ⏵⏵ 또는 >> 로 시작하는 UI 프롬프트
+    if (/^[⏵►»>]{1,3}\s*bypass/i.test(t)) return false
+    if (/^[⏵►»>]{2,}/.test(t)) return false
+
+    return true
+  })
 
   // 4. Claude 프롬프트 라인 제거 (끝부분)
   while (lines.length && /^\s*[>❯►»]\s*$/.test(lines[lines.length - 1].trim())) {
