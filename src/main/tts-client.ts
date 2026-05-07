@@ -752,6 +752,9 @@ const TTS_ABBR_MAP: Record<string, string> = {
   TCP: '티씨피',   UDP: '유디피',   CI: '씨아이',  CD: '씨디',
   PM: '피엠',      CTO: '씨티오',   CEO: '씨이오',
   ROI: '아르오아이', KPI: '케이피아이', OKR: '오케이알',
+  ERR: '오류',    REF: '참조',    ENV: '환경',
+  DEV: '개발',    PROD: '운영',   SRC: '소스',
+  PWD: '현재 경로', DIR: '디렉토리', LTS: '장기지원',
 }
 
 // 영어 브랜드·제품명 → 한국어 음성 (한국어 TTS 엔진의 영어 발음 어색함 방지)
