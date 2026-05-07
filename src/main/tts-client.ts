@@ -363,7 +363,7 @@ function splitForQwen3Streaming(text: string, maxLen = 60): string[] {
     } else {
       // 2단계: 쉼표·한국어 접속부사 앞에서 추가 분리
       const parts = sentence
-        .split(/(?<=[,，、])\s*|(?=그리고\s|그래서\s|하지만\s|또한\s|따라서\s|그런데\s|즉\s)/u)
+        .split(/(?<=[,，、])\s*|(?=그리고\s|그래서\s|하지만\s|또한\s|따라서\s|그런데\s|즉\s|그러나\s|그렇지만\s|왜냐하면\s|그래도\s|반면\s|더욱이\s)/u)
         .map(s => s.trim())
         .filter(s => s.length > 0)
 
@@ -932,6 +932,18 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bJest\b/g, '제스트'],
   [/\bVitest\b/g, '비테스트'],
   [/\bPlaywright\b/g, '플레이라이트'],
+  // 백엔드 프레임워크
+  [/\bExpress\.js\b|\bExpressJS\b/gi, '익스프레스제이에스'],
+  [/\bExpress\b/g, '익스프레스'],
+  [/\bFastAPI\b/gi, '패스트에이피아이'],
+  [/\bDjango\b/g, '장고'],
+  [/\bSpring\s*Boot\b/gi, '스프링부트'],
+  [/\bSpring\b/g, '스프링'],
+  [/\bFlask\b/g, '플라스크'],
+  [/\bHono\b/g, '호노'],
+  [/\bAstro\b/g, '아스트로'],
+  [/\bRemix\b/g, '리믹스'],
+  [/\bNuxt\b/g, '넉스트'],
   // 혼합 대소문자·하이픈 패턴 (ABBR_MAP/PascalCase 규칙으로 불가)
   [/\bWi-Fi\b/gi, '와이파이'],
   [/\bWebRTC\b/g, '웹알티씨'],
