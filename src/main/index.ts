@@ -293,7 +293,7 @@ app.whenReady().then(async () => {
       console.warn('[Microphone] Permission not granted')
       systemPreferences.askForMediaAccess('microphone').then(granted => {
         console.log('[Microphone] Permission:', granted ? 'granted ✓' : 'denied ✗')
-      })
+      }).catch((e: Error) => console.warn('[Microphone] Permission request failed:', e.message))
     } else {
       console.log('[Microphone] Permission granted ✓')
     }

@@ -134,11 +134,11 @@ export function UnifiedPanel() {
   useEffect(() => {
     if (!window.electronAPI) return
 
-    window.electronAPI.getAIModes?.().then((modes: any[]) => setAIModes(modes))
+    window.electronAPI.getAIModes?.().then((modes: any[]) => setAIModes(modes)).catch(() => {})
     // Sync mode from main process settings (main loads from disk, renderer defaults to 'direct')
     window.electronAPI.getSettings?.().then((s: any) => {
       if (s?.aiMode) setCurrentMode(s.aiMode)
-    })
+    }).catch(() => {})
 
     // Transcription + AI result
     const cleanupResult = window.electronAPI.onTranscriptionResult((result) => {
@@ -188,7 +188,7 @@ export function UnifiedPanel() {
     // Debug log streaming
     window.electronAPI.getDebugLogs?.().then((logs) => {
       if (logs?.length) setDebugLogs(logs)
-    })
+    }).catch(() => {})
     const cleanupDebug = window.electronAPI.onDebugLog?.((entry) => {
       setDebugLogs(prev => {
         const next = [...prev, entry]
