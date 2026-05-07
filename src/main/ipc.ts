@@ -1528,8 +1528,8 @@ JSON만:`
         }
       }
     } catch (e) {
-      finalText = `[처리 오류] ${(e as Error).message}`
-      aiResult = finalText
+      finalText = '파일 처리 중 오류가 생겼어요.'
+      aiResult = `[Attachment Error] ${(e as Error).message}`
       console.error('[Attachment] Processing error:', e)
     }
 

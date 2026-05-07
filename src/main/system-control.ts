@@ -479,7 +479,7 @@ export async function getCalendarEvents(period: 'today' | 'tomorrow' | 'week' = 
     const result = await osascript(script)
     return { success: true, message: result }
   } catch (e) {
-    return { success: false, message: `캘린더 조회 실패 (Calendar 앱 자동화 권한 필요): ${(e as Error).message}` }
+    return { success: false, message: '캘린더를 읽지 못했어요. 시스템 설정에서 캘린더 권한을 허용해주세요.' }
   }
 }
 
@@ -499,7 +499,7 @@ export async function addCalendarEvent(title: string, startTime?: string): Promi
     const result = await osascript(script)
     return { success: true, message: result }
   } catch (e) {
-    return { success: false, message: `일정 추가 실패: ${(e as Error).message}` }
+    return { success: false, message: '일정 추가에 실패했어요. 캘린더 권한을 확인해주세요.' }
   }
 }
 
@@ -531,7 +531,7 @@ export async function searchContacts(name: string): Promise<CommandResult> {
     const result = await osascript(script)
     return { success: true, message: result.trim() }
   } catch (e) {
-    return { success: false, message: `연락처 검색 실패 (연락처 앱 권한 필요): ${(e as Error).message}` }
+    return { success: false, message: '연락처를 검색하지 못했어요. 시스템 설정에서 연락처 권한을 허용해주세요.' }
   }
 }
 
@@ -549,7 +549,7 @@ export async function getWeather(location = '서울'): Promise<CommandResult> {
     }
     throw new Error('empty response')
   } catch (e) {
-    return { success: false, message: `날씨 조회 실패: ${(e as Error).message}` }
+    return { success: false, message: '날씨 정보를 가져오지 못했어요. 잠시 후 다시 해볼게요.' }
   }
 }
 
@@ -565,6 +565,6 @@ export async function addReminder(title: string, dueDate?: string): Promise<Comm
     await osascript(script)
     return { success: true, message: `리마인더 추가했어요: "${title}"` }
   } catch (e) {
-    return { success: false, message: `리마인더 추가 실패: ${(e as Error).message}` }
+    return { success: false, message: '리마인더 추가에 실패했어요. 리마인더 권한을 확인해주세요.' }
   }
 }
