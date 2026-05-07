@@ -1177,6 +1177,14 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\brefactor\b/gi, '리팩토링'],
   [/\brollback\b/gi, '롤백'],
   [/\brevert\b/gi, '되돌리기'],
+  [/\binstall\b/gi, '설치'],
+  [/\buninstall\b/gi, '제거'],
+  [/\bstart\b/gi, '시작'],
+  [/\brun\b/g, '실행'],
+  [/\blint\b/g, '린트'],
+  [/\bformat\b/g, '포맷'],
+  [/\bwatch\b/g, '감시'],
+  [/\bexport\b/g, '내보내기'],
   [/\brelease\b/gi, '릴리즈'],
   // Claude 모델 티어 (claude-sonnet 등 복합어보다 앞에)
   [/\bSonnet\b/g, '소넷'],
@@ -1237,6 +1245,17 @@ export function sanitizeTTSText(raw: string): string {
   t = t.replace(/localhost:\d+/g, '로컬 서버')
   // 9b. 단독 :포트번호 (4-5자리, 앞에 숫자 없음) → 제거 (시간 HH:MM 제외)
   t = t.replace(/(?<![0-9]):\d{4,5}\b/g, '')
+
+  // 9c. CLI 플래그 (--flag-name, -f) → 제거 (npm/git/curl 등 옵션 TTS 부적합)
+  t = t.replace(/\s--?[a-z][a-z0-9-]*(?:=[^\s]+)?/gi, '')
+
+  // 9d. caret/tilde 버전 앞 기호 제거 (^18.2.0 → 18.2.0, ~3.0 → 3.0)
+  t = t.replace(/[\^~](?=\d)/g, '')
+
+  // 9e. ASCII 큰따옴표로 감싼 짧은 코드 값 → 제거 ("value", "react" 등)
+  // 단, 한국어가 안에 없고 10자 이내인 경우만
+  t = t.replace(/"([^"\n]{1,15})"(?=\s*[:,)])/g, (_, inner) =>
+    /[가-힣]/.test(inner) ? `"${inner}"` : '')
 
   // 10. 마크다운 리스트 기호 (- / * / •) → 제거
   t = t.replace(/^[ \t]*[-*•]\s+/gm, '')
