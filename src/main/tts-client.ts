@@ -861,6 +861,10 @@ export function normalizeKoreanNumbers(text: string): string {
       if (v === 3) return ' 세제곱'
       return ' ' + toSinoKorean(v) + ' 제곱'
     })
+    // 유니코드 위첨자 (²→제곱, ³→세제곱, 나머지는 제거)
+    .replace(/²/g, ' 제곱')
+    .replace(/³/g, ' 세제곱')
+    .replace(/[⁰¹⁴⁵⁶⁷⁸⁹]/g, '')  // 0·1·4+ 승은 제거 (10⁶ 등 오변환 방지)
     // 시간·기간 단위 (기존 패턴에 없는 시간/주/배)
     // 주의: 한국어는 \W이므로 한국어로 끝나는 패턴에 trailing \b 사용 불가
     .replace(/(?<!\.)\b(\d+)시간/g,    (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 시간' })
@@ -982,6 +986,8 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bNode\.js\b|\bNodeJS\b/g, '노드제이에스'],
   [/\bNode\b/g, '노드'],
   [/\bNova\b/g, '노바'],
+  [/\bNode\.js\b/gi, '노드제이에스'],
+  [/\bnode\b/g, '노드'],          // Node.js (소문자)
   [/\bnpm\b/g, '엔피엠'],         // Node 패키지 관리자
   [/\bbrew\b/g, '브루'],          // Homebrew (macOS)
   [/\bdocker\b/gi, '도커'],          // 컨테이너
