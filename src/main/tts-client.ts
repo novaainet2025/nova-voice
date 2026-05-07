@@ -747,9 +747,12 @@ export function normalizeKoreanNumbers(text: string): string {
     })
     .replace(/(?<!\.)\b(\d+)개/g,      (_, n) => { const v = parseInt(n); return v < 10000 ? toNativeKorean(v) + ' 개' : n + '개' })
     .replace(/(?<!\.)\b(\d+)명/g,      (_, n) => { const v = parseInt(n); return v < 10000 ? toNativeKorean(v) + ' 명' : n + '명' })
-    // 살 (나이) · 마리 (동물) — 순우리말 수사
+    // 살 (나이) · 마리 (동물) · 장 (종이) · 권 (책) · 잔 (음료) — 순우리말 수사
     .replace(/(?<!\.)\b(\d+)살/g,      (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 살' })
     .replace(/(?<!\.)\b(\d+)마리/g,    (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 마리' })
+    .replace(/(?<!\.)\b(\d+)장/g,      (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 장' })
+    .replace(/(?<!\.)\b(\d+)권/g,      (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 권' })
+    .replace(/(?<!\.)\b(\d+)잔/g,      (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 잔' })
     // 소수점 포함 단위 — 정수 패턴보다 먼저 처리 (3.5GB, 99.7% 등)
     .replace(/(?<![\d.])\b(\d+)\.(\d+)%/g,   (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 퍼센트')
     .replace(/(?<![\d.])\b(\d+)\.(\d+)GB/gi, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + '기가바이트')
