@@ -732,10 +732,16 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d{1,2})초/g,  (_, n) => toSinoKorean(parseInt(n)) + '초')
     .replace(/(?<!\.)\b(\d+)개/g,      (_, n) => { const v = parseInt(n); return v < 10000 ? toSinoKorean(v) + '개' : n + '개' })
     .replace(/(?<!\.)\b(\d+)명/g,      (_, n) => { const v = parseInt(n); return v < 10000 ? toSinoKorean(v) + '명' : n + '명' })
+    // 소수점 포함 단위 — 정수 패턴보다 먼저 처리 (3.5GB, 99.7% 등)
+    .replace(/(?<![\d.])\b(\d+)\.(\d+)%/g,   (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 퍼센트')
+    .replace(/(?<![\d.])\b(\d+)\.(\d+)GB/gi, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + '기가바이트')
+    .replace(/(?<![\d.])\b(\d+)\.(\d+)MB/gi, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + '메가바이트')
     .replace(/(?<!\.)\b(\d+)%/g,       (_, n) => toSinoKorean(parseInt(n)) + ' 퍼센트')
     .replace(/(?<!\.)\b(\d+)GB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '기가바이트')
     .replace(/(?<!\.)\b(\d+)MB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '메가바이트')
     .replace(/(?<!\.)\b(\d+)KB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '킬로바이트')
+    // ms (밀리초) 단위
+    .replace(/(?<!\.)\b(\d+)ms\b/gi,   (_, n) => toSinoKorean(parseInt(n)) + '밀리초')
     // 천단위 콤마 숫자 (1,000 / 50,000 / 1,234,567) → 한국어
     .replace(/\b(\d{1,3}(?:,\d{3})+)\b/g, (m) => {
       const v = parseInt(m.replace(/,/g, ''))
