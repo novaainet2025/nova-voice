@@ -132,7 +132,7 @@ export async function volumeUp(amount = 10): Promise<CommandResult> {
       const current = await osascript('output volume of (get volume settings)')
       const newVol = Math.min(100, parseInt(current) + amount)
       await osascript(`set volume output volume ${newVol}`)
-      return { success: true, message: `볼륨 ${newVol}%` }
+      return { success: true, message: `볼륨을 ${newVol}%로 올렸어요.` }
     } else if (isWin) {
       await powershell(`$obj = New-Object -com wscript.shell; ${'$'}obj.SendKeys([char]175)`)
       return { success: true, message: '볼륨 올렸어요.' }
@@ -149,7 +149,7 @@ export async function volumeDown(amount = 10): Promise<CommandResult> {
       const current = await osascript('output volume of (get volume settings)')
       const newVol = Math.max(0, parseInt(current) - amount)
       await osascript(`set volume output volume ${newVol}`)
-      return { success: true, message: `볼륨 ${newVol}%` }
+      return { success: true, message: `볼륨을 ${newVol}%로 낮췄어요.` }
     } else if (isWin) {
       await powershell(`$obj = New-Object -com wscript.shell; $obj.SendKeys([char]174)`)
       return { success: true, message: '볼륨 낮췄어요.' }

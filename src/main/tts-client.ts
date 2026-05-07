@@ -765,6 +765,9 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d+)GB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '기가바이트')
     .replace(/(?<!\.)\b(\d+)MB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '메가바이트')
     .replace(/(?<!\.)\b(\d+)KB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '킬로바이트')
+    // 기가/메가 (한국어로 이미 쓰인 단위, e.g. 메모리 정보 메시지)
+    .replace(/(?<!\.)\b(\d+)기가/g,    (_, n) => toSinoKorean(parseInt(n)) + '기가')
+    .replace(/(?<!\.)\b(\d+)메가/g,    (_, n) => toSinoKorean(parseInt(n)) + '메가')
     // ms (밀리초) 단위
     .replace(/(?<!\.)\b(\d+)ms\b/gi,   (_, n) => toSinoKorean(parseInt(n)) + '밀리초')
     // 시간·기간 단위 (기존 패턴에 없는 시간/주/배)
