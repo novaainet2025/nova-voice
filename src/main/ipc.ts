@@ -1039,8 +1039,8 @@ JSON만:`
                 throw new Error(`Gemini Vision in cooldown (${snap?.cooldownRemainSec}s remain)`)
               }
               const screenPrompt = text
-                ? `오늘은 ${nowDate}입니다.\n사용자 질문: "${text}"\n\n위 질문의 맥락에서 화면을 분석해줘. 핵심만 2-3문장으로 자연스럽게.`
-                : `오늘은 ${nowDate}입니다.\n이 화면에 무엇이 있는지 핵심만 2-3문장으로 자연스럽게 설명해줘.`
+                ? `오늘은 ${nowDate}입니다. ${VOICE_ANSWER_GUIDE}\n사용자 질문: "${text}"\n\n위 질문의 맥락에서 화면을 분석해줘.`
+                : `오늘은 ${nowDate}입니다. ${VOICE_ANSWER_GUIDE}\n이 화면에 무엇이 있는지 설명해줘.`
               const visionResult = await processImageWithGemini(base64, 'image/png', screenPrompt)
               recordProviderSuccess(geminiKey)
               const stripped = stripMd(visionResult)
