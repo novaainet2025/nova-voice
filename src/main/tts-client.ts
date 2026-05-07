@@ -805,6 +805,8 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\d)(\d+)\.(\d+)점/g, (_, n, d) =>
       toSinoKorean(parseInt(n)) + '점' + d.split('').map((c: string) => toSinoKorean(parseInt(c))).join('') + ' 점')
     .replace(/(?<![\d.])\b(\d+)\.(\d+)%/g,   (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 퍼센트')
+    // FPS (프레임레이트) — \bfps\b는 \d+fps에서 단어경계 없어 BRAND_KO 매칭 실패, 여기서 처리
+    .replace(/(?<!\.)\b(\d+)fps\b/gi,   (_, n) => toSinoKorean(parseInt(n)) + ' 에프피에스')
     // Gbps/Mbps/Kbps (네트워크 속도) — GB/MB/KB보다 반드시 앞에 처리 (GB가 먼저 매칭되면 bps 잔류)
     .replace(/(?<!\.)\b(\d+)Gbps/gi,   (_, n) => toSinoKorean(parseInt(n)) + ' 기가비피에스')
     .replace(/(?<!\.)\b(\d+)Mbps/gi,   (_, n) => toSinoKorean(parseInt(n)) + ' 메가비피에스')
@@ -833,10 +835,17 @@ export function normalizeKoreanNumbers(text: string): string {
       const v = Math.round(parseFloat(n) * 1000)
       return (Number.isSafeInteger(v) ? toSinoKorean(v) : n + '000') + ' '
     })
-    // 배수 표현: 2x/3x/N× → 두 배/세 배/N 배 (배율, 승수)
-    .replace(/(?<!\d)(\d+)\s*[xX×]\s*/g, (_, n) => {
+    // 배수 표현: 2x/3x/N× → 두 배/세 배/N 배 (소수점 뒤 자리 오매칭 방지: (?<![\d.]))
+    .replace(/(?<![\d.])(\d+)\s*[xX×]\s*/g, (_, n) => {
       const v = parseInt(n)
       return (v <= 20 ? toNativeKorean(v) : toSinoKorean(v)) + ' 배 '
+    })
+    // 거듭제곱 표기: ^2 → 제곱, ^3 → 세제곱, ^N → N제곱
+    .replace(/\^(\d+)/g, (_, n) => {
+      const v = parseInt(n)
+      if (v === 2) return ' 제곱'
+      if (v === 3) return ' 세제곱'
+      return ' ' + toSinoKorean(v) + ' 제곱'
     })
     // 시간·기간 단위 (기존 패턴에 없는 시간/주/배)
     // 주의: 한국어는 \W이므로 한국어로 끝나는 패턴에 trailing \b 사용 불가
@@ -844,8 +853,8 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d+)주일/g,    (_, n) => toSinoKorean(parseInt(n)) + '주일')
     // 주 (week) 단위: 2주 → 이 주, 3주 → 삼 주
     .replace(/(?<!\.)\b(\d+)주(?!\s*소|일|차)/g, (_, n) => toSinoKorean(parseInt(n)) + ' 주')
-    .replace(/(?<![\d.])\b(\d+)\.(\d+)배/g, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + '배')
-    .replace(/(?<!\.)\b(\d+)배/g,      (_, n) => toSinoKorean(parseInt(n)) + '배')
+    .replace(/(?<![\d.])\b(\d+)\.(\d+)배/g, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 배')
+    .replace(/(?<!\.)\b(\d+)배/g,      (_, n) => toSinoKorean(parseInt(n)) + ' 배')
     // 한국어 단위 사이 ~ (물결표 범위) 후처리: 백 밀리초~이백 밀리초 → 백 밀리초에서 이백 밀리초
     .replace(/([가-힣])\s*~\s*([가-힣\d])/g, '$1에서 $2')
     // 금액 단위 — 콤마 숫자 + 원 (1,500원 → 천오백 원, 350만원 → 삼백오십만 원)
@@ -1041,6 +1050,7 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bbackend\b|\bback-end\b/gi,     '백엔드'],
   [/\bmiddleware\b/gi, '미들웨어'],
   [/\bheadless\b/gi, '헤드리스'],
+  [/\bfps\b/gi, '에프피에스'],
   // 혼합 대소문자·하이픈 패턴 (ABBR_MAP/PascalCase 규칙으로 불가)
   [/\bWi-Fi\b/gi, '와이파이'],
   [/\bWebRTC\b/g, '웹알티씨'],
