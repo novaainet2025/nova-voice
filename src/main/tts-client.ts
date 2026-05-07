@@ -977,6 +977,7 @@ export function sanitizeTTSText(raw: string): string {
   t = t.replace(/←/g, '에서')
   t = t.replace(/↑/g, '위로')
   t = t.replace(/↓/g, '아래로')
+  t = t.replace(/[↗↘↙↖]/g, '')   // 대각선 방향 화살표 제거 (날씨 바람 방향 등)
   t = t.replace(/[✓✔☑]/g, '완료')
   t = t.replace(/[★☆✦✧]/g, '')
   t = t.replace(/[…⋯]/g, '.')
@@ -986,6 +987,16 @@ export function sanitizeTTSText(raw: string): string {
   t = t.replace(/[♪♫♬]/g, '')
   t = t.replace(/[❌✗]/g, '실패')
   t = t.replace(/[⚠⚡]/g, '')
+  // 15b. 온도 (날씨 wttr.in 형식 등) — 양수=영상, 음수=영하
+  t = t.replace(/([+-])(\d+(?:\.\d+)?)°C/g, (_, sign, n) =>
+    (sign === '+' ? '영상 ' : '영하 ') + Math.round(parseFloat(n)) + '도')
+  t = t.replace(/(\d+(?:\.\d+)?)°C/g, (_, n) => Math.round(parseFloat(n)) + '도')
+  t = t.replace(/([+-])(\d+(?:\.\d+)?)°F/g, (_, sign, n) =>
+    (sign === '+' ? '영상 ' : '영하 ') + Math.round(parseFloat(n)) + '도 화씨')
+  t = t.replace(/(\d+(?:\.\d+)?)°F/g, (_, n) => Math.round(parseFloat(n)) + '도 화씨')
+  // 15c. 속도/크기 단위 — px는 제거(UI값), km/h는 한국어
+  t = t.replace(/\b\d+px\b/g, '')
+  t = t.replace(/(\d+(?:\.\d+)?)km\/h/gi, (_, n) => '시속 ' + Math.round(parseFloat(n)) + '킬로미터')
 
   // 16. 버전 번호 (v1.0.0, v2.3, v18, @10.2.0) → "버전"
   t = t.replace(/\bv\d+(?:\.\d+){0,3}\b/gi, '버전')
