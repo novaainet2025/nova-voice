@@ -875,6 +875,9 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bMacOS\b|\bmacOS\b/g, '맥'],
   [/\bWindows\b/g, '윈도우'],
   [/\bLinux\b/g, '리눅스'],
+  // GitHub 복합 패턴 먼저 (단순 GitHub 패턴보다 앞에 와야 함)
+  [/\bGitHub\s*Actions\b/g, '깃허브 액션스'],
+  [/\bGitHub\s*Copilot\b/g, '깃허브 코파일럿'],
   [/\bGitHub\b/g, '깃허브'],
   [/\bgit\b/g, '깃'],           // 소문자 git (shell 명령어 컨텍스트)
   [/\bGit\b/g, '깃'],
@@ -920,9 +923,6 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   // 복합 약어 (슬래시 포함 — ABBR_MAP 개별 처리 불가)
   [/\bCI\/CD\b/g, '씨아이 씨디'],
   [/\bA\/B\s*테스트/g, '에이비 테스트'],
-  // GitHub 서비스
-  [/\bGitHub\s*Actions\b/g, '깃허브 액션스'],
-  [/\bGitHub\s*Copilot\b/g, '깃허브 코파일럿'],
   // AWS 서비스 (숫자 포함 → ABBR_MAP 불가, 여기서 처리)
   [/\bEC2\b/g, '이씨투'],
   [/\bS3\b/g, '에스쓰리'],
