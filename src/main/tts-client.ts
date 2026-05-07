@@ -786,6 +786,8 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bXcode\b/g, '엑스코드'],
   [/\bAndroid\b/g, '안드로이드'],
   [/\bFlutter\b/g, '플러터'],
+  [/\biOS\b/g, '아이오에스'],
+  [/\bSwiftUI\b/g, '스위프트유아이'],
   [/\bVercel\b/g, '버셀'],
   [/\bNext\.js\b|\bNextjs\b/g, '넥스트제이에스'],
   [/\bSvelteKit\b|\bSvelte\b/g, '스벨트'],
@@ -871,8 +873,8 @@ export function sanitizeTTSText(raw: string): string {
   t = t.replace(/[❌✗]/g, '실패')
   t = t.replace(/[⚠⚡]/g, '')
 
-  // 16. 버전 번호 (v1.0.0, v2.3, v0.5.12) → "버전"
-  t = t.replace(/\bv\d+(?:\.\d+){1,3}\b/gi, '버전')
+  // 16. 버전 번호 (v1.0.0, v2.3, v18, v20) → "버전"
+  t = t.replace(/\bv\d+(?:\.\d+){0,3}\b/gi, '버전')
 
   // 17. 번호 목록 (1. / 2) / 가. 등) → 제거
   t = t.replace(/^\s*\d+[.)]\s+/gm, '')
@@ -891,6 +893,12 @@ export function sanitizeTTSText(raw: string): string {
 
   // 20. camelCase 식별자 (소문자 시작, 대문자 포함) → 제거
   t = t.replace(/\b[a-z][a-z0-9]*[A-Z]\w*\b/g, '')
+
+  // 20b. PascalCase 복합 식별자 (두 단어+ 합성, 한국어 컨텍스트) → 제거
+  // BrowserWindow, ElectronApp 등 코드 API 이름 (Brand/Abbr 맵 처리 이후 잔여분)
+  if (/[가-힣]/.test(t)) {
+    t = t.replace(/\b[A-Z][a-z]{2,}(?:[A-Z][a-z]+)+\b/g, '')
+  }
 
   // 21. 한국어 컨텍스트 숫자 정규화 (50%→오십퍼센트, 2026년→이천이십육년 등)
   if (/[가-힣]/.test(t)) {
