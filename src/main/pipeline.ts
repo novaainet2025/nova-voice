@@ -99,7 +99,7 @@ function splitSentences(text: string): string[] {
     .replace(/\b([a-z])\.\x00/g, '$1. ')
     .split('\x00')
     .map(s => s.trim())
-    .filter(s => s.length > 3)  // 너무 짧은 조각 제거
+    .filter(s => s.length > 2)  // 너무 짧은 조각 제거 (>2: "완료!" 같은 3자 감탄사 보존)
 }
 
 /**
