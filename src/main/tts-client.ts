@@ -1211,8 +1211,18 @@ export function sanitizeTTSText(raw: string): string {
     return (map[mod.toLowerCase()] || mod) + ' '
   })
 
-  // 16. 버전 번호 (v1.0.0, v2.3, v18, @10.2.0) → "버전"
-  t = t.replace(/\bv\d+(?:\.\d+){0,3}\b/gi, '버전')
+  // 15g. Q1/Q2/Q3/Q4 분기 → 한국어
+  t = t.replace(/\bQ([1-4])\b/g, (_, n) => ['일', '이', '삼', '사'][parseInt(n) - 1] + '분기')
+  // 15h. N+1 패턴 (개발 용어)
+  t = t.replace(/\bN\+(\d+)\b/g, (_, n) => '엔 플러스 ' + toSinoKorean(parseInt(n)))
+  // 15i. p50/p95/p99 퍼센타일 표기 → 피오십 등
+  t = t.replace(/\bp(\d{1,3})\b/g, (_, n) => '피' + toSinoKorean(parseInt(n)))
+
+  // 16. 버전 번호 (v1.0.0, v2.3, v18, @10.2.0) → "버전 일점오점이" 형태
+  t = t.replace(/\bv(\d+(?:\.\d+){0,3})\b/gi, (_, ver) => {
+    const parts = ver.split('.')
+    return '버전 ' + parts.map((p: string) => toSinoKorean(parseInt(p))).join('점')
+  })
   t = t.replace(/@\d+(?:\.\d+){0,3}\b/g, '')          // npm@10 패키지 버전 태그 제거
 
   // 17. 번호 목록 (1. / 2) / 가. 등) → 제거
