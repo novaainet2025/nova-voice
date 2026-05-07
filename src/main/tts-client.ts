@@ -352,7 +352,7 @@ function splitForQwen3Streaming(text: string, maxLen = 100): string[] {
   // 1단계: 강한 문장 경계에서 분리 (.!?。！？ 및 줄바꿈)
   // maxLen 100 → 60보다 큰 청크 허용 → afplay 재시작 횟수 감소 → 문장 단위 자연스러운 발화
   const raw = text
-    .split(/(?<=[.!?。！？])\s+|(?<=\n)/)
+    .split(/(?<=[.!?。！？다요죠])\s+|(?<=\n)/)
     .map(s => s.trim())
     .filter(s => s.length > 0)
 

@@ -223,7 +223,7 @@ function prepareSpeakText(text: string, aiResult?: string): string | null {
       aiResult?.startsWith('[Hive]')) return null
 
   // 코드 블록 포함 시 건너뜀
-  if (text.includes('```') || (text.includes('    ') && text.includes('\n'))) return null
+  if (text.includes('```') || (text.includes('    ') && text.includes('\n')) || /\bconst\b|\bfunction\b|\bimport\b|\breturn\b/.test(text)) return null
 
   // 파일 경로 포함 시 건너뜀 (/var/folders/, /tmp/, ~/..., C:\...)
   if (/\/(?:var|tmp|usr|etc|home|Users|private|Library|Applications)\//i.test(text)) return null
@@ -754,9 +754,18 @@ JSON만:`
               if (usePTYClaude) {
                 // ── PTY Claude 직접 통합 — 응답 캡처 후 TTS ──────────────────
                 askClaudeViaPTY(text, (response) => {
+                  // 코드/경로 포함 시 자연어 요약만 (핵심만 간결하게)
+                  const hasCode = response.includes('```') || response.includes('function ') || response.includes('const ') || response.includes('  at ')
+                  const hasPath = /\/(?:Users|home|var|tmp|src|lib)\//i.test(response)
+                  if (hasCode || hasPath) {
+                    smartSpeak('완료됐어요. 화면에서 확인해주세요.', { lang: 'ko' }).catch(() => {})
+                    return
+                  }
                   const stripped = sanitizeTTSText(response)
-                  const firstSent = stripped.split(/(?<=[.!?。요다])\s/)[0] || stripped
-                  const ttsSnippet = firstSent.length <= 300 ? firstSent : firstSent.substring(0, 300)
+                  // 첫 완성 문장 최대 80자 (이전 300자)
+                  const ptySentences = stripped.split(/(?<=[.!?。요다])\s+/)
+                  const firstSent = ptySentences[0]?.trim() || stripped.substring(0, 80)
+                  const ttsSnippet = firstSent.length <= 80 ? firstSent : firstSent.substring(0, 80)
                   if (ttsSnippet.length > 5) {
                     smartSpeak(ttsSnippet, { lang: 'ko' }).catch(() => {})
                     debugBroadcast('success', `[PTY-Claude] TTS: "${ttsSnippet.substring(0, 60)}"`)
@@ -1066,7 +1075,7 @@ JSON만:`
               const stripped = stripMd(visionResult)
               // 첫 완성 문장 추출 (최대 300자) — 전 프로바이더 일관성
               const firstSentV = stripped.split(/(?<=[.!?。요다])\s/)[0] || stripped
-              const ttsVision = firstSentV.length <= 300 ? firstSentV : firstSentV.substring(0, 300)
+              const ttsVision = firstSentV.length <= 100 ? firstSentV : '화면 분석이 완료됐어요. 화면에서 확인해주세요.'
               console.log(`[Smart→Screen] "${ttsVision.substring(0, 80)}..."`)
               debugBroadcast('success', `[Screen] 분석 완료: "${ttsVision.substring(0, 120)}"`)
               smartSpeak(ttsVision, { lang: 'ko' }).catch(e => console.error('[TTS] Screen:', (e as Error).message))
