@@ -902,6 +902,10 @@ export function sanitizeTTSText(raw: string): string {
   // 18b. 영문 대문자 약어 → 한국어 발음 (문장 중 자연스럽게 읽히도록)
   t = t.replace(/\b([A-Z]{2,6})\b/g, (m) => TTS_ABBR_MAP[m] || m)
 
+  // 18c. 6-15자 전대문자 기술 식별자 제거 (Node.js 오류 코드: ENOENT/EACCES/ECONNREFUSED 등)
+  // ABBR_MAP에 없는 6자+ 전대문자는 이미 Rule 18b에서 처리됐거나 제거 대상
+  t = t.replace(/\b[A-Z]{6,15}\b:?\s*/g, '')
+
   // 19. snake_case 식별자 → 제거 (한글 컨텍스트에서 코드 변수명)
   t = t.replace(/\b\w+_\w[\w_]*\b/g, '')
 
