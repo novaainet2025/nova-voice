@@ -716,6 +716,8 @@ export function normalizeKoreanNumbers(text: string): string {
 
   // (?<!\.) 소수점 이후 숫자는 단위 변환 금지 (3.8GB → "3.팔기가바이트" 방지)
   return text
+    // 숫자 범위 물결표 (3~5개→3 에서 5개, 이후 단위 패턴이 각각 처리)
+    .replace(/(\d+)\s*[~～]\s*(\d+)/g, '$1 에서 $2')
     // 전화번호 (0XX-XXXX-XXXX 또는 0X-XXXX-XXXX) — 숫자 변환 전 보호
     .replace(/\b(0\d{1,2})-(\d{3,4})-(\d{4})\b/g, (_, a, b, c) =>
       phoneToKo(a) + ' ' + phoneToKo(b) + ' ' + phoneToKo(c)
@@ -777,6 +779,14 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d+)주(?!일)/g,(_, n) => toSinoKorean(parseInt(n)) + '주')
     .replace(/(?<![\d.])\b(\d+)\.(\d+)배/g, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + '배')
     .replace(/(?<!\.)\b(\d+)배/g,      (_, n) => toSinoKorean(parseInt(n)) + '배')
+    // 금액 단위 — 콤마 숫자 + 원 (1,500원 → 천오백 원, 350만원 → 삼백오십만 원)
+    .replace(/\b(\d{1,3}(?:,\d{3})+)원/g, (_, m) => {
+      const v = parseInt(m.replace(/,/g, ''))
+      return (v < 100000000 ? toSinoKorean(v) : m) + ' 원'
+    })
+    .replace(/(?<!\.)\b(\d+)만\s*원/g, (_, n) => toSinoKorean(parseInt(n)) + '만 원')
+    .replace(/(?<!\.)\b(\d+)천\s*원/g, (_, n) => toSinoKorean(parseInt(n)) + '천 원')
+    .replace(/(?<!\.)\b(\d+)\s*원(?!\s*[가-힣])/g, (_, n) => { const v = parseInt(n); return v < 100000000 ? toSinoKorean(v) + ' 원' : n + '원' })
     // 천단위 콤마 숫자 (1,000 / 50,000 / 1,234,567) → 한국어
     .replace(/\b(\d{1,3}(?:,\d{3})+)\b/g, (m) => {
       const v = parseInt(m.replace(/,/g, ''))
