@@ -739,8 +739,17 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d{1,2})시/g,  (_, n) => toSinoKorean(parseInt(n)) + '시')
     .replace(/(?<!\.)\b(\d{1,2})분/g,  (_, n) => toSinoKorean(parseInt(n)) + '분')
     .replace(/(?<!\.)\b(\d{1,2})초/g,  (_, n) => toSinoKorean(parseInt(n)) + '초')
+    // 번째 (서수) — 1번째=첫 번째, 2~20번째=순우리말, 21+=한자어
+    .replace(/(?<!\.)\b(\d+)번째/g,    (_, n) => {
+      const v = parseInt(n)
+      if (v === 1) return '첫 번째'
+      return (v <= 20 ? toNativeKorean(v) : toSinoKorean(v)) + ' 번째'
+    })
     .replace(/(?<!\.)\b(\d+)개/g,      (_, n) => { const v = parseInt(n); return v < 10000 ? toNativeKorean(v) + ' 개' : n + '개' })
     .replace(/(?<!\.)\b(\d+)명/g,      (_, n) => { const v = parseInt(n); return v < 10000 ? toNativeKorean(v) + ' 명' : n + '명' })
+    // 살 (나이) · 마리 (동물) — 순우리말 수사
+    .replace(/(?<!\.)\b(\d+)살/g,      (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 살' })
+    .replace(/(?<!\.)\b(\d+)마리/g,    (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 마리' })
     // 소수점 포함 단위 — 정수 패턴보다 먼저 처리 (3.5GB, 99.7% 등)
     .replace(/(?<![\d.])\b(\d+)\.(\d+)%/g,   (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 퍼센트')
     .replace(/(?<![\d.])\b(\d+)\.(\d+)GB/gi, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + '기가바이트')
@@ -753,7 +762,7 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d+)ms\b/gi,   (_, n) => toSinoKorean(parseInt(n)) + '밀리초')
     // 시간·기간 단위 (기존 패턴에 없는 시간/주/배)
     // 주의: 한국어는 \W이므로 한국어로 끝나는 패턴에 trailing \b 사용 불가
-    .replace(/(?<!\.)\b(\d+)시간/g,    (_, n) => toSinoKorean(parseInt(n)) + '시간')
+    .replace(/(?<!\.)\b(\d+)시간/g,    (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 시간' })
     .replace(/(?<!\.)\b(\d+)주일/g,    (_, n) => toSinoKorean(parseInt(n)) + '주일')
     .replace(/(?<!\.)\b(\d+)주(?!일)/g,(_, n) => toSinoKorean(parseInt(n)) + '주')
     .replace(/(?<![\d.])\b(\d+)\.(\d+)배/g, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + '배')
