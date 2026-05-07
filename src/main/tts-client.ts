@@ -815,6 +815,9 @@ export function sanitizeTTSText(raw: string): string {
   t = t.replace(/_([^_\n]+)_/g, '$1')
 
   // 5. URL (http/https) → "링크 생략"
+  // 5a. 마크다운 링크 [텍스트](url) → 텍스트만 추출
+  t = t.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+  // 5b. 남은 URL (http/https)
   t = t.replace(/https?:\/\/[^\s)>\]"',]+/g, '링크 생략')
 
   // 6. 파일 경로 → 제거 (절대 /path/to/file 및 상대 src/main/ipc.ts 모두)
@@ -834,6 +837,8 @@ export function sanitizeTTSText(raw: string): string {
 
   // 9. localhost:포트 → "로컬 서버"
   t = t.replace(/localhost:\d+/g, '로컬 서버')
+  // 9b. 단독 :포트번호 (4-5자리, 앞에 숫자 없음) → 제거 (시간 HH:MM 제외)
+  t = t.replace(/(?<![0-9]):\d{4,5}\b/g, '')
 
   // 10. 마크다운 리스트 기호 (- / * / •) → 제거
   t = t.replace(/^[ \t]*[-*•]\s+/gm, '')
