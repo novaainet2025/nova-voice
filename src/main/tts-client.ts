@@ -897,6 +897,13 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bJest\b/g, '제스트'],
   [/\bVitest\b/g, '비테스트'],
   [/\bPlaywright\b/g, '플레이라이트'],
+  // 혼합 대소문자·하이픈 패턴 (ABBR_MAP/PascalCase 규칙으로 불가)
+  [/\bWi-Fi\b/gi, '와이파이'],
+  [/\bWebRTC\b/g, '웹알티씨'],
+  [/\bWebGL\b/g, '웹지엘'],
+  [/\bOAuth\b/g, '오어스'],
+  [/\bNaN\b/g, '낸'],            // Not a Number
+  [/\biOS\b/g, '아이오에스'],    // (기존 항목과 중복 방지용 — 이미 처리되면 skip)
   // AI 모델 (nova-voice TTS 엔진 포함)
   [/\bQwen\d*[-\s]?(?:TTS)?\b/gi, '취엔'],
   [/\bLlama\b/gi, '라마'],
@@ -997,6 +1004,14 @@ export function sanitizeTTSText(raw: string): string {
   // 15c. 속도/크기 단위 — px는 제거(UI값), km/h는 한국어
   t = t.replace(/\b\d+px\b/g, '')
   t = t.replace(/(\d+(?:\.\d+)?)km\/h/gi, (_, n) => '시속 ' + Math.round(parseFloat(n)) + '킬로미터')
+  // 15d. 키보드 단축키 (Ctrl+C, Cmd+S, Alt+Tab, Shift+Enter 등) → 한국어 수식어
+  t = t.replace(/\b(Ctrl|Cmd|Command|Alt|Option|Shift|Meta|Win)\s*\+\s*/gi, (_, mod) => {
+    const map: Record<string, string> = {
+      ctrl: '컨트롤', cmd: '커맨드', command: '커맨드',
+      alt: '알트', option: '옵션', shift: '쉬프트', meta: '메타', win: '윈도우키'
+    }
+    return (map[mod.toLowerCase()] || mod) + ' '
+  })
 
   // 16. 버전 번호 (v1.0.0, v2.3, v18, @10.2.0) → "버전"
   t = t.replace(/\bv\d+(?:\.\d+){0,3}\b/gi, '버전')
