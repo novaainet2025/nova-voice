@@ -772,7 +772,7 @@ JSON만:`
                     `다음 사용자 음성 명령을 실행해주세요. 필요한 경우 터미널 명령, 앱 실행, 파일 조작 등을 직접 수행하세요:\n\n사용자 명령: "${text}"`,
                     { notify: false }
                   )
-                  finalText = claudeResult || `[Claude 실행 완료: ${text}]`
+                  finalText = claudeResult || '완료됐어요.'
                   aiResult = `[Smart→Claude] ${finalText}`
                 } catch (e) {
                   console.error('[Smart→Claude] Failed:', (e as Error).message)
@@ -1501,8 +1501,8 @@ JSON만:`
         }
 
         if (!finalText) {
-          finalText = '[이미지 분석 실패] Gemini API 키(nco/.env)를 확인하거나 Ollama vision 모델(llava 등)을 설치해주세요.'
-          aiResult = finalText
+          finalText = '이미지 분석에 실패했어요. 에이아이 설정을 확인해주세요.'
+          aiResult = '[Attachment] 이미지 분석 실패 — Gemini API 키 또는 Ollama vision 모델 미설치'
         }
 
       } else {
