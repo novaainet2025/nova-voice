@@ -842,9 +842,12 @@ export function normalizeKoreanNumbers(text: string): string {
     // 주의: 한국어는 \W이므로 한국어로 끝나는 패턴에 trailing \b 사용 불가
     .replace(/(?<!\.)\b(\d+)시간/g,    (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 시간' })
     .replace(/(?<!\.)\b(\d+)주일/g,    (_, n) => toSinoKorean(parseInt(n)) + '주일')
-    .replace(/(?<!\.)\b(\d+)주(?!일)/g,(_, n) => toSinoKorean(parseInt(n)) + '주')
+    // 주 (week) 단위: 2주 → 이 주, 3주 → 삼 주
+    .replace(/(?<!\.)\b(\d+)주(?!\s*소|일|차)/g, (_, n) => toSinoKorean(parseInt(n)) + ' 주')
     .replace(/(?<![\d.])\b(\d+)\.(\d+)배/g, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + '배')
     .replace(/(?<!\.)\b(\d+)배/g,      (_, n) => toSinoKorean(parseInt(n)) + '배')
+    // 한국어 단위 사이 ~ (물결표 범위) 후처리: 백 밀리초~이백 밀리초 → 백 밀리초에서 이백 밀리초
+    .replace(/([가-힣])\s*~\s*([가-힣\d])/g, '$1에서 $2')
     // 금액 단위 — 콤마 숫자 + 원 (1,500원 → 천오백 원, 350만원 → 삼백오십만 원)
     .replace(/\b(\d{1,3}(?:,\d{3})+)원/g, (_, m) => {
       const v = parseInt(m.replace(/,/g, ''))
@@ -1032,6 +1035,12 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bAstro\b/g, '아스트로'],
   [/\bRemix\b/g, '리믹스'],
   [/\bNuxt\b/g, '넉스트'],
+  // 웹 개발 계층 용어
+  [/\bfullstack\b|\bfull-stack\b/gi, '풀스택'],
+  [/\bfrontend\b|\bfront-end\b/gi,   '프론트엔드'],
+  [/\bbackend\b|\bback-end\b/gi,     '백엔드'],
+  [/\bmiddleware\b/gi, '미들웨어'],
+  [/\bheadless\b/gi, '헤드리스'],
   // 혼합 대소문자·하이픈 패턴 (ABBR_MAP/PascalCase 규칙으로 불가)
   [/\bWi-Fi\b/gi, '와이파이'],
   [/\bWebRTC\b/g, '웹알티씨'],
