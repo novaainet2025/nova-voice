@@ -805,6 +805,12 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\d)(\d+)\.(\d+)점/g, (_, n, d) =>
       toSinoKorean(parseInt(n)) + '점' + d.split('').map((c: string) => toSinoKorean(parseInt(c))).join('') + ' 점')
     .replace(/(?<![\d.])\b(\d+)\.(\d+)%/g,   (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 퍼센트')
+    // Gbps/Mbps/Kbps (네트워크 속도) — GB/MB/KB보다 반드시 앞에 처리 (GB가 먼저 매칭되면 bps 잔류)
+    .replace(/(?<!\.)\b(\d+)Gbps/gi,   (_, n) => toSinoKorean(parseInt(n)) + ' 기가비피에스')
+    .replace(/(?<!\.)\b(\d+)Mbps/gi,   (_, n) => toSinoKorean(parseInt(n)) + ' 메가비피에스')
+    .replace(/(?<!\.)\b(\d+)Kbps/gi,   (_, n) => toSinoKorean(parseInt(n)) + ' 킬로비피에스')
+    // TB (테라바이트) — GB보다 앞에
+    .replace(/(?<!\.)\b(\d+)TB/gi,     (_, n) => toSinoKorean(parseInt(n)) + ' 테라바이트')
     .replace(/(?<![\d.])\b(\d+)\.(\d+)GB/gi, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 기가바이트')
     .replace(/(?<![\d.])\b(\d+)\.(\d+)MB/gi, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 메가바이트')
     .replace(/(?<!\.)\b(\d+)%/g,       (_, n) => toSinoKorean(parseInt(n)) + ' 퍼센트')
@@ -822,6 +828,16 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d+)건(?!\w)/g, (_, n) => toSinoKorean(parseInt(n)) + '건')
     // ms (밀리초) 단위
     .replace(/(?<!\.)\b(\d+)ms\b/gi,   (_, n) => toSinoKorean(parseInt(n)) + ' 밀리초')
+    // K 단위 (kilo=천): 5K명 → 오천 명, 10K개 → 만 개 (한국어 단위 앞에만 적용)
+    .replace(/(?<!\.)\b(\d+(?:\.\d+)?)K(?=\s*[명개건원])/g, (_, n) => {
+      const v = Math.round(parseFloat(n) * 1000)
+      return (Number.isSafeInteger(v) ? toSinoKorean(v) : n + '000') + ' '
+    })
+    // 배수 표현: 2x/3x/N× → 두 배/세 배/N 배 (배율, 승수)
+    .replace(/(?<!\d)(\d+)\s*[xX×]\s*/g, (_, n) => {
+      const v = parseInt(n)
+      return (v <= 20 ? toNativeKorean(v) : toSinoKorean(v)) + ' 배 '
+    })
     // 시간·기간 단위 (기존 패턴에 없는 시간/주/배)
     // 주의: 한국어는 \W이므로 한국어로 끝나는 패턴에 trailing \b 사용 불가
     .replace(/(?<!\.)\b(\d+)시간/g,    (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 시간' })
@@ -1025,6 +1041,7 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\biOS\b/g, '아이오에스'],    // (기존 항목과 중복 방지용 — 이미 처리되면 skip)
   // 기술 동사/행위 (한국어에 직접 붙어쓰이는 경우: merge됐어요 → 머지됐어요)
   [/\bmerge\b/gi, '머지'],
+  [/\bpatch\b/gi, '패치'],
   [/\bdeploy\b/gi, '배포'],
   [/\bpush\b/g, '푸시'],
   [/\bpull\b/g, '풀'],
@@ -1131,6 +1148,10 @@ export function sanitizeTTSText(raw: string): string {
   t = t.replace(/\bfalse\b/g, '거짓')
   t = t.replace(/\bnull\b/g, '널')
   t = t.replace(/\bundefined\b/g, '미정의')
+
+  // 13f. 상업 영어 표현 → 한국어
+  t = t.replace(/\boff\b/gi, '할인')   // 30% off → 30% 할인 (normalizeKoreanNumbers가 이후 변환)
+  t = t.replace(/\bfree\b/gi, '무료')
 
   // 14. 이모지 제거 (TTS 엔진이 이모지 발음 시 어색하거나 건너뜀)
   t = t.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FEFF}]/gu, '')
