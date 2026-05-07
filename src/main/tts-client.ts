@@ -793,6 +793,12 @@ const TTS_ABBR_MAP: Record<string, string> = {
   // 기타 프로토콜/개념
   WS: '웹소켓',     RPC: '알피씨',   RBAC: '알백',
   TTY: '티티와이',  REPL: '렙',      EOF: '파일 끝',
+  // 웹 아키텍처
+  SSR: '서버사이드렌더링', CSR: '클라이언트렌더링', SSG: '정적사이트생성',
+  PWA: '피더블유에이',    HMR: '핫모듈교체',
+  FE: '프론트엔드',  BE: '백엔드',  IDE: '아이디이',
+  // 확장 현실
+  AR: '증강현실',  VR: '가상현실',  XR: '확장현실',  RTC: '실시간통신',
 }
 
 // 영어 브랜드·제품명 → 한국어 음성 (한국어 TTS 엔진의 영어 발음 어색함 방지)
@@ -891,6 +897,15 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bJest\b/g, '제스트'],
   [/\bVitest\b/g, '비테스트'],
   [/\bPlaywright\b/g, '플레이라이트'],
+  // AI 모델 (nova-voice TTS 엔진 포함)
+  [/\bQwen\d*[-\s]?(?:TTS)?\b/gi, '취엔'],
+  [/\bLlama\b/gi, '라마'],
+  [/\bMistral\b/g, '미스트랄'],
+  [/\bGroq\b/g, '그록'],
+  [/\bPerplexity\b/g, '퍼플렉시티'],
+  [/\bHugging\s*Face\b/gi, '허깅페이스'],
+  [/\bKokoro\b/g, '코코로'],
+  [/\bCosyVoice\b/gi, '코지보이스'],
 ]
 
 export function sanitizeTTSText(raw: string): string {
