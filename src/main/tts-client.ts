@@ -1023,6 +1023,26 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bOAuth\b/g, '오어스'],
   [/\bNaN\b/g, '낸'],            // Not a Number
   [/\biOS\b/g, '아이오에스'],    // (기존 항목과 중복 방지용 — 이미 처리되면 skip)
+  // 기술 동사/행위 (한국어에 직접 붙어쓰이는 경우: merge됐어요 → 머지됐어요)
+  [/\bmerge\b/gi, '머지'],
+  [/\bdeploy\b/gi, '배포'],
+  [/\bpush\b/g, '푸시'],
+  [/\bpull\b/g, '풀'],
+  [/\bfork\b/g, '포크'],
+  [/\bclone\b/g, '클론'],
+  [/\bcommit\b/g, '커밋'],
+  [/\bbuild\b/g, '빌드'],
+  [/\bdebug\b/g, '디버그'],
+  [/\btest\b/gi, '테스트'],
+  [/\breview\b/gi, '리뷰'],
+  [/\brefactor\b/gi, '리팩토링'],
+  [/\brollback\b/gi, '롤백'],
+  [/\brevert\b/gi, '되돌리기'],
+  [/\brelease\b/gi, '릴리즈'],
+  // Claude 모델 티어 (claude-sonnet 등 복합어보다 앞에)
+  [/\bSonnet\b/g, '소넷'],
+  [/\bOpus\b/g, '오퍼스'],
+  [/\bHaiku\b/g, '하이쿠'],
   // AI 모델 (nova-voice TTS 엔진 포함)
   [/\bQwen\d*[-\s]?(?:TTS)?\b/gi, '취엔'],
   [/\bLlama\b/gi, '라마'],
@@ -1110,12 +1130,16 @@ export function sanitizeTTSText(raw: string): string {
   t = t.replace(/\btrue\b/g, '참')
   t = t.replace(/\bfalse\b/g, '거짓')
   t = t.replace(/\bnull\b/g, '널')
-  t = t.replace(/\bundefined\b/g, '정의되지 않음')
+  t = t.replace(/\bundefined\b/g, '미정의')
 
   // 14. 이모지 제거 (TTS 엔진이 이모지 발음 시 어색하거나 건너뜀)
   t = t.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FEFF}]/gu, '')
 
   // 15. 특수기호 → 자연스러운 표현 또는 제거
+  // 15a-pre: # 이슈/PR 번호 (PR #123 → PR 백이십삼호) — 정규화 전 # 제거
+  t = t.replace(/#(\d+)/g, '$1호')
+  // 15a-pre2: 숫자+ (버전 이상 표시: 18+ → 18 이상)
+  t = t.replace(/(\d)\+\s*(?=[가-힣]|$)/g, '$1 이상 ')
   t = t.replace(/→|▶|►/g, '로')
   t = t.replace(/←/g, '에서')
   t = t.replace(/↑/g, '위로')
@@ -1192,9 +1216,10 @@ export function sanitizeTTSText(raw: string): string {
   // 20c. 소문자 영어 단어(들) + 한국어 조사 → 영어 부분 제거 (한국어 컨텍스트 명령어: install react를 → 를)
   // 3자+ 소문자 영어 단어 시퀀스가 한국어 조사 바로 앞에 올 때 제거 (조사는 Rule 23c에서 정리)
   // ※ '이' 제외: 지시대명사와 주격조사 구분 불가 (exception이 → '이 발생' 오제거 방지)
+  // ※ '은/는' 제외: 기술 용어 (rate limit은) 오제거 방지
   // ※ 앞에 '.' 있으면 제외: URL 도메인 부분 오제거 방지 (example.com을 → example.을)
   if (/[가-힣]/.test(t)) {
-    t = t.replace(/(?<![.\w])[a-z][a-z0-9-]{2,}(?:\s+[a-z][a-z0-9-]{2,})*\s*(?=[을를가은는도만])/g, '')
+    t = t.replace(/(?<![.\w])[a-z][a-z0-9-]{2,}(?:\s+[a-z][a-z0-9-]{2,})*\s*(?=[을를도만])/g, '')
   }
 
   // 21. 한국어 컨텍스트 숫자 정규화 (50%→오십퍼센트, 2026년→이천이십육년 등)
