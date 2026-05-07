@@ -866,6 +866,8 @@ export function sanitizeTTSText(raw: string): string {
 
   // 13. 괄호 안 약어/코드 → 제거
   t = t.replace(/\([A-Za-z0-9_.-]{2,}\)/g, '')
+  // 13b. 대괄호 상태 태그 [오류], [Error], [Smart→...] → 제거
+  t = t.replace(/\[[^\]]{1,30}\]/g, '')
 
   // 14. 이모지 제거 (TTS 엔진이 이모지 발음 시 어색하거나 건너뜀)
   t = t.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FEFF}]/gu, '')

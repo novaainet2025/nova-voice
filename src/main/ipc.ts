@@ -776,8 +776,9 @@ JSON만:`
                   aiResult = `[Smart→Claude] ${finalText}`
                 } catch (e) {
                   console.error('[Smart→Claude] Failed:', (e as Error).message)
-                  finalText = `[오류] Claude 실행 실패: ${(e as Error).message}`
-                  aiResult = finalText
+                  finalText = '잠시 문제가 생겼어요.'
+                  aiResult = `[Smart→Claude Error] ${(e as Error).message}`
+                  smartSpeak('잠시 문제가 생겼어요.', { lang: 'ko' }).catch(() => {})
                 }
               }
             }
