@@ -290,7 +290,6 @@ export async function processWithNCOTask(prompt: string, ai: string): Promise<st
     if ((msg.includes('rate') || msg.includes('429') || msg.includes('Gemini')) && ai === 'gemini') {
       // Gemini 429 → fallback to claude-code
       console.warn('[NCO] Gemini rate limited, falling back to claude-code')
-      const novaVoiceDir = join(__dirname, '../../..')
       const result = await processWithNCO(prompt + '\n\n(Respond concisely)', 'claude-code')
       return result.text
     }

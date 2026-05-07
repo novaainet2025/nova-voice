@@ -106,7 +106,7 @@ export function createPTY(cols = 120, rows = 30): void {
       if (restartCount > MAX_RESTARTS) {
         console.error(`[PTY] Max restarts (${MAX_RESTARTS}) exceeded — giving up`)
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('pty:error', `PTY 재시작 ${MAX_RESTARTS}회 초과 — 수동 재시작 필요`)
+          mainWindow.webContents.send('pty:error', `터미널 재시작에 ${MAX_RESTARTS}번 실패했어요. 앱을 다시 시작해주세요.`)
         }
         restartCount = 0
       } else {
