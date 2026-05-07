@@ -810,8 +810,13 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\d)(\d+)\.(\d+)점/g, (_, n, d) =>
       toSinoKorean(parseInt(n)) + '점' + d.split('').map((c: string) => toSinoKorean(parseInt(c))).join('') + ' 점')
     .replace(/(?<![\d.])\b(\d+)\.(\d+)%/g,   (_, n, d) => toSinoKorean(parseInt(n)) + '점' + d.split('').map((c: string) => toSinoKorean(parseInt(c))).join('') + ' 퍼센트')
+    // GHz/MHz (주파수) — 숫자에 직접 붙으면 \b 미작동, 여기서 처리
+    .replace(/(?<!\.)\b(\d+(?:\.\d+)?)GHz\b/gi,  (_, n) => toSinoKorean(parseInt(n)) + ' 기가헤르츠')
+    .replace(/(?<!\.)\b(\d+(?:\.\d+)?)MHz\b/gi,  (_, n) => toSinoKorean(parseInt(n)) + ' 메가헤르츠')
     // FPS (프레임레이트) — \bfps\b는 \d+fps에서 단어경계 없어 BRAND_KO 매칭 실패, 여기서 처리
     .replace(/(?<!\.)\b(\d+)fps\b/gi,   (_, n) => toSinoKorean(parseInt(n)) + ' 에프피에스')
+    // 해상도 (1080p, 720p, 480p → 천팔십피, 칠백이십피 등)
+    .replace(/(?<!\.)\b(\d+)p\b/g,     (_, n) => toSinoKorean(parseInt(n)) + '피')
     // Gbps/Mbps/Kbps (네트워크 속도) — GB/MB/KB보다 반드시 앞에 처리 (GB가 먼저 매칭되면 bps 잔류)
     .replace(/(?<!\.)\b(\d+)Gbps/gi,   (_, n) => toSinoKorean(parseInt(n)) + ' 기가비피에스')
     .replace(/(?<!\.)\b(\d+)Mbps/gi,   (_, n) => toSinoKorean(parseInt(n)) + ' 메가비피에스')
@@ -957,6 +962,7 @@ const TTS_ABBR_MAP: Record<string, string> = {
   FE: '프론트엔드',  BE: '백엔드',  IDE: '아이디이',
   // 확장 현실
   AR: '증강현실',  VR: '가상현실',  XR: '확장현실',  RTC: '실시간통신',
+  HDR: '에이치디아르',  HDMI: '에이치디엠아이',  UHD: '유에이치디',  OLED: '오엘이디',
 }
 
 // 영어 브랜드·제품명 → 한국어 음성 (한국어 TTS 엔진의 영어 발음 어색함 방지)
@@ -1086,6 +1092,15 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bmiddleware\b/gi, '미들웨어'],
   [/\bheadless\b/gi, '헤드리스'],
   [/\bfps\b/gi, '에프피에스'],
+  [/\bGHz\b/g, '기가헤르츠'],
+  [/\bMHz\b/g, '메가헤르츠'],
+  [/\b4K\b/g, '사케이'],
+  [/\bsudo\b/g, '수도'],
+  [/\bchmod\b/g, '체인지모드'],
+  [/\bgrep\b/g, '그렙'],
+  [/\bcurl\b/g, '컬'],
+  [/\bpip\b/g, '핍'],
+  [/\bconda\b/g, '콘다'],
   // 혼합 대소문자·하이픈 패턴 (ABBR_MAP/PascalCase 규칙으로 불가)
   [/\bWi-Fi\b|\bWiFi\b/gi, '와이파이'],
   [/\bBluetooth\b/gi, '블루투스'],
