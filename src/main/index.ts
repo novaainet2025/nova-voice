@@ -6,7 +6,7 @@ import { registerShortcuts, unregisterAll } from './shortcuts'
 import { setupIPC, getRecordingState, setRecordingState, getSettings, cancelCurrentProcessing } from './ipc'
 import { initDB, closeDB } from './db'
 import { initWhisper, getAvailableModels, warmupWhisper } from './whisper'
-import { setOverlayWindow, rememberFrontApp, captureSelectedText, startFrontAppPoller } from './appState'
+import { setOverlayWindow, rememberFrontApp, captureSelectedText, startFrontAppPoller, stopFrontAppPoller } from './appState'
 import { initPipeline } from './pipeline'
 import { checkAccessibilityPermission } from './injector'
 import { initPTY, createPTY, destroyPTY } from './pty'
@@ -319,6 +319,7 @@ app.on('will-quit', () => {
   destroyTray()
   closeDB()
   destroyPTY()
+  stopFrontAppPoller()
 })
 
 const gotTheLock = app.requestSingleInstanceLock()

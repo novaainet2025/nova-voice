@@ -69,6 +69,13 @@ export function startFrontAppPoller(): void {
   }, 2000)
 }
 
+export function stopFrontAppPoller(): void {
+  if (_pollerTimer) {
+    clearInterval(_pollerTimer)
+    _pollerTimer = null
+  }
+}
+
 export function setOverlayWindow(win: BrowserWindow): void {
   overlayWindow = win
 }
