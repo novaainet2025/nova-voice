@@ -198,9 +198,9 @@ export async function openURL(url: string): Promise<CommandResult> {
     } else {
       await execFile('xdg-open', [url])
     }
-    return { success: true, message: `${url} 열기` }
+    return { success: true, message: '링크를 열었어요.' }
   } catch {
-    return { success: false, message: 'URL 열기 실패' }
+    return { success: false, message: '링크를 열지 못했어요.' }
   }
 }
 
@@ -250,15 +250,15 @@ export async function takeScreenshot(): Promise<CommandResult> {
     if (isMac) {
       const p = `/tmp/nova-voice-screenshot-${ts}.png`
       await execFile('screencapture', ['-x', p])
-      return { success: true, message: `스크린샷 저장: ${p}` }
+      return { success: true, message: '스크린샷을 저장했어요.' }
     } else if (isWin) {
       const p = `${os.tmpdir()}\\nova-voice-screenshot-${ts}.png`
       await powershell(`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::PrimaryScreen | ForEach-Object { $bmp = New-Object System.Drawing.Bitmap($_.Bounds.Width, $_.Bounds.Height); $g = [System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($_.Bounds.Location, [System.Drawing.Point]::Empty, $_.Bounds.Size); $bmp.Save('${p}'); }`)
-      return { success: true, message: `스크린샷 저장: ${p}` }
+      return { success: true, message: '스크린샷을 저장했어요.' }
     }
     return { success: false, message: '이 플랫폼에서는 지원되지 않아요.' }
   } catch {
-    return { success: false, message: '스크린샷 실패' }
+    return { success: false, message: '스크린샷 저장에 실패했어요.' }
   }
 }
 
