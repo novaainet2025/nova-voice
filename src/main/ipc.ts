@@ -833,19 +833,39 @@ JSON만:`
               return firstSentence.substring(0, 120)
             }
 
-            // NCO 결과 TTS 헬퍼 — 최종 결과 요약 읽기
-            const speakNCOResult = (resultText: string, label: string) => {
+            // NCO 결과 TTS 헬퍼 — 최종 결과를 자연어로 요약해 읽기
+            const speakNCOResult = (resultText: string, _label: string) => {
               if (!resultText?.trim()) return
               const stripped = stripMdForTTS(resultText)
-              const hasCode = resultText.includes('```') || resultText.includes('function ') || resultText.includes('const ')
-              if (hasCode) {
+
+              // 코드 블록 포함 → 완료 알림만 (코드는 TTS 부적합)
+              if (resultText.includes('```') || resultText.includes('function ') || resultText.includes('const ')) {
                 smartSpeak('완료됐어요. 화면에서 확인해주세요.', { lang: 'ko' }).catch(() => {})
                 return
               }
-              // 첫 완성 문장 추출 (최대 150자) — substring 대신 문장 경계에서 자름
-              const firstSentence = stripped.split(/(?<=[.!?。요다])\s/)[0] || stripped
-              const ttsSnippet = firstSentence.length <= 150 ? firstSentence : firstSentence.substring(0, 150)
-              smartSpeak(ttsSnippet, { lang: 'ko' }).catch(e => console.error('[TTS NCO]', (e as Error).message))
+
+              // 경로/URL 포함 → 완료 알림만
+              if (/\/(?:Users|home|var|tmp|src|lib)\//i.test(stripped) || /https?:\/\//.test(stripped)) {
+                smartSpeak('완료됐어요. 화면에서 확인해주세요.', { lang: 'ko' }).catch(() => {})
+                return
+              }
+
+              // 결론/핵심 문장 우선 추출
+              const conclusionMatch = stripped.match(/(?:결론|요약|핵심|최종|권장|추천|정리)[^.!?。]*[.!?。]/)
+              if (conclusionMatch) {
+                const snippet = conclusionMatch[0].substring(0, 80)
+                smartSpeak(snippet, { lang: 'ko' }).catch(() => {})
+                return
+              }
+
+              // 첫 완성 문장 추출 — 최대 70자, 그 이상은 "결과가 나왔어요."
+              const sentences = stripped.split(/(?<=[.!?。다요])\s+/)
+              const firstSentence = (sentences[0] || stripped).trim()
+              if (firstSentence.length >= 5 && firstSentence.length <= 70) {
+                smartSpeak(firstSentence, { lang: 'ko' }).catch(e => console.error('[TTS NCO]', (e as Error).message))
+              } else {
+                smartSpeak('결과가 나왔어요. 화면에서 확인해주세요.', { lang: 'ko' }).catch(() => {})
+              }
             }
 
             // 장기 작업(discuss/team/agent/hive): 백그라운드 실행 → IPC 즉시 반환

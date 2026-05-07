@@ -68,9 +68,9 @@ export async function pipelineSpeak(
   }
 
   try {
+    // speaker는 tts-client.ts mlxTTSVoice 전역 변수로 관리 — UI 이름 전달 금지
     await smartSpeak(speakText, {
       lang: config.ttsLang,
-      speaker: config.ttsSpeaker,
       speed: config.ttsSpeed
     })
   } catch (e) {
@@ -115,21 +115,19 @@ export async function pipelineSpeakStreaming(
 
   let speakText = sanitizeTTSText(text)
   if (type === 'error') speakText = `오류: ${speakText}`
+  if (!speakText.trim()) return
 
-  const sentences = splitSentences(speakText)
-  // Speak each sentence sequentially — smartSpeak queue handles concurrency
-  for (const sentence of sentences) {
-    if (sentence.trim().length > 2) {
-      try {
-        await smartSpeak(sentence, {
-          lang: config.ttsLang,
-          speaker: config.ttsSpeaker,
-          speed: config.ttsSpeed
-        })
-      } catch (e) {
-        console.error('[Pipeline-Stream] TTS failed:', (e as Error).message)
-      }
-    }
+  // 단일 smartSpeak 호출 — 내부 chunked pipeline(lookahead 2)이 문장 분리 처리
+  // 이전: sentence별 순차 합성 → 문장 사이 1-2초 무음 갭 발생
+  // 수정: 전체 텍스트를 한 번에 전달 → speakQwen3Chunked가 연속 재생
+  // speaker는 tts-client.ts의 mlxTTSVoice 전역 변수로 관리 — 여기서 UI 이름 전달 금지
+  try {
+    await smartSpeak(speakText, {
+      lang: config.ttsLang,
+      speed: config.ttsSpeed
+    })
+  } catch (e) {
+    console.error('[Pipeline-Stream] TTS failed:', (e as Error).message)
   }
 }
 

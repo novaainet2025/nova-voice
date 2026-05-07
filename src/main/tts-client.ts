@@ -348,8 +348,9 @@ export async function speak(text: string, options?: Partial<TTSOptions>): Promis
 // 텍스트를 짧은 청크로 분리 → chunk[i] 재생 중에 chunk[i+1] 동시 합성
 // 효과: 첫 소리 대기 1.5-2s (기존 4-8s), 전체 시간 30-50% 단축
 
-function splitForQwen3Streaming(text: string, maxLen = 60): string[] {
+function splitForQwen3Streaming(text: string, maxLen = 100): string[] {
   // 1단계: 강한 문장 경계에서 분리 (.!?。！？ 및 줄바꿈)
+  // maxLen 100 → 60보다 큰 청크 허용 → afplay 재시작 횟수 감소 → 문장 단위 자연스러운 발화
   const raw = text
     .split(/(?<=[.!?。！？])\s+|(?<=\n)/)
     .map(s => s.trim())
@@ -396,11 +397,13 @@ function splitForQwen3Streaming(text: string, maxLen = 60): string[] {
     }
   }
 
-  // 3단계: 너무 짧은 끝 청크는 앞에 합치기 (8자 이하 단독 청크 방지)
+  // 3단계: 짧은 청크를 앞에 합쳐 afplay 재시작 횟수 최소화 (25자 이하 → 병합)
+  // 이전: 8자 이하만 병합 → 단어 단위 재시작 갭 발생
+  // 수정: 25자 이하 청크는 앞에 병합 → 문장 단위 연속 재생
   const merged: string[] = []
   for (const chunk of chunks) {
     const prev = merged[merged.length - 1]
-    if (prev && chunk.length <= 8 && prev.length + chunk.length <= maxLen + 15) {
+    if (prev && chunk.length <= 25 && prev.length + chunk.length <= maxLen + 30) {
       merged[merged.length - 1] = prev + ' ' + chunk
     } else {
       merged.push(chunk)
@@ -749,6 +752,24 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/\b(0\d{1,2})-(\d{3,4})-(\d{4})\b/g, (_, a, b, c) =>
       phoneToKo(a) + ' ' + phoneToKo(b) + ' ' + phoneToKo(c)
     )
+    // 영어 월 이름 날짜 → 한국어 (May 7, 2026 / January 1st / 7 May 2026 등)
+    .replace(/\b(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s*(\d{4})\b/gi, (_, mon, d, y) => {
+      const EN_MONTH: Record<string, number> = { january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12, jan:1,feb:2,mar:3,apr:4,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 }
+      const mNum = EN_MONTH[mon.toLowerCase()]
+      return toSinoKorean(parseInt(y)) + '년 ' + toSinoKorean(mNum) + '월 ' + toSinoKorean(parseInt(d)) + '일'
+    })
+    // D Month YYYY (7 May 2026) 순서
+    .replace(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+(\d{4})\b/gi, (_, d, mon, y) => {
+      const EN_MONTH: Record<string, number> = { january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12, jan:1,feb:2,mar:3,apr:4,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 }
+      const mNum = EN_MONTH[mon.toLowerCase()]
+      return toSinoKorean(parseInt(y)) + '년 ' + toSinoKorean(mNum) + '월 ' + toSinoKorean(parseInt(d)) + '일'
+    })
+    // Month D (연도 없음: January 1st, March 3) → 월 일
+    .replace(/\b(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/gi, (_, mon, d) => {
+      const EN_MONTH: Record<string, number> = { january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12, jan:1,feb:2,mar:3,apr:4,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 }
+      const mNum = EN_MONTH[mon.toLowerCase()]
+      return toSinoKorean(mNum) + '월 ' + toSinoKorean(parseInt(d)) + '일'
+    })
     // YYYY-MM-DD 날짜 형식 → 년 월 일 (2026-05-07 → 이천이십육년 오월 칠일)
     .replace(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/g, (_, y, m, d) =>
       toSinoKorean(parseInt(y)) + '년 ' + toSinoKorean(parseInt(m)) + '월 ' + toSinoKorean(parseInt(d)) + '일'
@@ -1773,11 +1794,24 @@ async function _doSmartSpeak(text: string, options?: Partial<TTSOptions>): Promi
       if (await isTTSAvailable()) {
         const qwen3Speaker = getQwen3Voice(mlxTTSVoice)
         console.log(`[Qwen3-TTS] voice=${mlxTTSVoice} → speaker=${qwen3Speaker} (:7860)`)
-        await speakQwen3Chunked(text, { voice: 'qwen3-tts', speaker: qwen3Speaker, ...options })
+        // options.speaker는 UI 화자명('Ryan')이므로 qwen3Speaker(소문자 'ryan')를 항상 우선 적용
+        // 이전: { ...options } 스프레드가 qwen3Speaker를 덮어써 다른 화자 선택됨
+        const { speaker: _uiSpeaker, ...restOptions } = options || {}
+        await speakQwen3Chunked(text, { voice: 'qwen3-tts', speaker: qwen3Speaker, ...restOptions })
         return
       }
     } catch (e) {
       console.log('[Qwen3-TTS] Failed:', (e as Error).message)
+    }
+    // qwen3 실패 → mlx_ko (:8800) 폴백 (침묵 대신 목소리 유지)
+    try {
+      if (await isMLXAvailable()) {
+        console.log('[Qwen3→MLX-KO fallback] qwen3 실패, :8800 폴백')
+        await speakMLXKoChunked(text, mlxTTSVoice, MLX_KO_API, MLX_KO_MODEL)
+        return
+      }
+    } catch (e2) {
+      console.warn('[Qwen3→MLX-KO fallback] 폴백도 실패:', (e2 as Error).message)
     }
     console.warn('[Qwen3-TTS] 실패, 침묵 처리')
     return
