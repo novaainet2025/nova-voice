@@ -1085,6 +1085,10 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bAstro\b/g, '아스트로'],
   [/\bRemix\b/g, '리믹스'],
   [/\bNuxt\b/g, '넉스트'],
+  [/\bYAML\b/g, '야믈'],
+  [/\bMarkdown\b/gi, '마크다운'],
+  [/\basync\b/g, '어싱크'],
+  [/\bawait\b/g, '어웨이트'],
   // 웹 개발 계층 용어
   [/\bfullstack\b|\bfull-stack\b/gi, '풀스택'],
   [/\bfrontend\b|\bfront-end\b/gi,   '프론트엔드'],
