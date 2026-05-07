@@ -313,9 +313,9 @@ export async function showNotification(title: string, message: string): Promise<
         [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("VoiceType").Show($toast)
       `.trim())
     }
-    return { success: true, message: '알림 표시' }
+    return { success: true, message: '알림을 표시했어요.' }
   } catch {
-    return { success: false, message: '알림 실패' }
+    return { success: false, message: '알림 표시에 실패했어요.' }
   }
 }
 
@@ -328,9 +328,9 @@ export async function openFolder(folderPath: string): Promise<CommandResult> {
     } else {
       await execFile('xdg-open', [folderPath])
     }
-    return { success: true, message: `${folderPath} 열기` }
+    return { success: true, message: '폴더를 열었어요.' }
   } catch {
-    return { success: false, message: '폴더 열기 실패' }
+    return { success: false, message: '폴더를 열지 못했어요.' }
   }
 }
 
@@ -346,9 +346,9 @@ export async function sendKeystroke(key: string, modifiers: string[] = []): Prom
       const prefix = modifiers.map(m => modMap[m] || '').join('')
       await powershell(`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("${prefix}${key}")`)
     }
-    return { success: true, message: `키 입력: ${modifiers.join('+')}+${key}` }
+    return { success: true, message: '키 입력했어요.' }
   } catch {
-    return { success: false, message: '키 입력 실패' }
+    return { success: false, message: '키 입력에 실패했어요.' }
   }
 }
 
