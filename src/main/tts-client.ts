@@ -752,7 +752,7 @@ const TTS_ABBR_MAP: Record<string, string> = {
   TCP: '티씨피',   UDP: '유디피',   CI: '씨아이',  CD: '씨디',
   PM: '피엠',      CTO: '씨티오',   CEO: '씨이오',
   ROI: '아르오아이', KPI: '케이피아이', OKR: '오케이알',
-  ERR: '오류',    REF: '참조',    ENV: '환경',
+  ERR: '오류',    REF: '참조',    ENV: '환경', WARN: '경고',
   DEV: '개발',    PROD: '운영',   SRC: '소스',
   PWD: '현재 경로', DIR: '디렉토리', LTS: '장기지원',
 }
@@ -892,8 +892,9 @@ export function sanitizeTTSText(raw: string): string {
   t = t.replace(/[❌✗]/g, '실패')
   t = t.replace(/[⚠⚡]/g, '')
 
-  // 16. 버전 번호 (v1.0.0, v2.3, v18, v20) → "버전"
+  // 16. 버전 번호 (v1.0.0, v2.3, v18, @10.2.0) → "버전"
   t = t.replace(/\bv\d+(?:\.\d+){0,3}\b/gi, '버전')
+  t = t.replace(/@\d+(?:\.\d+){0,3}\b/g, '')          // npm@10 패키지 버전 태그 제거
 
   // 17. 번호 목록 (1. / 2) / 가. 등) → 제거
   t = t.replace(/^\s*\d+[.)]\s+/gm, '')
