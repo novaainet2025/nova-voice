@@ -819,6 +819,16 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d+)GB/gi,     (_, n) => toSinoKorean(parseInt(n)) + ' 기가바이트')
     .replace(/(?<!\.)\b(\d+)MB/gi,     (_, n) => toSinoKorean(parseInt(n)) + ' 메가바이트')
     .replace(/(?<!\.)\b(\d+)KB/gi,     (_, n) => toSinoKorean(parseInt(n)) + ' 킬로바이트')
+    // 속도 단위 (\dUnit 패턴, 단어경계 없어 BRAND_KO 미처리)
+    .replace(/(?<![\d.])\b(\d+(?:\.\d+)?)km\/h\b/gi, (_, n) => toSinoKorean(parseInt(n)) + ' 킬로미터')
+    .replace(/(?<![\d.])\b(\d+(?:\.\d+)?)m\/s\b/gi,  (_, n) => '초속 ' + toSinoKorean(parseInt(n)) + ' 미터')
+    // 액체 단위 (소수점 포함: 1.5L → 일점오 리터)
+    .replace(/(?<!\.)\b(\d+)\.(\d+)ml\b/gi, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 밀리리터')
+    .replace(/(?<!\.)\b(\d+)ml\b/gi,        (_, n) => toSinoKorean(parseInt(n)) + ' 밀리리터')
+    .replace(/(?<!\.)\b(\d+)\.(\d+)L\b/g,   (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 리터')
+    .replace(/(?<!\.)\b(\d+)L\b/g,          (_, n) => toSinoKorean(parseInt(n)) + ' 리터')
+    // 대기오염 PM 지수 (PM2.5, PM10) — \b 없어 여기서 처리
+    .replace(/\bPM(\d+(?:\.\d+)?)/g, (_, n) => '피엠 ' + (n.includes('.') ? toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(n.split('.')[1])) : toSinoKorean(parseInt(n))))
     // 기가/메가 (한국어로 이미 쓰인 단위, e.g. 메모리 정보 메시지)
     .replace(/(?<!\.)\b(\d+)기가/g,    (_, n) => toSinoKorean(parseInt(n)) + ' 기가')
     .replace(/(?<!\.)\b(\d+)메가/g,    (_, n) => toSinoKorean(parseInt(n)) + ' 메가')
@@ -1201,9 +1211,8 @@ export function sanitizeTTSText(raw: string): string {
   t = t.replace(/([+-])(\d+(?:\.\d+)?)°F/g, (_, sign, n) =>
     (sign === '+' ? '영상 ' : '영하 ') + Math.round(parseFloat(n)) + '도 화씨')
   t = t.replace(/(\d+(?:\.\d+)?)°F/g, (_, n) => Math.round(parseFloat(n)) + '도 화씨')
-  // 15c. 속도/크기 단위 — px는 제거(UI값), km/h는 한국어
+  // 15c. 속도/크기 단위 — px는 제거(UI값), km/h는 normalizeKoreanNumbers에서 처리
   t = t.replace(/\b\d+px\b/g, '')
-  t = t.replace(/(\d+(?:\.\d+)?)km\/h/gi, (_, n) => '시속 ' + Math.round(parseFloat(n)) + '킬로미터')
   // 15e. 통화 기호 → 한국어 (숫자 앞 $ € £ ¥)
   t = t.replace(/\$(\d[\d,]*(?:\.\d+)?)/g, (_, n) => n.replace(/,/g, '') + ' 달러')
   t = t.replace(/€(\d[\d,]*(?:\.\d+)?)/g,  (_, n) => n.replace(/,/g, '') + ' 유로')
