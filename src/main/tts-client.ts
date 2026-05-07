@@ -690,6 +690,15 @@ function toSinoKorean(n: number): string {
   return n.toString()
 }
 
+// 순우리말 수사 (물건/사람 카운팅) — 1~20: 한/두/세/네/다섯/여섯/일곱/여덟/아홉/열/열한/열두...스물
+// 21+: 한자어 fallback (이십일개 등 — 구어체서도 한자어 사용)
+const NATIVE_ONES = ['', '한', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열',
+                     '열한', '열두', '열세', '열네', '열다섯', '열여섯', '열일곱', '열여덟', '열아홉', '스물']
+function toNativeKorean(n: number): string {
+  if (n >= 1 && n <= 20) return NATIVE_ONES[n]
+  return toSinoKorean(n)  // 21+: 한자어
+}
+
 /**
  * 한국어 컨텍스트의 숫자/날짜를 한국어 발음으로 정규화
  * "2026년 5월 50%" → "이천이십육년 오월 오십 퍼센트"
@@ -730,8 +739,8 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d{1,2})시/g,  (_, n) => toSinoKorean(parseInt(n)) + '시')
     .replace(/(?<!\.)\b(\d{1,2})분/g,  (_, n) => toSinoKorean(parseInt(n)) + '분')
     .replace(/(?<!\.)\b(\d{1,2})초/g,  (_, n) => toSinoKorean(parseInt(n)) + '초')
-    .replace(/(?<!\.)\b(\d+)개/g,      (_, n) => { const v = parseInt(n); return v < 10000 ? toSinoKorean(v) + '개' : n + '개' })
-    .replace(/(?<!\.)\b(\d+)명/g,      (_, n) => { const v = parseInt(n); return v < 10000 ? toSinoKorean(v) + '명' : n + '명' })
+    .replace(/(?<!\.)\b(\d+)개/g,      (_, n) => { const v = parseInt(n); return v < 10000 ? toNativeKorean(v) + ' 개' : n + '개' })
+    .replace(/(?<!\.)\b(\d+)명/g,      (_, n) => { const v = parseInt(n); return v < 10000 ? toNativeKorean(v) + ' 명' : n + '명' })
     // 소수점 포함 단위 — 정수 패턴보다 먼저 처리 (3.5GB, 99.7% 등)
     .replace(/(?<![\d.])\b(\d+)\.(\d+)%/g,   (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 퍼센트')
     .replace(/(?<![\d.])\b(\d+)\.(\d+)GB/gi, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + '기가바이트')
