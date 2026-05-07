@@ -938,6 +938,9 @@ export async function checkAllProviders(): Promise<ProviderHealthResult[]> {
     latencyMs: r.latencyMs,
     model: r.body ? (() => { try { const d = JSON.parse(r.body!); return `${d.providerCount} providers, ${d.runtime?.agentsOnline} agents` } catch { return undefined } })() : undefined,
     checkedAt: Date.now()
+  })).catch((): ProviderHealthResult => ({
+    id: 'nco-server', name: 'NCO Server', role: 'Orchestrator', type: 'api' as const,
+    status: 'offline', latencyMs: 0, checkedAt: Date.now()
   }))
 
   const providerChecks = providers.map(async (p: any): Promise<ProviderHealthResult> => {
