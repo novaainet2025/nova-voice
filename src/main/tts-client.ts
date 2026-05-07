@@ -725,6 +725,23 @@ export function normalizeKoreanNumbers(text: string): string {
 
   // (?<!\.) 소수점 이후 숫자는 단위 변환 금지 (3.8GB → "3.팔기가바이트" 방지)
   return text
+    // 음수 표현 — 단위 변환 전 처리 (-5도 → 영하 오도는 sanitize 15f에서, 여기선 금액/수치)
+    // 콤마 포함 음수 (통화 단위 포함): -1,200,000원 → 마이너스 백이십만 원
+    .replace(/-(\d{1,3}(?:,\d{3})+)(원|달러|유로|파운드|엔|위안)?/g, (_, m, unit) => {
+      const v = parseInt(m.replace(/,/g, ''))
+      const ko = Number.isSafeInteger(v) ? toSinoKorean(v) : m
+      return '마이너스 ' + ko + (unit ? ' ' + unit : '')
+    })
+    // 단순 음수 정수 (통화 단위 포함): -500원 → 마이너스 오백 원
+    .replace(/(?<![a-zA-Z\d])-(\d+)(원|달러|유로|파운드|엔|위안)?(?!\d)/g, (_, n, unit) => {
+      const v = parseInt(n)
+      const ko = Number.isSafeInteger(v) ? toSinoKorean(v) : n
+      return '마이너스 ' + ko + (unit ? ' ' + unit : '')
+    })
+    // 분수 표현: 2/3 → 삼분의 이 (분모 먼저 읽기, URL/코드와 구분: 앞뒤 공백 또는 줄 경계)
+    .replace(/(?<![a-zA-Z\d/])(\d+)\/(\d+)(?![a-zA-Z\d/])/g, (_, num, den) =>
+      toSinoKorean(parseInt(den)) + '분의 ' + toSinoKorean(parseInt(num))
+    )
     // 숫자 범위 물결표 (3~5개→3 에서 5개, 이후 단위 패턴이 각각 처리)
     .replace(/(\d+)\s*[~～]\s*(\d+)/g, '$1 에서 $2')
     // 전화번호 (0XX-XXXX-XXXX 또는 0X-XXXX-XXXX) — 숫자 변환 전 보호
@@ -1104,6 +1121,14 @@ export function sanitizeTTSText(raw: string): string {
   // 15c. 속도/크기 단위 — px는 제거(UI값), km/h는 한국어
   t = t.replace(/\b\d+px\b/g, '')
   t = t.replace(/(\d+(?:\.\d+)?)km\/h/gi, (_, n) => '시속 ' + Math.round(parseFloat(n)) + '킬로미터')
+  // 15e. 통화 기호 → 한국어 (숫자 앞 $ € £ ¥)
+  t = t.replace(/\$(\d[\d,]*(?:\.\d+)?)/g, (_, n) => n.replace(/,/g, '') + ' 달러')
+  t = t.replace(/€(\d[\d,]*(?:\.\d+)?)/g,  (_, n) => n.replace(/,/g, '') + ' 유로')
+  t = t.replace(/£(\d[\d,]*(?:\.\d+)?)/g,  (_, n) => n.replace(/,/g, '') + ' 파운드')
+  t = t.replace(/¥(\d[\d,]*(?:\.\d+)?)/g,  (_, n) => n.replace(/,/g, '') + ' 엔')
+  // 15f. 음수 한국어 도 표현 (-5도 → 영하 오도, +3도 → 영상 삼도)
+  t = t.replace(/([+-])(\d+(?:\.\d+)?)도/g, (_, sign, n) =>
+    (sign === '-' ? '영하 ' : '영상 ') + n + '도')
   // 15d. 키보드 단축키 (Ctrl+C, Cmd+S, Alt+Tab, Shift+Enter 등) → 한국어 수식어
   t = t.replace(/\b(Ctrl|Cmd|Command|Alt|Option|Shift|Meta|Win)\s*\+\s*/gi, (_, mod) => {
     const map: Record<string, string> = {
