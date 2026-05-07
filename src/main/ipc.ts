@@ -837,9 +837,13 @@ JSON만:`
               if (!resultText?.trim()) return
               const stripped = stripMdForTTS(resultText)
               const hasCode = resultText.includes('```') || resultText.includes('function ') || resultText.includes('const ')
-              const ttsSnippet = hasCode
-                ? '완료됐어요. 화면에서 확인해주세요.'
-                : stripped.substring(0, 200)
+              if (hasCode) {
+                smartSpeak('완료됐어요. 화면에서 확인해주세요.', { lang: 'ko' }).catch(() => {})
+                return
+              }
+              // 첫 완성 문장 추출 (최대 150자) — substring 대신 문장 경계에서 자름
+              const firstSentence = stripped.split(/(?<=[.!?。요다])\s/)[0] || stripped
+              const ttsSnippet = firstSentence.length <= 150 ? firstSentence : firstSentence.substring(0, 150)
               smartSpeak(ttsSnippet, { lang: 'ko' }).catch(e => console.error('[TTS NCO]', (e as Error).message))
             }
 
@@ -1059,7 +1063,10 @@ JSON만:`
             // ── PTY Claude 우선 라우팅 — 응답 캡처 후 TTS 출력 ──────────────────────
             if (isPTYReady() && isClaudeRunningInPTY()) {
               askClaudeViaPTY(text, (response) => {
-                const stripped = stripMd(response).substring(0, 400)
+                const strippedFull = stripMd(response)
+                // 첫 완성 문장 추출 (최대 300자) — 문장 중간 잘림 방지
+                const firstSent = strippedFull.split(/(?<=[.!?。요다])\s/)[0] || strippedFull
+                const stripped = firstSent.length <= 300 ? firstSent : firstSent.substring(0, 300)
                 debugBroadcast('success', `[${label}] PTY Claude 응답 (${response.length}자): "${stripped.substring(0, 80)}"`)
                 smartSpeak(stripped, { lang: 'ko' }).catch(e => console.error('[TTS] PTY-Claude:', (e as Error).message))
                 debugBroadcast('info', `[TTS] PTY Claude 음성 출력: "${stripped.substring(0, 60)}"`)

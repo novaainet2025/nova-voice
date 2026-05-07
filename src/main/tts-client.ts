@@ -788,8 +788,9 @@ export function sanitizeTTSText(raw: string): string {
   // 5. URL (http/https) → "링크 생략"
   t = t.replace(/https?:\/\/[^\s)>\]"',]+/g, '링크 생략')
 
-  // 6. 파일 경로 (/path/to/file) → 제거 (파일명도 TTS에 어색함)
-  t = t.replace(/(?:\/[\w.-]+){3,}/g, '')
+  // 6. 파일 경로 → 제거 (절대 /path/to/file 및 상대 src/main/ipc.ts 모두)
+  // 최소 3세그먼트(/)이면 절대경로, 2세그먼트+확장자이면 상대경로
+  t = t.replace(/(?:^|(?<=\s))[\w.-]*(?:\/[\w.-]+){2,}(?:\.\w{1,5})?(?=\s|$)/gm, '')
 
   // 7. 긴 ID / 해시 (16자 이상 영숫자 혼합) → 제거
   t = t.replace(/\b[A-Za-z0-9_-]{16,}\b/g, '')
