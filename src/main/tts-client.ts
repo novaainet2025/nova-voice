@@ -760,6 +760,9 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d+)권/g,      (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 권' })
     .replace(/(?<!\.)\b(\d+)잔/g,      (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 잔' })
     // 소수점 포함 단위 — 정수 패턴보다 먼저 처리 (3.5GB, 99.7% 등)
+    // 소수점 + 점 단위 (평점/점수): 4.5점 → 사점오 점
+    .replace(/(?<!\d)(\d+)\.(\d+)점/g, (_, n, d) =>
+      toSinoKorean(parseInt(n)) + '점' + d.split('').map((c: string) => toSinoKorean(parseInt(c))).join('') + ' 점')
     .replace(/(?<![\d.])\b(\d+)\.(\d+)%/g,   (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 퍼센트')
     .replace(/(?<![\d.])\b(\d+)\.(\d+)GB/gi, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + '기가바이트')
     .replace(/(?<![\d.])\b(\d+)\.(\d+)MB/gi, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + '메가바이트')
@@ -792,6 +795,9 @@ export function normalizeKoreanNumbers(text: string): string {
       const v = parseInt(m.replace(/,/g, ''))
       return v < 100000000 ? toSinoKorean(v) : m
     })
+    // 단독 소수점 (단위 없음, 한국어 컨텍스트): 3.14 → 삼점일사
+    .replace(/(?<!\d)(\d+)\.(\d+)(?!\d|[%a-zA-Z])/g, (_, n, d) =>
+      toSinoKorean(parseInt(n)) + '점' + d.split('').map((c: string) => toSinoKorean(parseInt(c))).join(''))
     .replace(/(?<![\d.])(\d+)(?![\d.])/g, (_, n) => { const v = parseInt(n); return v < 100000 ? toSinoKorean(v) : n })
 }
 
