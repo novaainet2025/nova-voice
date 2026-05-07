@@ -742,8 +742,8 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<![a-zA-Z\d/])(\d+)\/(\d+)(?![a-zA-Z\d/])/g, (_, num, den) =>
       toSinoKorean(parseInt(den)) + '분의 ' + toSinoKorean(parseInt(num))
     )
-    // 숫자 범위 물결표 (3~5개→3 에서 5개, 이후 단위 패턴이 각각 처리)
-    .replace(/(\d+)\s*[~～]\s*(\d+)/g, '$1 에서 $2')
+    // 숫자 범위 물결표 (1,500~2,000개→천오백에서 이천 개, 이후 단위 패턴이 각각 처리)
+    .replace(/(\d+)\s*[~～]\s*(\d+)/g, '$1에서 $2')
     // 전화번호 (0XX-XXXX-XXXX 또는 0X-XXXX-XXXX) — 숫자 변환 전 보호
     .replace(/\b(0\d{1,2})-(\d{3,4})-(\d{4})\b/g, (_, a, b, c) =>
       phoneToKo(a) + ' ' + phoneToKo(b) + ' ' + phoneToKo(c)
@@ -752,8 +752,16 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/g, (_, y, m, d) =>
       toSinoKorean(parseInt(y)) + '년 ' + toSinoKorean(parseInt(m)) + '월 ' + toSinoKorean(parseInt(d)) + '일'
     )
+    // 시간 형식 — 오전/오후 + HH:MM 복합: "오후 3:30" → "오후 세시 삼십분" (12h 해석)
+    .replace(/(오전|오후)\s+([0-9]{1,2}):([0-5]\d)(?::[0-5]\d)?\b/g, (_, ampm, h, m) => {
+      const hour = parseInt(h), min = parseInt(m)
+      const h12 = hour % 12 || 12
+      const hKo = NATIVE_HOUR[h12] + '시'
+      const mKo = min > 0 ? ' ' + toSinoKorean(min) + '분' : ''
+      return ampm + ' ' + hKo + mKo
+    })
     // 시간 형식 HH:MM(:SS) → 한국어 시간 (14:30 → 오후 두시 삼십분)
-    .replace(/(?<![가-힣]오[전후]\s*)\b([0-1]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?\b/g, (_, h, m) => {
+    .replace(/\b([0-1]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?\b/g, (_, h, m) => {
       const hour = parseInt(h), min = parseInt(m)
       if (hour === 0 && min === 0) return '자정'
       if (hour === 12 && min === 0) return '정오'
@@ -763,8 +771,6 @@ export function normalizeKoreanNumbers(text: string): string {
       const mKo = min > 0 ? ' ' + toSinoKorean(min) + '분' : ''
       return ampm + ' ' + hKo + mKo
     })
-    // 이중 오전/오후 정리 ("오후 오후 두시" → "오후 두시")
-    .replace(/(?:오전|오후)\s+(오전|오후)\s+/g, '$1 ')
     .replace(/(?<!\.)\b(\d{1,4})년/g,  (_, n) => toSinoKorean(parseInt(n)) + '년')
     .replace(/(?<!\.)\b(\d{1,2})월/g,  (_, n) => toSinoKorean(parseInt(n)) + '월')
     .replace(/(?<!\.)\b(\d{1,2})일/g,  (_, n) => toSinoKorean(parseInt(n)) + '일')
@@ -777,6 +783,8 @@ export function normalizeKoreanNumbers(text: string): string {
       if (v === 1) return '첫 번째'
       return (v <= 20 ? toNativeKorean(v) : toSinoKorean(v)) + ' 번째'
     })
+    // 단계 (순서/스텝): 1단계 → 일 단계 (한자어 수사)
+    .replace(/(?<!\.)\b(\d+)단계/g,     (_, n) => toSinoKorean(parseInt(n)) + ' 단계')
     // 번 (횟수) — 번째 처리 이후에 와야 중복 매칭 없음
     .replace(/(?<!\.)\b(\d+)번(?!째)/g, (_, n) => { const v = parseInt(n); return (v <= 20 ? toNativeKorean(v) : toSinoKorean(v)) + ' 번' })
     // 회 (횟수/차례) — 한자어 수사 (\b는 한국어 앞 미동작 → (?!\d)로 처리)
@@ -1168,6 +1176,12 @@ export function sanitizeTTSText(raw: string): string {
   // BrowserWindow, ElectronApp 등 코드 API 이름 (Brand/Abbr 맵 처리 이후 잔여분)
   if (/[가-힣]/.test(t)) {
     t = t.replace(/\b[A-Z][a-z]{2,}(?:[A-Z][a-z]+)+\b/g, '')
+  }
+
+  // 20c. 소문자 영어 단어(들) + 한국어 조사 → 영어 부분 제거 (한국어 컨텍스트 명령어: install react를 → 를)
+  // 3자+ 소문자 영어 단어 시퀀스가 한국어 조사 바로 앞에 올 때 제거 (조사는 Rule 23c에서 정리)
+  if (/[가-힣]/.test(t)) {
+    t = t.replace(/\b[a-z][a-z0-9-]{2,}(?:\s+[a-z][a-z0-9-]{2,})*\s*(?=[을를이가은는도만])/g, '')
   }
 
   // 21. 한국어 컨텍스트 숫자 정규화 (50%→오십퍼센트, 2026년→이천이십육년 등)
