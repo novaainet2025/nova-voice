@@ -720,6 +720,10 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/\b(0\d{1,2})-(\d{3,4})-(\d{4})\b/g, (_, a, b, c) =>
       phoneToKo(a) + ' ' + phoneToKo(b) + ' ' + phoneToKo(c)
     )
+    // YYYY-MM-DD 날짜 형식 → 년 월 일 (2026-05-07 → 이천이십육년 오월 칠일)
+    .replace(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/g, (_, y, m, d) =>
+      toSinoKorean(parseInt(y)) + '년 ' + toSinoKorean(parseInt(m)) + '월 ' + toSinoKorean(parseInt(d)) + '일'
+    )
     // 시간 형식 HH:MM(:SS) → 한국어 시간 (14:30 → 오후 두시 삼십분)
     .replace(/(?<![가-힣]오[전후]\s*)\b([0-1]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?\b/g, (_, h, m) => {
       const hour = parseInt(h), min = parseInt(m)
@@ -1003,6 +1007,14 @@ export function sanitizeTTSText(raw: string): string {
   t = t.replace(/\([A-Za-z0-9_.-]{2,}\)/g, '')
   // 13b. 대괄호 상태 태그 [오류], [Error], [Smart→...] → 제거
   t = t.replace(/\[[^\]]{1,30}\]/g, '')
+
+  // 13c. 한국어 자모 이모티콘 처리 (채팅 스타일)
+  t = t.replace(/ㅇㅋ/g, '오케이')
+  t = t.replace(/ㄳ|ㄱㅅ/g, '감사해요')
+  t = t.replace(/ㅎㅎ+|ㅋㅋ+/g, '')          // 웃음 이모티콘 제거
+  t = t.replace(/ㅠㅠ+|ㅜㅜ+/g, '')          // 울음 이모티콘 제거
+  t = t.replace(/ㅡㅡ|ㄷㄷ/g, '')            // 기타 자모 이모티콘 제거
+  t = t.replace(/[ㄱ-ㅎㅏ-ㅣ]{2,}/g, '')     // 2개 이상 연속 자모 (잔여) 제거
 
   // 14. 이모지 제거 (TTS 엔진이 이모지 발음 시 어색하거나 건너뜀)
   t = t.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FEFF}]/gu, '')
