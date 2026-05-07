@@ -699,6 +699,13 @@ export function normalizeKoreanNumbers(text: string): string {
 
   // (?<!\.) 소수점 이후 숫자는 단위 변환 금지 (3.8GB → "3.팔기가바이트" 방지)
   return text
+    // 시간 형식 HH:MM(:SS) → 한국어 시간 (14:30 → 오후 두시 삼십분)
+    .replace(/\b([0-1]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?\b/g, (_, h, m) => {
+      const hour = parseInt(h), min = parseInt(m)
+      const hKo = toSinoKorean(hour) + '시'
+      const mKo = min > 0 ? ' ' + toSinoKorean(min) + '분' : ''
+      return hKo + mKo
+    })
     .replace(/(?<!\.)\b(\d{1,4})년/g,  (_, n) => toSinoKorean(parseInt(n)) + '년')
     .replace(/(?<!\.)\b(\d{1,2})월/g,  (_, n) => toSinoKorean(parseInt(n)) + '월')
     .replace(/(?<!\.)\b(\d{1,2})일/g,  (_, n) => toSinoKorean(parseInt(n)) + '일')
@@ -711,6 +718,11 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d+)GB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '기가바이트')
     .replace(/(?<!\.)\b(\d+)MB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '메가바이트')
     .replace(/(?<!\.)\b(\d+)KB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '킬로바이트')
+    // 천단위 콤마 숫자 (1,000 / 50,000 / 1,234,567) → 한국어
+    .replace(/\b(\d{1,3}(?:,\d{3})+)\b/g, (m) => {
+      const v = parseInt(m.replace(/,/g, ''))
+      return v < 100000000 ? toSinoKorean(v) : m
+    })
     .replace(/(?<![\d.])(\d+)(?![\d.])/g, (_, n) => { const v = parseInt(n); return v < 100000 ? toSinoKorean(v) : n })
 }
 
