@@ -149,7 +149,7 @@ export function UnifiedPanel() {
       } else if (!result.aiResult && isV2T) {
         addMsg('inject', result.text || '')
       } else if (!result.aiResult && !isV2T && result.text) {
-        addMsg('error', '⚠️ AI 응답을 받지 못했습니다 — 우상단 Health 버튼으로 프로바이더 상태를 확인하세요')
+        addMsg('error', '⚠️ AI 응답을 받지 못했어요 — 우상단 Health 버튼으로 프로바이더 상태를 확인해주세요')
       }
       setAIStage('done')
       setClaudeRunning(false)
@@ -356,7 +356,7 @@ export function UnifiedPanel() {
       await window.electronAPI?.claudeSend?.(text)
     } catch {
       setClaudeRunning(false)
-      addMsg('error', 'Claude Terminal 전송 실패 — claude CLI가 설치되어 있는지 확인하세요')
+      addMsg('error', '⚠️ Claude Terminal 전송에 실패했어요 — claude CLI가 설치되어 있는지 확인해주세요')
     }
   }
 
