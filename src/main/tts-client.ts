@@ -775,8 +775,14 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d+)MB/gi,     (_, n) => toSinoKorean(parseInt(n)) + ' 메가바이트')
     .replace(/(?<!\.)\b(\d+)KB/gi,     (_, n) => toSinoKorean(parseInt(n)) + ' 킬로바이트')
     // 기가/메가 (한국어로 이미 쓰인 단위, e.g. 메모리 정보 메시지)
-    .replace(/(?<!\.)\b(\d+)기가/g,    (_, n) => toSinoKorean(parseInt(n)) + '기가')
-    .replace(/(?<!\.)\b(\d+)메가/g,    (_, n) => toSinoKorean(parseInt(n)) + '메가')
+    .replace(/(?<!\.)\b(\d+)기가/g,    (_, n) => toSinoKorean(parseInt(n)) + ' 기가')
+    .replace(/(?<!\.)\b(\d+)메가/g,    (_, n) => toSinoKorean(parseInt(n)) + ' 메가')
+    // 건 (건수) — 콤마 포함 큰 수 우선, 일반 정수 후처리
+    .replace(/\b(\d{1,3}(?:,\d{3})+)건(?!\w)/g, (_, m) => {
+      const v = parseInt(m.replace(/,/g, ''))
+      return (v < 100000000 ? toSinoKorean(v) : m) + '건'
+    })
+    .replace(/(?<!\.)\b(\d+)건(?!\w)/g, (_, n) => toSinoKorean(parseInt(n)) + '건')
     // ms (밀리초) 단위
     .replace(/(?<!\.)\b(\d+)ms\b/gi,   (_, n) => toSinoKorean(parseInt(n)) + ' 밀리초')
     // 시간·기간 단위 (기존 패턴에 없는 시간/주/배)
