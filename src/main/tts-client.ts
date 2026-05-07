@@ -890,6 +890,12 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bwebpack\b/gi, '웹팩'],
   [/\bpnpm\b/g, '피엔피엠'],
   [/\byarn\b/gi, '얀'],
+  // 복합 약어 (슬래시 포함 — ABBR_MAP 개별 처리 불가)
+  [/\bCI\/CD\b/g, '씨아이 씨디'],
+  [/\bA\/B\s*테스트/g, '에이비 테스트'],
+  // GitHub 서비스
+  [/\bGitHub\s*Actions\b/g, '깃허브 액션스'],
+  [/\bGitHub\s*Copilot\b/g, '깃허브 코파일럿'],
   // AWS 서비스 (숫자 포함 → ABBR_MAP 불가, 여기서 처리)
   [/\bEC2\b/g, '이씨투'],
   [/\bS3\b/g, '에스쓰리'],
@@ -1114,6 +1120,9 @@ export function sanitizeTTSText(raw: string): string {
 
   // 23b. 줄/문장 시작의 고립 조사 제거 (식별자 제거 후 남는 '을', '로', '에서' 등)
   t = t.replace(/^(?:을|를|이|가|은|는|의|에서|으로|에게|와|과|도|만)\s+/gm, '')
+  // 23c. 문장 중간 고립 조사 제거 (파일명 제거 후 남는 '을/를' — 의미 없는 격조사)
+  // '을/를'은 목적격 조사로 단독으로는 의미 없음 → 공백만 남김
+  t = t.replace(/\s+(?:을|를)(\s|[.!?,]|$)/g, '$1')
 
   // 24. 연속 공백·줄바꿈 정리
   t = t.replace(/\n{3,}/g, '\n')
