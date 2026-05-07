@@ -752,6 +752,7 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bWindows\b/g, '윈도우'],
   [/\bLinux\b/g, '리눅스'],
   [/\bGitHub\b/g, '깃허브'],
+  [/\bgit\b/g, '깃'],           // 소문자 git (shell 명령어 컨텍스트)
   [/\bGit\b/g, '깃'],
   [/\bPython\b/g, '파이썬'],
   [/\bJavaScript\b/g, '자바스크립트'],
@@ -773,6 +774,11 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bNode\.js\b|\bNodeJS\b/g, '노드제이에스'],
   [/\bNode\b/g, '노드'],
   [/\bNova\b/g, '노바'],
+  [/\bnpm\b/g, '엔피엠'],         // Node 패키지 관리자
+  [/\bbrew\b/g, '브루'],          // Homebrew (macOS)
+  [/\bdocker\b/gi, '도커'],       // 컨테이너
+  [/\bkubernetes\b/gi, '쿠버네티스'], // 오케스트레이션
+  [/\bterraform\b/gi, '테라폼'],  // IaC
 ]
 
 export function sanitizeTTSText(raw: string): string {

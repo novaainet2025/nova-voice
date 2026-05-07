@@ -754,13 +754,12 @@ JSON만:`
               if (usePTYClaude) {
                 // ── PTY Claude 직접 통합 — 응답 캡처 후 TTS ──────────────────
                 askClaudeViaPTY(text, (response) => {
-                  const stripped = response
-                    .replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1')
-                    .replace(/```[\s\S]*?```/g, '').replace(/`([^`]+)`/g, '$1')
-                    .replace(/^#+\s+/gm, '').replace(/\n+/g, ' ').trim()
-                  if (stripped.length > 5) {
-                    smartSpeak(stripped, { lang: 'ko' }).catch(() => {})
-                    debugBroadcast('success', `[PTY-Claude] TTS: "${stripped.substring(0, 60)}"`)
+                  const stripped = sanitizeTTSText(response)
+                  const firstSent = stripped.split(/(?<=[.!?。요다])\s/)[0] || stripped
+                  const ttsSnippet = firstSent.length <= 300 ? firstSent : firstSent.substring(0, 300)
+                  if (ttsSnippet.length > 5) {
+                    smartSpeak(ttsSnippet, { lang: 'ko' }).catch(() => {})
+                    debugBroadcast('success', `[PTY-Claude] TTS: "${ttsSnippet.substring(0, 60)}"`)
                   }
                 }, { idleMs: 3000, maxMs: 90000 }).catch(() => {})
                 finalText = text
@@ -949,7 +948,15 @@ JSON만:`
                 } catch (e) {
                   const errMsg = (e as Error).message
                   debugBroadcast('error', `[NCO] 백그라운드 실패 (${ncoSubtype}): ${errMsg.substring(0, 100)}`)
-                  smartSpeak('잠시 문제가 생겼어요.', { lang: 'ko' }).catch(() => {})
+                  // 에러 유형별 맞춤 TTS 메시지
+                  const ncoErrTTS = /timeout|시간초과|ETIMEDOUT/i.test(errMsg)
+                    ? '시간이 좀 걸렸어요. 나중에 다시 해볼게요.'
+                    : /429|quota|rate.?limit|RESOURCE_EXHAUSTED/i.test(errMsg)
+                    ? '요청이 너무 많아요. 잠시 후 다시 해볼게요.'
+                    : /ECONNREFUSED|ENOTFOUND|network|연결/i.test(errMsg)
+                    ? '연결이 잘 안 돼요. 잠시 후 다시 해볼게요.'
+                    : '잠시 문제가 생겼어요.'
+                  smartSpeak(ncoErrTTS, { lang: 'ko' }).catch(() => {})
                   // 에러도 UI에 전달 — 대화 스레드에 실패 메시지 표시
                   if (!mainWindow.isDestroyed()) {
                     const errResult: TranscriptionResult = {
@@ -1036,9 +1043,12 @@ JSON만:`
               const visionResult = await processImageWithGemini(base64, 'image/png', screenPrompt)
               recordProviderSuccess(geminiKey)
               const stripped = stripMd(visionResult)
-              console.log(`[Smart→Screen] "${stripped.substring(0, 80)}..."`)
-              debugBroadcast('success', `[Screen] 분석 완료: "${stripped.substring(0, 120)}"`)
-              smartSpeak(stripped, { lang: 'ko' }).catch(e => console.error('[TTS] Screen:', (e as Error).message))
+              // 첫 완성 문장 추출 (최대 300자) — 전 프로바이더 일관성
+              const firstSentV = stripped.split(/(?<=[.!?。요다])\s/)[0] || stripped
+              const ttsVision = firstSentV.length <= 300 ? firstSentV : firstSentV.substring(0, 300)
+              console.log(`[Smart→Screen] "${ttsVision.substring(0, 80)}..."`)
+              debugBroadcast('success', `[Screen] 분석 완료: "${ttsVision.substring(0, 120)}"`)
+              smartSpeak(ttsVision, { lang: 'ko' }).catch(e => console.error('[TTS] Screen:', (e as Error).message))
               finalText = visionResult
               aiResult = `[Smart→Screen] ${visionResult}`
             } catch (e) {
