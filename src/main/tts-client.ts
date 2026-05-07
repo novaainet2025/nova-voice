@@ -1218,6 +1218,8 @@ export function sanitizeTTSText(raw: string): string {
   t = t.replace(/[♪♫♬]/g, '')
   t = t.replace(/[❌✗]/g, '실패')
   t = t.replace(/[⚠⚡]/g, '')
+  // 15a-eq: 공백 없는 = 기호 → 공백 (p50=12ms → p50 12ms, 수식 제외 처리)
+  t = t.replace(/([A-Za-z가-힣\d])=([A-Za-z가-힣\d\-])/g, '$1 $2')
   // 15b. 온도 (날씨 wttr.in 형식 등) — 양수=영상, 음수=영하
   t = t.replace(/([+-])(\d+(?:\.\d+)?)°C/g, (_, sign, n) =>
     (sign === '+' ? '영상 ' : '영하 ') + Math.round(parseFloat(n)) + '도')
@@ -1312,6 +1314,9 @@ export function sanitizeTTSText(raw: string): string {
   t = t.replace(/^(?:을|를|가|은|는|의|에서|으로|로|에게|와|과|도|만)\s+/gm, '')
   // 23c. 문장 중간 고립 조사 제거 (파일명/식별자 제거 후 남는 목적격·방향격 조사)
   t = t.replace(/\s+(?:을|를|로|으로)(\s|[.!?,]|$)/g, '$1')
+
+  // 23b. 버전 중복 제거 (원문에 "버전" + 조사 + v패턴→"버전 N" 연속 시)
+  t = t.replace(/버전([을를은는이가에서으로도]?\s*)버전\s+/g, '버전$1')
 
   // 24. 연속 공백·줄바꿈 정리
   t = t.replace(/\n{3,}/g, '\n')
