@@ -1615,7 +1615,7 @@ JSON만:`
   ipcMain.handle('tts:say-voices', () => [...SAY_VOICES])
   ipcMain.handle('tts:say-preview', async (_event, voice: string, text?: string) => {
     const { execFile: ef } = require('child_process')
-    ef('say', ['-v', voice, text || '안녕하세요. 저는 노바입니다.'])
+    ef('say', ['-v', voice, text || '안녕하세요. 저는 노바예요.'])
   })
 
   // ── PTY Claude 직접 통합 IPC ──────────────────────────────────────────────
