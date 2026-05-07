@@ -701,10 +701,18 @@ export function normalizeKoreanNumbers(text: string): string {
   const NATIVE_HOUR = ['열두', '한', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열', '열한', '열두']
   //                     0h      1h   2h   3h   4h    5h      6h      7h      8h      9h     10h    11h      12h
 
+  // 전화번호 자릿수 한국어 읽기 (010-1234-5678 → 공일공 일이삼사 오육칠팔)
+  const PHONE_DIGITS = '영일이삼사오육칠팔구'
+  const phoneToKo = (s: string) => s.split('').map(d => d === '0' ? '공' : PHONE_DIGITS[parseInt(d)]).join('')
+
   // (?<!\.) 소수점 이후 숫자는 단위 변환 금지 (3.8GB → "3.팔기가바이트" 방지)
   return text
+    // 전화번호 (0XX-XXXX-XXXX 또는 0X-XXXX-XXXX) — 숫자 변환 전 보호
+    .replace(/\b(0\d{1,2})-(\d{3,4})-(\d{4})\b/g, (_, a, b, c) =>
+      phoneToKo(a) + ' ' + phoneToKo(b) + ' ' + phoneToKo(c)
+    )
     // 시간 형식 HH:MM(:SS) → 한국어 시간 (14:30 → 오후 두시 삼십분)
-    .replace(/\b([0-1]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?\b/g, (_, h, m) => {
+    .replace(/(?<![가-힣]오[전후]\s*)\b([0-1]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?\b/g, (_, h, m) => {
       const hour = parseInt(h), min = parseInt(m)
       if (hour === 0 && min === 0) return '자정'
       if (hour === 12 && min === 0) return '정오'
@@ -714,6 +722,8 @@ export function normalizeKoreanNumbers(text: string): string {
       const mKo = min > 0 ? ' ' + toSinoKorean(min) + '분' : ''
       return ampm + ' ' + hKo + mKo
     })
+    // 이중 오전/오후 정리 ("오후 오후 두시" → "오후 두시")
+    .replace(/(?:오전|오후)\s+(오전|오후)\s+/g, '$1 ')
     .replace(/(?<!\.)\b(\d{1,4})년/g,  (_, n) => toSinoKorean(parseInt(n)) + '년')
     .replace(/(?<!\.)\b(\d{1,2})월/g,  (_, n) => toSinoKorean(parseInt(n)) + '월')
     .replace(/(?<!\.)\b(\d{1,2})일/g,  (_, n) => toSinoKorean(parseInt(n)) + '일')
