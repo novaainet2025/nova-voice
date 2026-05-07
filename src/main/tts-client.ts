@@ -693,10 +693,11 @@ function toSinoKorean(n: number): string {
 // 순우리말 수사 (물건/사람 카운팅) — 1~20: 한/두/세/네/다섯/여섯/일곱/여덟/아홉/열/열한/열두...스물
 // 21+: 한자어 fallback (이십일개 등 — 구어체서도 한자어 사용)
 const NATIVE_ONES = ['', '한', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열',
-                     '열한', '열두', '열세', '열네', '열다섯', '열여섯', '열일곱', '열여덟', '열아홉', '스물']
+                     '열한', '열두', '열세', '열네', '열다섯', '열여섯', '열일곱', '열여덟', '열아홉', '스물',
+                     '스물한', '스물두', '스물세', '스물네']  // 21~24 (시간 단위용)
 function toNativeKorean(n: number): string {
-  if (n >= 1 && n <= 20) return NATIVE_ONES[n]
-  return toSinoKorean(n)  // 21+: 한자어
+  if (n >= 1 && n <= 24) return NATIVE_ONES[n]
+  return toSinoKorean(n)  // 25+: 한자어
 }
 
 /**
@@ -742,7 +743,7 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d{1,4})년/g,  (_, n) => toSinoKorean(parseInt(n)) + '년')
     .replace(/(?<!\.)\b(\d{1,2})월/g,  (_, n) => toSinoKorean(parseInt(n)) + '월')
     .replace(/(?<!\.)\b(\d{1,2})일/g,  (_, n) => toSinoKorean(parseInt(n)) + '일')
-    .replace(/(?<!\.)\b(\d{1,2})시/g,  (_, n) => toSinoKorean(parseInt(n)) + '시')
+    .replace(/(?<!\.)\b(\d{1,2})시(?!간)/g, (_, n) => { const v = parseInt(n); return (v >= 1 && v <= 12 ? NATIVE_HOUR[v] : toSinoKorean(v)) + '시' })
     .replace(/(?<!\.)\b(\d{1,2})분/g,  (_, n) => toSinoKorean(parseInt(n)) + '분')
     .replace(/(?<!\.)\b(\d{1,2})초/g,  (_, n) => toSinoKorean(parseInt(n)) + '초')
     // 번째 (서수) — 1번째=첫 번째, 2~20번째=순우리말, 21+=한자어
