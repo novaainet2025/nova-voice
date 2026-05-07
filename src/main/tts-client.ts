@@ -761,6 +761,14 @@ const TTS_ABBR_MAP: Record<string, string> = {
   XSS: '엑스에스에스', CORS: '코어스', CSRF: '씨에스알에프',
   IAM: '아이에이엠',  VPC: '브이피씨', SPA: '에스피에이',
   JSX: '제이에스엑스', TSX: '티에스엑스', ORM: '오알엠',
+  // AWS 서비스 약어
+  RDS: '알디에스',   ECS: '이씨에스',  EKS: '이케이에스',
+  ALB: '에이엘비',   ELB: '이엘비',   SQS: '에스큐에스',
+  SNS: '에스엔에스', SES: '에스이에스', ECR: '이씨알',
+  NAT: '냇',        ACL: '에이씨엘',  MFA: '엠에프에이',
+  // 기타 프로토콜/개념
+  WS: '웹소켓',     RPC: '알피씨',   RBAC: '알백',
+  TTY: '티티와이',  REPL: '렙',      EOF: '파일 끝',
 }
 
 // 영어 브랜드·제품명 → 한국어 음성 (한국어 TTS 엔진의 영어 발음 어색함 방지)
@@ -817,6 +825,30 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bwebpack\b/gi, '웹팩'],
   [/\bpnpm\b/g, '피엔피엠'],
   [/\byarn\b/gi, '얀'],
+  // AWS 서비스 (숫자 포함 → ABBR_MAP 불가, 여기서 처리)
+  [/\bEC2\b/g, '이씨투'],
+  [/\bS3\b/g, '에스쓰리'],
+  [/\bGPT-?4o?\b/gi, '지피티포'],
+  // DB·인프라·미들웨어
+  [/\bPostgreSQL\b/gi, '포스트그레스큐엘'],
+  [/\bPostgres\b/g, '포스트그레스'],
+  [/\bMySQL\b/gi, '마이에스큐엘'],
+  [/\bMongoDB\b/g, '몽고디비'],
+  [/\bSQLite\b/gi, '에스큐엘라이트'],
+  [/\bRedis\b/g, '레디스'],
+  [/\bKafka\b/g, '카프카'],
+  [/\bElasticsearch\b/gi, '엘라스틱서치'],
+  [/\bNginx\b/gi, '엔진엑스'],
+  [/\bGrafana\b/g, '그라파나'],
+  [/\bPrometheus\b/g, '프로메테우스'],
+  [/\bAnsible\b/g, '앤서블'],
+  // AWS 관리 서비스 (브랜드)
+  [/\bLambda\b/g, '람다'],
+  [/\bDynamoDB\b/g, '다이나모디비'],
+  [/\bCloudWatch\b/g, '클라우드워치'],
+  [/\bCloudFront\b/g, '클라우드프론트'],
+  // 결제·외부 서비스
+  [/\bStripe\b/g, '스트라이프'],
   // 브라우저·앱·도구
   [/\bChrome\b/g, '크롬'],
   [/\bFirefox\b/g, '파이어폭스'],
