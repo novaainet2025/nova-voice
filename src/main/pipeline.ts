@@ -17,7 +17,7 @@
  *     → [Hand] 결과를 커서 위치에 텍스트 삽입
  */
 
-import { smartSpeak, isTTSAvailable, isMLXAvailable, ensureTTSServer, synthesizeMLX, playAudio, startMLXInBackground } from './tts-client'
+import { smartSpeak, isTTSAvailable, isMLXAvailable, ensureTTSServer, synthesizeMLX, playAudio, startMLXInBackground, sanitizeTTSText } from './tts-client'
 import { BrowserWindow } from 'electron'
 
 export interface PipelineConfig {
@@ -78,22 +78,8 @@ export async function pipelineSpeak(
   }
 }
 
-/**
- * Strip markdown formatting for TTS
- */
-function stripMarkdown(text: string): string {
-  return text
-    .replace(/\*\*([^*]+)\*\*/g, '$1')   // **bold** → bold
-    .replace(/\*([^*]+)\*/g, '$1')        // *italic* → italic
-    .replace(/^[-*•]\s+/gm, '')           // bullet points
-    .replace(/^#+\s+/gm, '')              // headings
-    .replace(/`([^`]+)`/g, '$1')          // inline code
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links
-    .replace(/\n{2,}/g, '. ')             // double newline → period
-    .replace(/\n/g, ' ')                  // single newline → space
-    .replace(/\s{2,}/g, ' ')             // collapse spaces
-    .trim()
-}
+// stripMarkdown 제거 — sanitizeTTSText (tts-client.ts)로 통합
+// 24개 규칙 포함: 경로/해시/약어/camelCase/숫자정규화 등 포괄 처리
 
 /**
  * Split text into sentences for streaming TTS
@@ -121,7 +107,7 @@ export async function pipelineSpeakStreaming(
   if (type === 'command' && !config.speakCommands) return
   if (type === 'ai_result' && !config.speakAIResults) return
 
-  let speakText = stripMarkdown(text)
+  let speakText = sanitizeTTSText(text)
   if (type === 'error') speakText = `오류: ${speakText}`
 
   const sentences = splitSentences(speakText)

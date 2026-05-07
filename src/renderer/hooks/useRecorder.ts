@@ -194,7 +194,7 @@ export function useRecorder() {
           await window.electronAPI.sendAudioData(arrayBuffer)
         } catch (error) {
           console.error('[Recorder] Transcription failed:', error)
-          setCurrentTranscription('Transcription failed. Please check your Whisper model setup.')
+          setCurrentTranscription('음성 인식에 실패했어요. Whisper 모델 설정을 확인해주세요.')
         }
         setIsTranscribing(false)
       }
@@ -212,7 +212,17 @@ export function useRecorder() {
 
       console.log('[Recorder] Recording started')
     } catch (error) {
-      console.error('[Recorder] Failed to start:', error)
+      const err = error as DOMException
+      let userMsg = '마이크 접근에 실패했어요.'
+      if (err.name === 'NotAllowedError') {
+        userMsg = '마이크 권한을 허용해주세요. 시스템 설정에서 확인해주세요.'
+      } else if (err.name === 'NotFoundError') {
+        userMsg = '연결된 마이크가 없어요.'
+      } else if (err.name === 'NotReadableError') {
+        userMsg = '마이크가 다른 앱에서 사용 중이에요.'
+      }
+      console.error('[Recorder] Failed to start:', err.name, err.message)
+      setCurrentTranscription(userMsg)
     }
   }, [setRecording, setRecordingDuration, setAudioLevel, setIsTranscribing, setCurrentTranscription])
 

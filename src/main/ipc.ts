@@ -1103,7 +1103,10 @@ JSON만:`
                 const result = await searchWithGemini(query)
                 if (result) {
                   recordProviderSuccess(geminiProvider)
-                  const stripped = stripMd(result)
+                  const strippedFull = stripMd(result)
+                  // 첫 완성 문장 추출 (최대 300자) — 문장 중간 잘림 방지
+                  const firstSentG = strippedFull.split(/(?<=[.!?。요다])\s/)[0] || strippedFull
+                  const stripped = firstSentG.length <= 300 ? firstSentG : firstSentG.substring(0, 300)
                   debugBroadcast('success', `[${label}] Gemini 성공 (${result.length}자): "${stripped.substring(0, 80)}"`)
                   smartSpeak(stripped, { lang: 'ko' }).catch(e => console.error('[TTS]', (e as Error).message))
                   debugBroadcast('info', `[TTS] 음성 출력: "${stripped.substring(0, 60)}"`)
@@ -1134,7 +1137,9 @@ JSON만:`
                     const ollamaQuery = `당신은 음성 비서입니다. 오늘은 ${nowDate}입니다. ${VOICE_ANSWER_GUIDE}\n\n질문: ${text}`
                     const ollamaResult = await processWithAI({ prompt: ollamaQuery, text: '' })
                     if (ollamaResult.text) {
-                      const stripped = stripMd(ollamaResult.text)
+                      const strippedOllama = stripMd(ollamaResult.text)
+                      const firstSentO = strippedOllama.split(/(?<=[.!?。요다])\s/)[0] || strippedOllama
+                      const stripped = firstSentO.length <= 300 ? firstSentO : firstSentO.substring(0, 300)
                       debugBroadcast('success', `[${label}] Ollama 폴백 성공: "${stripped.substring(0, 80)}"`)
                       smartSpeak(stripped, { lang: 'ko' }).catch(e => console.error('[TTS]', (e as Error).message))
                       finalText = ollamaResult.text
