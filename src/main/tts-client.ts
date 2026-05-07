@@ -738,8 +738,9 @@ export function normalizeKoreanNumbers(text: string): string {
       const ko = Number.isSafeInteger(v) ? toSinoKorean(v) : n
       return '마이너스 ' + ko + (unit ? ' ' + unit : '')
     })
-    // 분수 표현: 2/3 → 삼분의 이 (분모 먼저 읽기, URL/코드와 구분: 앞뒤 공백 또는 줄 경계)
-    .replace(/(?<![a-zA-Z\d/])(\d+)\/(\d+)(?![a-zA-Z\d/])/g, (_, num, den) =>
+    // 분수 표현: 2/3 → 삼분의 이 (분모 먼저 읽기, URL/코드/소수점 구분: (?<![a-zA-Z\d/.]))
+    // ※ 4.5/5.0에서 소수 뒤 자리(5)가 오매칭되지 않도록 lookbehind에 . 추가
+    .replace(/(?<![a-zA-Z\d/.])(\d+)\/(\d+)(?![a-zA-Z\d/])/g, (_, num, den) =>
       toSinoKorean(parseInt(den)) + '분의 ' + toSinoKorean(parseInt(num))
     )
     // 숫자 범위 물결표 (1,500~2,000개→천오백에서 이천 개, 이후 단위 패턴이 각각 처리)
@@ -867,6 +868,9 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/[⁰¹⁴⁵⁶⁷⁸⁹]/g, '')  // 0·1·4+ 승은 제거 (10⁶ 등 오변환 방지)
     // 시간·기간 단위 (기존 패턴에 없는 시간/주/배)
     // 주의: 한국어는 \W이므로 한국어로 끝나는 패턴에 trailing \b 사용 불가
+    // 소수점 포함 시간 단위 (1.5초 → 일점오 초, 소수→정수 오매칭 방지)
+    .replace(/(?<!\d)(\d+)\.(\d+)초/g,  (_, n, d) => toSinoKorean(parseInt(n)) + '점' + d.split('').map((c: string) => toSinoKorean(parseInt(c))).join('') + ' 초')
+    .replace(/(?<!\d)(\d+)\.(\d+)분/g,  (_, n, d) => toSinoKorean(parseInt(n)) + '점' + d.split('').map((c: string) => toSinoKorean(parseInt(c))).join('') + '분')
     .replace(/(?<!\.)\b(\d+)시간/g,    (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 시간' })
     .replace(/(?<!\.)\b(\d+)주일/g,    (_, n) => toSinoKorean(parseInt(n)) + '주일')
     // 주 (week) 단위: 2주 → 이 주, 3주 → 삼 주
