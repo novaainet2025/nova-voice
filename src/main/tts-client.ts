@@ -1111,9 +1111,19 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bUSB-C\b/gi, '유에스비씨'],
   [/\bUSB-A\b/gi, '유에스비에이'],
   [/\bType-C\b/gi, '타입씨'],
+  [/\bWebSocket\b/g, '웹소켓'],
   [/\bWebRTC\b/g, '웹알티씨'],
   [/\bWebGL\b/g, '웹지엘'],
+  [/\bOAuth2\b/g, '오어스투'],
   [/\bOAuth\b/g, '오어스'],
+  [/\bgRPC\b/g, '지알피씨'],
+  [/\bGraphQL\b/g, '그래프큐엘'],
+  [/\bKotlin\b/g, '코틀린'],
+  [/\bSwift\b/g, '스위프트'],
+  [/\bRust\b/g, '러스트'],
+  [/\bcallback\b/g, '콜백'],
+  [/\bboolean\b/g, '불리언'],
+  [/\bregex\b/gi, '정규식'],
   [/\bNaN\b/g, '낸'],            // Not a Number
   [/\biOS\b/g, '아이오에스'],    // (기존 항목과 중복 방지용 — 이미 처리되면 skip)
   // 기술 동사/행위 (한국어에 직접 붙어쓰이는 경우: merge됐어요 → 머지됐어요)
