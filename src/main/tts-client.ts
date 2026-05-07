@@ -742,6 +742,13 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d+)KB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '킬로바이트')
     // ms (밀리초) 단위
     .replace(/(?<!\.)\b(\d+)ms\b/gi,   (_, n) => toSinoKorean(parseInt(n)) + '밀리초')
+    // 시간·기간 단위 (기존 패턴에 없는 시간/주/배)
+    // 주의: 한국어는 \W이므로 한국어로 끝나는 패턴에 trailing \b 사용 불가
+    .replace(/(?<!\.)\b(\d+)시간/g,    (_, n) => toSinoKorean(parseInt(n)) + '시간')
+    .replace(/(?<!\.)\b(\d+)주일/g,    (_, n) => toSinoKorean(parseInt(n)) + '주일')
+    .replace(/(?<!\.)\b(\d+)주(?!일)/g,(_, n) => toSinoKorean(parseInt(n)) + '주')
+    .replace(/(?<![\d.])\b(\d+)\.(\d+)배/g, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + '배')
+    .replace(/(?<!\.)\b(\d+)배/g,      (_, n) => toSinoKorean(parseInt(n)) + '배')
     // 천단위 콤마 숫자 (1,000 / 50,000 / 1,234,567) → 한국어
     .replace(/\b(\d{1,3}(?:,\d{3})+)\b/g, (m) => {
       const v = parseInt(m.replace(/,/g, ''))
