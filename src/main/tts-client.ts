@@ -697,14 +697,22 @@ function toSinoKorean(n: number): string {
 export function normalizeKoreanNumbers(text: string): string {
   if (!/[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(text)) return text  // 한국어 없으면 패스
 
+  // 고유어(순우리말) 시 단위 — 시간에는 한국 고유어 사용 (열두시, 두시, 아홉시)
+  const NATIVE_HOUR = ['열두', '한', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열', '열한', '열두']
+  //                     0h      1h   2h   3h   4h    5h      6h      7h      8h      9h     10h    11h      12h
+
   // (?<!\.) 소수점 이후 숫자는 단위 변환 금지 (3.8GB → "3.팔기가바이트" 방지)
   return text
     // 시간 형식 HH:MM(:SS) → 한국어 시간 (14:30 → 오후 두시 삼십분)
     .replace(/\b([0-1]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?\b/g, (_, h, m) => {
       const hour = parseInt(h), min = parseInt(m)
-      const hKo = toSinoKorean(hour) + '시'
+      if (hour === 0 && min === 0) return '자정'
+      if (hour === 12 && min === 0) return '정오'
+      const ampm = hour < 12 ? '오전' : '오후'
+      const h12 = hour % 12 || 12
+      const hKo = NATIVE_HOUR[h12] + '시'
       const mKo = min > 0 ? ' ' + toSinoKorean(min) + '분' : ''
-      return hKo + mKo
+      return ampm + ' ' + hKo + mKo
     })
     .replace(/(?<!\.)\b(\d{1,4})년/g,  (_, n) => toSinoKorean(parseInt(n)) + '년')
     .replace(/(?<!\.)\b(\d{1,2})월/g,  (_, n) => toSinoKorean(parseInt(n)) + '월')
