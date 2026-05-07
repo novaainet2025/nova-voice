@@ -481,6 +481,7 @@ export function setupIPC(mainWindow: BrowserWindow): void {
           } catch (e) {
             console.error('[SelectionSummarize] AI failed:', (e as Error).message)
             finalText = '요약에 실패했어요.'
+            pipelineSpeakStreaming(finalText, 'notification').catch(() => {})
           }
         } else {
           finalText = '선택된 텍스트가 없어요. 텍스트를 드래그로 선택한 후 다시 해보세요.'

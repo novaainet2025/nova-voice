@@ -5,6 +5,7 @@ import https from 'https'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { isProviderHealthy, recordProviderSuccess, recordProviderFailure } from './self-heal'
+import { sanitizeTTSText } from './tts-client'
 
 const execFile = promisify(execFileCb)
 
@@ -618,13 +619,15 @@ export async function processWithClaudeStreaming(
       const chunk = d.toString()
       stdout += chunk
       buffer += chunk
-      // Detect sentence boundaries and fire callback
-      const sentenceEnd = /[.!?。！？]\s*/g
+      // 문장 경계 감지 — 소수점(3.14)·약어(e.g.) 앞 마침표는 경계로 보지 않음
+      // 마침표+공백+대문자/한글/숫자 시작 패턴
+      const sentenceEnd = /([.!?。！？])\s+(?=[A-Z가-힣\d])/g
       let match: RegExpExecArray | null
       let lastIdx = 0
       while ((match = sentenceEnd.exec(buffer)) !== null) {
         const sentence = buffer.slice(lastIdx, match.index + match[0].length).trim()
-        if (sentence.length > 5) onSentence(sentence)
+        const cleaned = sanitizeTTSText(sentence)
+        if (cleaned.length > 5) onSentence(cleaned)
         lastIdx = match.index + match[0].length
       }
       buffer = buffer.slice(lastIdx)
@@ -633,8 +636,9 @@ export async function processWithClaudeStreaming(
     proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
 
     proc.on('close', (code: number) => {
-      // Flush remaining buffer
-      if (buffer.trim().length > 5) onSentence(buffer.trim())
+      // Flush remaining buffer — sanitize 적용
+      const remaining = sanitizeTTSText(buffer.trim())
+      if (remaining.length > 5) onSentence(remaining)
       const text = stdout.trim()
       if (code !== 0 && !text) {
         reject(new Error(`Claude exit ${code}: ${stderr.substring(0, 200)}`))
