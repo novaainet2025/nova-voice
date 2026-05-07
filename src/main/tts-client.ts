@@ -868,6 +868,7 @@ export function sanitizeTTSText(raw: string): string {
   t = t.replace(/\|/g, ' ')
 
   // 13. 괄호 안 약어/코드 → 제거
+  t = t.replace(/\(\)/g, '')                       // 빈 괄호 (함수 호출 잔여)
   t = t.replace(/\([A-Za-z0-9_.-]{2,}\)/g, '')
   // 13b. 대괄호 상태 태그 [오류], [Error], [Smart→...] → 제거
   t = t.replace(/\[[^\]]{1,30}\]/g, '')
@@ -932,6 +933,9 @@ export function sanitizeTTSText(raw: string): string {
 
   // 23. 줄 시작의 외로운 구두점 제거
   t = t.replace(/^\s*[,.:;·]\s*/gm, '')
+
+  // 23b. 줄/문장 시작의 고립 조사 제거 (식별자 제거 후 남는 '을', '로', '에서' 등)
+  t = t.replace(/^(?:을|를|이|가|은|는|의|에서|으로|에게|와|과|도|만)\s+/gm, '')
 
   // 24. 연속 공백·줄바꿈 정리
   t = t.replace(/\n{3,}/g, '\n')
