@@ -1073,6 +1073,10 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bfps\b/gi, '에프피에스'],
   // 혼합 대소문자·하이픈 패턴 (ABBR_MAP/PascalCase 규칙으로 불가)
   [/\bWi-Fi\b/gi, '와이파이'],
+  [/\bBluetooth\b/gi, '블루투스'],
+  [/\bUSB-C\b/gi, '유에스비씨'],
+  [/\bUSB-A\b/gi, '유에스비에이'],
+  [/\bType-C\b/gi, '타입씨'],
   [/\bWebRTC\b/g, '웹알티씨'],
   [/\bWebGL\b/g, '웹지엘'],
   [/\bOAuth\b/g, '오어스'],
