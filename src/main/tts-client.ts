@@ -1124,6 +1124,20 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bcallback\b/g, '콜백'],
   [/\bboolean\b/g, '불리언'],
   [/\bregex\b/gi, '정규식'],
+  // React hooks / Browser API — camelCase 삭제 방지 (Rule 20 이전 처리 필수)
+  [/\buseState\b/g, '유즈스테이트'],
+  [/\buseEffect\b/g, '유즈이펙트'],
+  [/\buseRef\b/g, '유즈레프'],
+  [/\buseCallback\b/g, '유즈콜백'],
+  [/\buseMemo\b/g, '유즈메모'],
+  [/\buseContext\b/g, '유즈컨텍스트'],
+  [/\blocalStorage\b/g, '로컬스토리지'],
+  [/\bsessionStorage\b/g, '세션스토리지'],
+  [/\bsetTimeout\b/g, '셋타임아웃'],
+  [/\bsetInterval\b/g, '셋인터벌'],
+  [/\bquerySelector\b/g, '쿼리셀렉터'],
+  [/\bgetElementById\b/g, '아이디 선택'],
+  [/\binnerHTML\b/g, '이너에이치티엠엘'],
   [/\bNaN\b/g, '낸'],            // Not a Number
   [/\biOS\b/g, '아이오에스'],    // (기존 항목과 중복 방지용 — 이미 처리되면 skip)
   // 기술 동사/행위 (한국어에 직접 붙어쓰이는 경우: merge됐어요 → 머지됐어요)
