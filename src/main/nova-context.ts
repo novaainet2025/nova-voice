@@ -262,4 +262,4 @@ export const NCO_CODING_CONTEXT = `
 /**
  * 음성 출력용 답변 가이드 — answer/search 인텐트에서 AI 프롬프트에 추가.
  */
-export const VOICE_ANSWER_GUIDE = '답변 규칙: 2-3문장 이내로 간결하게 (음성 출력용). 마크다운(**, ##, -, 코드블록) 사용 금지. 질문에 직접 답하고 부연설명 최소화.'
+export const VOICE_ANSWER_GUIDE = '답변 규칙: 2-3문장 이내로 간결하게 (음성 출력용). 마크다운·영문 약어(API, URL 등)·코드 사용 금지. 구어체 한국어로 직접 답하고 부연설명 최소화.'

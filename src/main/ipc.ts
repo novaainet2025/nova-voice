@@ -11,7 +11,8 @@ import { pipelineSpeak, pipelineSpeakStreaming, getPipelineStatus, initPipeline,
 import { createPTY, writeToPTY, sendCommandToPTY, resizePTY, destroyPTY, typeCommandInPTY, isPTYReady, startPTYResponseCapture, askClaudeViaPTY, isClaudeRunningInPTY } from './pty'
 import { smartSpeak, getSpeakers, MLX_VOICES, setMLXVoice, getMLXVoice,
   getTTSServerStatuses, startTTSServer, stopTTSServer, previewTTSVoice,
-  SAY_VOICES, setActiveTTSModel, setActiveSayVoice, getActiveTTSModel } from './tts-client'
+  SAY_VOICES, setActiveTTSModel, setActiveSayVoice, getActiveTTSModel,
+  sanitizeTTSText } from './tts-client'
 import { BUILTIN_MODES } from '../shared/types'
 import type { AppSettings, TranscriptionResult, AIMode } from '../shared/types'
 import path from 'path'
@@ -353,7 +354,7 @@ export function setupIPC(mainWindow: BrowserWindow): void {
       debugBroadcast('warn', '[취소] AI 작업 취소 요청됨')
       cancelCurrentProcessing()
       // TTS 중단
-      try { smartSpeak('취소됐습니다.', { lang: 'ko' }).catch(() => {}) } catch { /* ignore */ }
+      try { smartSpeak('취소됐어요.', { lang: 'ko' }).catch(() => {}) } catch { /* ignore */ }
       mainWindow.webContents.send('ai:stage', 'idle')
       mainWindow.webContents.send('transcription:progress', 0)
     }
@@ -479,10 +480,10 @@ export function setupIPC(mainWindow: BrowserWindow): void {
             )
           } catch (e) {
             console.error('[SelectionSummarize] AI failed:', (e as Error).message)
-            finalText = '요약에 실패했습니다.'
+            finalText = '요약에 실패했어요.'
           }
         } else {
-          finalText = '선택된 텍스트가 없습니다. 먼저 마우스로 텍스트를 드래그해서 선택한 후 단축키를 누르세요.'
+          finalText = '선택된 텍스트가 없어요. 텍스트를 드래그로 선택한 후 다시 해보세요.'
           console.log('[SelectionSummarize] No captured text')
           pipelineSpeakStreaming(finalText, 'notification').catch(() => {})
         }
@@ -709,9 +710,9 @@ JSON만:`
           debugBroadcast('info', `[Smart] 최종 인텐트: ${intent}${ncoSubtype ? '/' + ncoSubtype : ''}`)
           // 인텐트 결정 → 작업 중계 TTS
           const WORK_LABELS: Record<string, string> = {
-            command: '명령 실행', screen: '화면 분석 중', search: '검색 중', answer: '답변 중',
-            'nco/discuss': 'AI 토론 시작', 'nco/team': 'AI 팀 실행', 'nco/agent': '에이전트 실행',
-            'nco/hive': '전체 AI 실행', 'nco/code': 'AI 코딩 시작', nco: 'NCO 실행',
+            command: '명령 실행할게요.', screen: '화면 분석 중이에요.', search: '검색 중이에요.', answer: '답변할게요.',
+            'nco/discuss': 'AI들이 토론할게요.', 'nco/team': 'AI 팀이 작업할게요.', 'nco/agent': '에이전트가 시작할게요.',
+            'nco/hive': '전체 AI를 동원할게요.', 'nco/code': 'AI가 코딩할게요.', nco: '실행할게요.',
           }
           speakWork(WORK_LABELS[ncoSubtype ? `nco/${ncoSubtype}` : intent] ?? '')
 
@@ -804,10 +805,10 @@ JSON만:`
               aiResult = `[Smart→NCO:PTY-Claude:${ncoSubtype || 'conductor'}] 터미널 실행 중`
               debugBroadcast('info', `[NCO] PTY Claude에 전달: ${ptyCmd.substring(0, 80)}`)
               const confirmMsg = ncoSubtype === 'discuss'
-                ? 'Claude 터미널에서 AI 토론을 시작합니다.'
-                : ncoSubtype === 'team' ? 'Claude 터미널에서 AI 팀을 실행합니다.'
-                : ncoSubtype === 'hive' ? 'Claude 터미널에서 전체 AI를 동원합니다.'
-                : 'Claude 터미널에서 NCO를 실행합니다.'
+                ? '터미널에서 AI 토론을 시작할게요.'
+                : ncoSubtype === 'team' ? '터미널에서 AI 팀을 실행할게요.'
+                : ncoSubtype === 'hive' ? '터미널에서 전체 AI를 동원할게요.'
+                : '터미널에서 실행할게요.'
               smartSpeak(confirmMsg, { lang: 'ko' }).catch(() => {})
               // Stop 훅이 Claude 응답 완료 시 TTS 출력
             } else {
@@ -817,12 +818,8 @@ JSON만:`
               ? `${NCO_CODING_CONTEXT}\n\n## 사용자 요청\n${text}`
               : `${NCO_FULL_CONTEXT}\n\n## 사용자 음성 요청\n${text}`
 
-            // 마크다운 스트립 헬퍼
-            const stripMdForTTS = (s: string) => s
-              .replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1')
-              .replace(/```[\s\S]*?```/g, '').replace(/`([^`]+)`/g, '$1')
-              .replace(/^#+\s+/gm, '').replace(/^[-*•]\s+/gm, '')
-              .replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()
+            // 마크다운 스트립 헬퍼 — sanitizeTTSText로 통합
+            const stripMdForTTS = sanitizeTTSText
 
             // 토론 결과에서 핵심 결론만 추출 → TTS (최대 120자)
             const extractConclusion = (text: string): string => {
@@ -841,7 +838,7 @@ JSON만:`
               const stripped = stripMdForTTS(resultText)
               const hasCode = resultText.includes('```') || resultText.includes('function ') || resultText.includes('const ')
               const ttsSnippet = hasCode
-                ? `${label} 완료. 결과를 화면에서 확인하세요.`
+                ? '완료됐어요. 화면에서 확인해주세요.'
                 : stripped.substring(0, 200)
               smartSpeak(ttsSnippet, { lang: 'ko' }).catch(e => console.error('[TTS NCO]', (e as Error).message))
             }
@@ -852,10 +849,10 @@ JSON만:`
             if (isLongTask) {
               // 즉시 확인 TTS — 요청 접수 알림
               const confirmMsg = ncoSubtype === 'discuss'
-                ? '네, AI들이 토론을 시작합니다. 완료되면 결과를 알려드릴게요.'
-                : ncoSubtype === 'team' ? '네, AI 팀이 병렬 작업을 시작합니다.'
-                : ncoSubtype === 'agent' ? '네, 자율 에이전트가 작업을 시작합니다.'
-                : '네, 전체 AI를 동원합니다. 잠시 기다려주세요.'
+                ? '네, AI들이 토론할게요. 완료되면 알려드릴게요.'
+                : ncoSubtype === 'team' ? '네, AI 팀이 작업을 시작할게요.'
+                : ncoSubtype === 'agent' ? '네, 에이전트가 작업을 시작할게요.'
+                : '네, 전체 AI를 동원할게요. 잠시만요.'
               smartSpeak(confirmMsg, { lang: 'ko' }).catch(() => {})
               debugBroadcast('info', `[NCO] 작업 확인 — "${text.substring(0, 60)}..." 백그라운드 시작`)
 
@@ -872,9 +869,9 @@ JSON만:`
                   progressInterval = setInterval(() => {
                     progressCount++
                     const msgs = [
-                      'AI들이 아직 토론 중입니다.',
-                      '토론이 계속되고 있습니다. 조금만 더 기다려주세요.',
-                      '깊이 있는 토론이 진행 중입니다.',
+                      '아직 분석 중이에요.',
+                      '조금만 더 기다려주세요.',
+                      '거의 다 됐어요.',
                     ]
                     smartSpeak(msgs[Math.min(progressCount - 1, msgs.length - 1)], { lang: 'ko' }).catch(() => {})
                     debugBroadcast('info', `[NCO] 진행 중... (${progressCount * 30}초 경과)`)
@@ -888,7 +885,7 @@ JSON만:`
                     debugBroadcast('info', '[NCO] discussion 시작 (최대 10분)...')
                     let r
                     try {
-                      smartSpeak("토론을 시작합니다.", { lang: "ko" }).catch(() => {})
+                      smartSpeak("분석 시작할게요.", { lang: "ko" }).catch(() => {})
                     r = await retryNCOTask(() => startDiscussion(ncoPrompt, undefined, (msg, level = 'info') => debugBroadcast(level, msg), abortSignal), 'discussion')
                     } catch (discussErr) {
                       const errMsg = (discussErr as Error).message
@@ -901,10 +898,10 @@ JSON만:`
                     bgAiResult = `[Smart→Discussion] ${r.text}`
                     debugBroadcast('success', `[NCO] Discussion 완료 (참가자: ${r.participants?.join(', ')}, ${r.text.length}자)`)
                     const conclusionTTS = extractConclusion(r.text)
-                    smartSpeak(`토론이 완료됐습니다. ${conclusionTTS}`, { lang: 'ko' }).catch(() => {})
+                    smartSpeak(`토론이 끝났어요. ${conclusionTTS}`, { lang: 'ko' }).catch(() => {})
                   } else if (ncoSubtype === 'team') {
                     console.log('[Smart→NCO Team] 백그라운드')
-                    smartSpeak("팀 작업을 시작합니다.", { lang: "ko" }).catch(() => {})
+                    smartSpeak("여러 AI가 함께 작업할게요.", { lang: "ko" }).catch(() => {})
                     const r = await retryNCOTask(() => startParallel(ncoPrompt), 'parallel')
                     bgText = r.text
                     bgAiResult = `[Smart→Team] ${r.text}`
@@ -919,7 +916,7 @@ JSON만:`
                     speakNCOResult(r.text, 'NCO 에이전트')
                   } else if (ncoSubtype === 'hive') {
                     console.log('[Smart→NCO Hive] 백그라운드')
-                    smartSpeak("하이브를 시작합니다.", { lang: "ko" }).catch(() => {})
+                    smartSpeak("여러 AI가 함께 분석할게요.", { lang: "ko" }).catch(() => {})
                     const r = await retryNCOTask(() => startHive(ncoPrompt), 'hive')
                     bgText = r.text
                     bgAiResult = `[Smart→Hive] ${r.text}`
@@ -947,7 +944,7 @@ JSON만:`
                 } catch (e) {
                   const errMsg = (e as Error).message
                   debugBroadcast('error', `[NCO] 백그라운드 실패 (${ncoSubtype}): ${errMsg.substring(0, 100)}`)
-                  smartSpeak('NCO 처리에 실패했습니다.', { lang: 'ko' }).catch(() => {})
+                  smartSpeak('잠시 문제가 생겼어요.', { lang: 'ko' }).catch(() => {})
                   // 에러도 UI에 전달 — 대화 스레드에 실패 메시지 표시
                   if (!mainWindow.isDestroyed()) {
                     const errResult: TranscriptionResult = {
@@ -978,7 +975,7 @@ JSON만:`
                 if (ncoSubtype === 'code') {
                   console.log('[Smart→NCO Code] conductor 라우팅')
                   debugBroadcast('info', '[NCO] code → conductor (aider/codex 자동 선택)')
-                  smartSpeak("AI 분석을 시작합니다.", { lang: "ko" }).catch(() => {})
+                  smartSpeak("분석할게요.", { lang: "ko" }).catch(() => {})
                   const r = await startConductor(ncoPrompt, abortSignal)
                   finalText = r.text
                   aiResult = `[Smart→NCO:Code] ${r.text}`
@@ -988,7 +985,7 @@ JSON만:`
                   // subtype 미지정 → conductor (자동 모드+AI 선택)
                   console.log('[Smart→NCO Conductor (auto)]')
                   debugBroadcast('info', '[NCO] conductor 시작 (자동 모드 선택)...')
-                  smartSpeak("AI 분석을 시작합니다.", { lang: "ko" }).catch(() => {})
+                  smartSpeak("분석할게요.", { lang: "ko" }).catch(() => {})
                   const r = await startConductor(ncoPrompt, abortSignal)
                   finalText = r.text
                   aiResult = `[Smart→NCO:${r.mode}] ${r.text}`
@@ -1000,7 +997,7 @@ JSON만:`
                 aiResult = `[NCO Error] ${errMsg}`
                 debugBroadcast('error', `[NCO] 실패 (${ncoSubtype}): ${errMsg.substring(0, 100)}`)
                 console.error(`[Smart→NCO] ${ncoSubtype} failed:`, errMsg)
-                smartSpeak(`처리 중 오류가 발생했습니다. ${errMsg.substring(0, 50)}`, { lang: 'ko' }).catch(() => {})
+                smartSpeak('잠시 문제가 생겼어요.', { lang: 'ko' }).catch(() => {})
               }
             }
             } // end PTY else
@@ -1010,11 +1007,7 @@ JSON만:`
           const nowDate = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })
 
           // stripMarkdown 헬퍼 (answer/search/screen 공통)
-          const stripMd = (s: string) => s
-            .replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1')
-            .replace(/^[-*•]\s+/gm, '').replace(/^#+\s+/gm, '')
-            .replace(/`([^`]+)`/g, '$1').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-            .replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()
+          const stripMd = sanitizeTTSText
 
           // ── Screen: 화면 캡처 → Gemini Vision (await — 오버레이 유지) ──
           if (intent === 'screen') {
@@ -1051,7 +1044,7 @@ JSON만:`
               debugBroadcast('error', `[Screen] 분석 실패: ${errMsg.substring(0, 100)}${fixDesc ? ` → ${fixDesc}` : ''}`)
               finalText = `화면 분석 실패`
               aiResult = `[Smart→Screen Error]`
-              smartSpeak('화면 분석에 실패했습니다.', { lang: 'ko' }).catch(() => {})
+              smartSpeak('화면 분석에 실패했어요.', { lang: 'ko' }).catch(() => {})
             }
           }
 
@@ -1074,7 +1067,7 @@ JSON만:`
                 const msg = (e as Error).message
                 console.error('[PTY-Claude] askClaudeViaPTY error:', msg)
                 if (msg.includes('timeout') || msg.includes('타임아웃') || msg.includes('maxMs')) {
-                  smartSpeak('Claude 응답 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.', { lang: 'ko' }).catch(() => {})
+                  smartSpeak('응답 시간이 너무 길어요. 잠시 후 다시 해볼게요.', { lang: 'ko' }).catch(() => {})
                   debugBroadcast('warn', '[PTY-Claude] 90초 응답 캡처 타임아웃')
                 } else {
                   debugBroadcast('error', `[PTY-Claude] 캡처 실패: ${msg.substring(0, 80)}`)
@@ -1145,7 +1138,7 @@ JSON만:`
                   }
                 }
                 if (!finalText) {
-                  smartSpeak('Gemini와 Claude가 모두 사용 불가입니다. 잠시 후 다시 시도해 주세요.', { lang: 'ko' }).catch(() => {})
+                  smartSpeak('지금은 AI가 응답하지 않아요. 잠시 후 다시 해볼게요.', { lang: 'ko' }).catch(() => {})
                   finalText = ''
                   aiResult = `[Smart→${label} Error: all providers down]`
                 }
@@ -1190,7 +1183,7 @@ JSON만:`
 
                   finalText = ''
                   aiResult = `[Smart→${label} Error]`
-                  smartSpeak('검색에 실패했습니다. 잠시 후 다시 시도해 주세요.', { lang: 'ko' }).catch(() => {})
+                  smartSpeak('검색이 안 됐어요. 잠시 후 다시 해볼게요.', { lang: 'ko' }).catch(() => {})
                 }
               }
             }
@@ -1230,7 +1223,7 @@ JSON만:`
           sendProgress('nco_discussion', 0.5)
           console.log(`[NCO] Starting discussion: "${result.text}"`)
           try {
-            speakProgress("토론을 시작합니다. 2-3분 소요됩니다...")
+            speakProgress("분석 시작할게요. 2-3분 정도 걸려요.")
             const r = await startDiscussion(result.text)
             finalText = r.text
             aiResult = `[Discussion] ${r.text}`
@@ -1244,7 +1237,7 @@ JSON만:`
           sendProgress('nco_parallel', 0.5)
           console.log(`[NCO] Starting parallel: "${result.text}"`)
           try {
-            speakProgress("팀 병렬 작업 진행 중...")
+            speakProgress("여러 AI가 작업 중이에요.")
             const r = await startParallel(result.text)
             finalText = r.text
             aiResult = `[Team] ${r.text}`
@@ -1257,7 +1250,7 @@ JSON만:`
           sendProgress('nco_agent', 0.5)
           console.log(`[NCO] Starting agent: "${result.text}"`)
           try {
-            speakProgress("에이전트 작업 진행 중...")
+            speakProgress("에이전트가 작업 중이에요.")
             const r = await startAgent(result.text)
             finalText = r.text
             aiResult = `[Agent] ${r.text}`
@@ -1270,7 +1263,7 @@ JSON만:`
           sendProgress('nco_hive', 0.5)
           console.log(`[NCO] Starting hive: "${result.text}"`)
           try {
-            speakProgress("하이브 모드를 시작합니다. 전체 AI가 분석합니다...")
+            speakProgress("모든 AI가 분석할게요.")
             const r = await startHive(result.text)
             finalText = r.text
             aiResult = `[Hive] ${r.text}`
@@ -1588,7 +1581,7 @@ JSON만:`
   ipcMain.handle('tts:server-start', async (_event, id: string) => {
     speakProgress(ProgressMessages.serverStart(id))
     const ok = await startTTSServer(id as any)
-    speakProgress(ok ? ProgressMessages.serverReady(id) : `${id} 시작 실패`)
+    speakProgress(ok ? ProgressMessages.serverReady(id) : '시작에 실패했어요.')
     return ok
   })
   ipcMain.handle('tts:server-stop', async (_event, id: string) => stopTTSServer(id))
@@ -1701,21 +1694,21 @@ JSON만:`
 
           const agent = inv.targetAgentId ?? 'NCO'
           if (inv.status === 'failed') {
-            smartSpeak(`${agent} 작업이 실패했습니다.`, { lang: 'ko' }).catch(() => {})
+            smartSpeak('작업이 실패했어요.', { lang: 'ko' }).catch(() => {})
             debugBroadcast('error', `[NCO Poll] ${agent} 실패 — ${inv.error?.substring(0, 80) ?? ''}`)
             continue
           }
 
           const summary = inv.resultSummary?.trim()
           if (!summary) {
-            smartSpeak(`${agent} 작업이 완료됐습니다.`, { lang: 'ko' }).catch(() => {})
+            smartSpeak('작업이 완료됐어요.', { lang: 'ko' }).catch(() => {})
             continue
           }
 
           // 코드/긴 결과 → 요약 안내만
           const hasCode = summary.includes('```') || summary.includes('function ') || summary.includes('const ')
           const snippet = hasCode
-            ? `${agent} 작업 완료. 결과를 화면에서 확인하세요.`
+            ? `작업이 완료됐어요. 화면에서 확인해주세요.`
             : summary.replace(/[#*`>_~]/g, '').substring(0, 180)
 
           debugBroadcast('success', `[NCO Poll] ${agent} 완료 → TTS: "${snippet.substring(0, 60)}"`)

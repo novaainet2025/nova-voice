@@ -271,7 +271,7 @@ export function UnifiedPanel() {
     const files = Array.from(e.dataTransfer.files)
 
     for (const file of files) {
-      const filePath = (file as any).path as string | undefined
+      const filePath = window.electronAPI.getPathForFile(file) || undefined
       const isImage = file.type.startsWith('image/')
 
       // 이미지: 첨부 대기열에 추가 (PTY/Claude-p는 텍스트 전용)
@@ -300,7 +300,19 @@ export function UnifiedPanel() {
 
       addMsg('typed', `📎 ${file.name}`)
 
-      // claude -p 실행 — PTY bash 오염 없이 독립 프로세스로 파일 분석
+      // PTY Claude Code 감지 → PTY로 직접 전달 (@file 참조 형식)
+      try {
+        const ptyStatus = await window.electronAPI?.ptyClaudeRunning?.()
+        if (ptyStatus?.claudeDetected) {
+          setClaudeRunning(true)
+          const ptyMsg = filePath ? `@${filePath} 분석해줘` : msg
+          await window.electronAPI!.ptyType(ptyMsg)
+          continue
+        }
+      } catch { /* PTY Claude 감지 실패 → claudeSend 폴백 */ }
+
+      // PTY Claude 없음 → 채팅 뷰 전환 후 claude -p 실행 (출력이 채팅에 보임)
+      if (!isV2T) setCurrentMode('direct')
       if (window.electronAPI?.claudeSend) {
         setClaudeRunning(true)
         try { await window.electronAPI.claudeSend(msg) }
@@ -393,14 +405,14 @@ export function UnifiedPanel() {
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
     >
-      {/* Drag overlay */}
+      {/* Drag overlay — 오버레이 숨김, 드롭 감지 레이어만 유지 */}
       {isDragOver && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center pointer-events-none
-          bg-primary-600/15 border-2 border-dashed border-primary-400/60 backdrop-blur-sm">
-          <div className="text-3xl mb-2">📂</div>
-          <p className="text-primary-300 text-sm font-medium">파일을 여기에 놓으세요</p>
-          <p className="text-white/40 text-xs mt-1">Claude에게 직접 전달됩니다</p>
-        </div>
+        <div
+          className="absolute inset-0 z-50"
+          onDragOver={(e) => e.preventDefault()}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        />
       )}
 
       {/* ── Top bar: mode toggle + status ─────────────────────────────────── */}

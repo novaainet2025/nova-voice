@@ -348,7 +348,7 @@ export async function speak(text: string, options?: Partial<TTSOptions>): Promis
 // 텍스트를 짧은 청크로 분리 → chunk[i] 재생 중에 chunk[i+1] 동시 합성
 // 효과: 첫 소리 대기 1.5-2s (기존 4-8s), 전체 시간 30-50% 단축
 
-function splitForQwen3Streaming(text: string, maxLen = 45): string[] {
+function splitForQwen3Streaming(text: string, maxLen = 60): string[] {
   // 1단계: 강한 문장 경계에서 분리 (.!?。！？ 및 줄바꿈)
   const raw = text
     .split(/(?<=[.!?。！？])\s+|(?<=\n)/)
@@ -361,9 +361,9 @@ function splitForQwen3Streaming(text: string, maxLen = 45): string[] {
     if (sentence.length <= maxLen) {
       chunks.push(sentence)
     } else {
-      // 2단계: 쉼표·한국어 쉼표에서 추가 분리
+      // 2단계: 쉼표·한국어 접속부사 앞에서 추가 분리
       const parts = sentence
-        .split(/(?<=[,，、])\s*/)
+        .split(/(?<=[,，、])\s*|(?=그리고\s|그래서\s|하지만\s|또한\s|따라서\s|그런데\s|즉\s)/u)
         .map(s => s.trim())
         .filter(s => s.length > 0)
 
@@ -373,11 +373,19 @@ function splitForQwen3Streaming(text: string, maxLen = 45): string[] {
           current += (current ? ' ' : '') + part
         } else {
           if (current) chunks.push(current)
-          // 단일 part가 maxLen 초과 시 강제 분리
+          // 단일 part가 maxLen 초과 시 어절(공백) 단위 분리
           if (part.length > maxLen) {
-            for (let i = 0; i < part.length; i += maxLen) {
-              chunks.push(part.slice(i, i + maxLen))
+            const words = part.split(/\s+/)
+            let sub = ''
+            for (const w of words) {
+              if (sub.length + w.length + 1 <= maxLen) {
+                sub += (sub ? ' ' : '') + w
+              } else {
+                if (sub) chunks.push(sub)
+                sub = w.length > maxLen ? w.slice(0, maxLen) : w
+              }
             }
+            if (sub) chunks.push(sub)
             current = ''
           } else {
             current = part
@@ -388,11 +396,11 @@ function splitForQwen3Streaming(text: string, maxLen = 45): string[] {
     }
   }
 
-  // 3단계: 너무 짧은 끝 청크는 앞에 합치기 (5자 이하 단독 청크 방지)
+  // 3단계: 너무 짧은 끝 청크는 앞에 합치기 (8자 이하 단독 청크 방지)
   const merged: string[] = []
   for (const chunk of chunks) {
     const prev = merged[merged.length - 1]
-    if (prev && chunk.length <= 5 && prev.length + chunk.length <= maxLen + 10) {
+    if (prev && chunk.length <= 8 && prev.length + chunk.length <= maxLen + 15) {
       merged[merged.length - 1] = prev + ' ' + chunk
     } else {
       merged.push(chunk)
@@ -405,7 +413,6 @@ function splitForQwen3Streaming(text: string, maxLen = 45): string[] {
 export async function speakQwen3Chunked(text: string, options?: Partial<TTSOptions>): Promise<void> {
   const chunks = splitForQwen3Streaming(text)
 
-  // 단일 짧은 텍스트 → 그냥 바로 합성 (파이프라인 오버헤드 불필요)
   if (chunks.length <= 1) {
     const result = await synthesize({ text, ...options })
     await playAudio(result.wavPath)
@@ -414,152 +421,140 @@ export async function speakQwen3Chunked(text: string, options?: Partial<TTSOptio
 
   console.log(`[Qwen3-Chunked] ${chunks.length}청크: ${chunks.map((c, i) => `[${i}]"${c.substring(0, 18)}"`).join(' ')}`)
 
-  // 파이프라인: chunk[0] 합성 시작 → 재생 중에 chunk[1] 합성 → ...
-  let pending: Promise<TTSResult> = synthesize({ text: chunks[0], ...options })
+  const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
+  if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
 
-  for (let i = 0; i < chunks.length; i++) {
-    const current = await pending
-
-    // chunk[i+1] 합성을 playAudio 전에 시작 → 재생과 합성이 동시 진행
-    if (i + 1 < chunks.length) {
-      pending = synthesize({ text: chunks[i + 1], ...options })
+  // synthFn: 합성 + 후미 무음 제거
+  const synthFn = async (t: string): Promise<string | null> => {
+    try {
+      const result = await synthesize({ text: t, ...options })
+      const buf = fs.readFileSync(result.wavPath)
+      const trimmed = trimWAVSilence(buf)
+      if (trimmed.length < buf.length) fs.writeFileSync(result.wavPath, trimmed)
+      return result.wavPath
+    } catch (e) {
+      console.warn(`[Qwen3-Chunked] chunk skip: "${t.substring(0, 20)}" —`, (e as Error).message)
+      return null
     }
-
-    await playAudio(current.wavPath)
-    // 재생 완료 시 next chunk는 이미 완성(또는 거의 완성) 상태
   }
+
+  // Qwen3 :7860은 샘플레이트가 다를 수 있으므로 WAV 병합 비활성화 (silence trim만 적용)
+  await runChunkedPipeline(chunks, cacheDir, synthFn, false)
 }
 
 // ─── MLX-KO 청크 스트리밍 (:8800 Qwen3-TTS 전용) ─────────────────────────────
-// 파이프라인: chunk[i+1] 합성 중에 chunk[i] 재생 → 지연 최소화
+// 최적화: 후미 무음 제거 + lookahead 2 + WAV 병합
 export async function speakMLXKoChunked(text: string, voice?: string, api = MLX_KO_API, model = MLX_KO_MODEL): Promise<void> {
   const chunks = splitForQwen3Streaming(text)
-  // Qwen3-TTS(:8800) 사용 — 한국어 특화, 단일화자 (voice 파라미터 서버에서 무시됨)
-  const actualApi = api
-  const actualModel = model
   // Qwen3-Base는 단일화자 — voice는 Kokoro fallback 시에만 사용
   const v = (api === MLX_EN_API) ? getKokoroVoice(voice || mlxTTSVoice) : 'qwen3'
   const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
   if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
 
-  const synthChunk = async (t: string): Promise<string> => {
-    const normalized = normalizeKoreanNumbers(t)
-    const audioData = await synthesizeMLXSegment(normalized, actualModel, v, actualApi)
-    const p = path.join(cacheDir, `mlx-ko-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
-    fs.writeFileSync(p, audioData)
-    return p
-  }
-
   if (chunks.length <= 1) {
-    const p = await synthChunk(text)
+    const normalized = normalizeKoreanNumbers(chunks[0] || text)
+    const audioData = await synthesizeMLXSegment(normalized, model, v, api)
+    if (audioData.length < 100) return
+    const trimmed = trimWAVSilence(audioData)
+    const p = path.join(cacheDir, `mlx-ko-${Date.now()}.wav`)
+    fs.writeFileSync(p, trimmed)
     await playAudio(p)
     return
   }
 
   console.log(`[MLX-KO-Chunked] ${chunks.length}청크: ${chunks.map((c, i) => `[${i}]"${c.substring(0, 18)}"`).join(' ')}`)
 
-  // 파이프라인: chunk[0] 합성 시작 → 재생 중에 chunk[1] 합성 → ...
-  const safeSynthChunk = async (t: string): Promise<string | null> => {
-    try { return await synthChunk(t) } catch (e) {
+  const synthFn = async (t: string): Promise<string | null> => {
+    try {
+      const normalized = normalizeKoreanNumbers(t)
+      const audioData = await synthesizeMLXSegment(normalized, model, v, api)
+      if (audioData.length < 100) throw new Error(`Empty audio (${audioData.length} bytes)`)
+      const trimmed = trimWAVSilence(audioData)  // 후미 무음 제거
+      const p = path.join(cacheDir, `mlx-ko-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
+      fs.writeFileSync(p, trimmed)
+      return p
+    } catch (e) {
       console.warn(`[MLX-KO-Chunked] chunk skip: "${t.substring(0, 20)}" —`, (e as Error).message)
       return null
     }
   }
 
-  let pending: Promise<string | null> = safeSynthChunk(chunks[0])
-
-  for (let i = 0; i < chunks.length; i++) {
-    const currentPath = await pending
-    if (i + 1 < chunks.length) {
-      pending = safeSynthChunk(chunks[i + 1])
-    }
-    if (currentPath) await playAudio(currentPath)
-  }
+  await runChunkedPipeline(chunks, cacheDir, synthFn, true)
 }
 
 // ─── MLX-EN 청크 스트리밍 (:8801 Kokoro-82M 전용) ────────────────────────────
-// speakMLXKoChunked와 동일 파이프라인, synthesizeMLXSegment(:8801) 사용
+// 최적화: 후미 무음 제거 + lookahead 2 + WAV 병합
 export async function speakMLXEnChunked(text: string, voice?: string, api = MLX_EN_API, model = MLX_EN_MODEL): Promise<void> {
   const chunks = splitForQwen3Streaming(text)
   const v = voice || getKokoroVoice(mlxTTSVoice)
   const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
   if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
 
-  const synthChunk = async (t: string): Promise<string> => {
-    const audioData = await synthesizeMLXSegment(t, model, v, api)
-    if (audioData.length < 100) throw new Error(`Empty audio (${audioData.length} bytes)`)
-    const p = path.join(cacheDir, `mlx-en-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
-    fs.writeFileSync(p, audioData)
-    return p
-  }
-
-  const safeSynthChunkEn = async (t: string): Promise<string | null> => {
-    try { return await synthChunk(t) } catch (e) {
-      console.warn(`[MLX-EN-Chunked] chunk skip: "${t.substring(0, 20)}" —`, (e as Error).message)
-      return null
-    }
-  }
-
   if (chunks.length <= 1) {
-    const p = await safeSynthChunkEn(text)
-    if (p) await playAudio(p)
+    const audioData = await synthesizeMLXSegment(chunks[0] || text, model, v, api)
+    if (audioData.length < 100) return
+    const trimmed = trimWAVSilence(audioData)
+    const p = path.join(cacheDir, `mlx-en-${Date.now()}.wav`)
+    fs.writeFileSync(p, trimmed)
+    await playAudio(p)
     return
   }
 
   console.log(`[MLX-EN-Chunked] ${chunks.length}청크: ${chunks.map((c, i) => `[${i}]"${c.substring(0, 18)}"`).join(' ')}`)
 
-  // 파이프라인: chunk[0] 합성 시작 → 재생 중에 chunk[1] 합성 → ...
-  let pending: Promise<string | null> = safeSynthChunkEn(chunks[0])
-
-  for (let i = 0; i < chunks.length; i++) {
-    const currentPath = await pending
-    if (i + 1 < chunks.length) {
-      pending = safeSynthChunkEn(chunks[i + 1])
+  const synthFn = async (t: string): Promise<string | null> => {
+    try {
+      const audioData = await synthesizeMLXSegment(t, model, v, api)
+      if (audioData.length < 100) throw new Error(`Empty audio (${audioData.length} bytes)`)
+      const trimmed = trimWAVSilence(audioData)  // 후미 무음 제거
+      const p = path.join(cacheDir, `mlx-en-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
+      fs.writeFileSync(p, trimmed)
+      return p
+    } catch (e) {
+      console.warn(`[MLX-EN-Chunked] chunk skip: "${t.substring(0, 20)}" —`, (e as Error).message)
+      return null
     }
-    if (currentPath) await playAudio(currentPath)
   }
+
+  await runChunkedPipeline(chunks, cacheDir, synthFn, true)
 }
 
 // ─── MLX-MIX 청크 스트리밍 (:8802 Spark-TTS 전용) ────────────────────────────
-// Spark-TTS — 한영 혼용, 다화자 (ko_male/ko_female/male_1/female_1)
+// 최적화: 후미 무음 제거 + lookahead 2 + WAV 병합
 export async function speakSparkChunked(text: string, sparkVoice: string): Promise<void> {
   const chunks = splitForQwen3Streaming(text)
   const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
   if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
 
-  const synthChunk = async (t: string): Promise<string> => {
-    const normalized = normalizeKoreanNumbers(t)
-    const audioData = await synthesizeMLXSegment(normalized, MLX_MIX_MODEL, sparkVoice, MLX_MIX_API)
-    if (audioData.length < 100) throw new Error(`Empty audio (${audioData.length} bytes)`)
-    const p = path.join(cacheDir, `mlx-mix-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
-    fs.writeFileSync(p, audioData)
-    return p
-  }
-
   if (chunks.length <= 1) {
-    const p = await synthChunk(text)
+    const normalized = normalizeKoreanNumbers(chunks[0] || text)
+    const audioData = await synthesizeMLXSegment(normalized, MLX_MIX_MODEL, sparkVoice, MLX_MIX_API)
+    if (audioData.length < 100) return
+    const trimmed = trimWAVSilence(audioData)
+    const p = path.join(cacheDir, `mlx-mix-${Date.now()}.wav`)
+    fs.writeFileSync(p, trimmed)
     await playAudio(p)
     return
   }
 
   console.log(`[Spark-Chunked] ${chunks.length}청크 voice=${sparkVoice}: ${chunks.map((c, i) => `[${i}]"${c.substring(0, 18)}"`).join(' ')}`)
 
-  const safeSynthChunk = async (t: string): Promise<string | null> => {
-    try { return await synthChunk(t) } catch (e) {
+  const synthFn = async (t: string): Promise<string | null> => {
+    try {
+      const normalized = normalizeKoreanNumbers(t)
+      const audioData = await synthesizeMLXSegment(normalized, MLX_MIX_MODEL, sparkVoice, MLX_MIX_API)
+      if (audioData.length < 100) throw new Error(`Empty audio (${audioData.length} bytes)`)
+      const trimmed = trimWAVSilence(audioData)  // 후미 무음 제거
+      const p = path.join(cacheDir, `mlx-mix-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
+      fs.writeFileSync(p, trimmed)
+      return p
+    } catch (e) {
       console.warn(`[Spark-Chunked] chunk skip: "${t.substring(0, 20)}" —`, (e as Error).message)
       return null
     }
   }
 
-  let pending: Promise<string | null> = safeSynthChunk(chunks[0])
-
-  for (let i = 0; i < chunks.length; i++) {
-    const currentPath = await pending
-    if (i + 1 < chunks.length) {
-      pending = safeSynthChunk(chunks[i + 1])
-    }
-    if (currentPath) await playAudio(currentPath)
-  }
+  await runChunkedPipeline(chunks, cacheDir, synthFn, true)
 }
 
 // Fallback: use macOS 'say' or similar if TTS server unavailable
@@ -702,29 +697,84 @@ function toSinoKorean(n: number): string {
 export function normalizeKoreanNumbers(text: string): string {
   if (!/[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(text)) return text  // 한국어 없으면 패스
 
+  // (?<!\.) 소수점 이후 숫자는 단위 변환 금지 (3.8GB → "3.팔기가바이트" 방지)
   return text
-    .replace(/(\d{1,4})년/g,  (_, n) => toSinoKorean(parseInt(n)) + '년')
-    .replace(/(\d{1,2})월/g,  (_, n) => toSinoKorean(parseInt(n)) + '월')
-    .replace(/(\d{1,2})일/g,  (_, n) => toSinoKorean(parseInt(n)) + '일')
-    .replace(/(\d{1,2})시/g,  (_, n) => toSinoKorean(parseInt(n)) + '시')
-    .replace(/(\d{1,2})분/g,  (_, n) => toSinoKorean(parseInt(n)) + '분')
-    .replace(/(\d+)%/g,       (_, n) => toSinoKorean(parseInt(n)) + ' 퍼센트')
-    .replace(/(\d+)GB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '기가바이트')
-    .replace(/(\d+)MB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '메가바이트')
-    .replace(/(\d+)KB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '킬로바이트')
-    .replace(/(\d+)/g,        (_, n) => { const v = parseInt(n); return v < 100000 ? toSinoKorean(v) : n })
+    .replace(/(?<!\.)\b(\d{1,4})년/g,  (_, n) => toSinoKorean(parseInt(n)) + '년')
+    .replace(/(?<!\.)\b(\d{1,2})월/g,  (_, n) => toSinoKorean(parseInt(n)) + '월')
+    .replace(/(?<!\.)\b(\d{1,2})일/g,  (_, n) => toSinoKorean(parseInt(n)) + '일')
+    .replace(/(?<!\.)\b(\d{1,2})시/g,  (_, n) => toSinoKorean(parseInt(n)) + '시')
+    .replace(/(?<!\.)\b(\d{1,2})분/g,  (_, n) => toSinoKorean(parseInt(n)) + '분')
+    .replace(/(?<!\.)\b(\d+)%/g,       (_, n) => toSinoKorean(parseInt(n)) + ' 퍼센트')
+    .replace(/(?<!\.)\b(\d+)GB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '기가바이트')
+    .replace(/(?<!\.)\b(\d+)MB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '메가바이트')
+    .replace(/(?<!\.)\b(\d+)KB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '킬로바이트')
+    .replace(/(?<![\d.])(\d+)(?![\d.])/g, (_, n) => { const v = parseInt(n); return v < 100000 ? toSinoKorean(v) : n })
 }
 
 // ─── TTS 텍스트 정제 — 음성 출력에 부적합한 요소 제거/요약 ──────────────────────
 // 마크다운 문법, URL, 파일 경로, 긴 ID, IP 주소 등을 음성에 맞게 변환
+
+// 영문 대문자 약어 → 한국어 발음 (TTS 자연스러운 독음)
+const TTS_ABBR_MAP: Record<string, string> = {
+  API: '에이피아이', TTS: '티티에스', STT: '에스티티',
+  PTY: '피티와이',  IPC: '아이피씨',  URL: '유알엘',
+  HTTP: '에이치티티피', HTTPS: '에이치티티피에스',
+  CPU: '씨피유',   GPU: '지피유',   MLX: '엠엘엑스',
+  NCO: '엔씨오',   AI: '에이아이', CLI: '씨엘아이',
+  JSON: '제이슨',  CSV: '씨에스브이', WAV: '웨이브',
+  PDF: '피디에프', PNG: '피엔지',   JPG: '제이펙',
+  UI: '유아이',    UX: '유엑스',    DB: '디비',
+  ID: '아이디',    OK: '오케이',    PR: '피알',
+  MPS: '엠피에스', MCP: '엠씨피',  SSH: '에스에스에이치',
+  LLM: '엘엘엠',  SDK: '에스디케이', DOM: '돔',
+  VS: '대',        FPS: '에프피에스', RAM: '램',
+  PC: '피씨',      OS: '오에스',    VPN: '브이피엔',
+}
+
+// 영어 브랜드·제품명 → 한국어 음성 (한국어 TTS 엔진의 영어 발음 어색함 방지)
+const TTS_BRAND_KO: [RegExp, string][] = [
+  [/\bClaude\b/g, '클로드'],
+  [/\bGemini\b/g, '제미나이'],
+  [/\bGoogle\b/g, '구글'],
+  [/\bApple\b/g, '애플'],
+  [/\biPhone\b/g, '아이폰'],
+  [/\biPad\b/g, '아이패드'],
+  [/\bMacBook\b/g, '맥북'],
+  [/\bMacOS\b|\bmacOS\b/g, '맥'],
+  [/\bWindows\b/g, '윈도우'],
+  [/\bLinux\b/g, '리눅스'],
+  [/\bGitHub\b/g, '깃허브'],
+  [/\bGit\b/g, '깃'],
+  [/\bPython\b/g, '파이썬'],
+  [/\bJavaScript\b/g, '자바스크립트'],
+  [/\bTypeScript\b/g, '타입스크립트'],
+  [/\bReact\b/g, '리액트'],
+  [/\bElectron\b/g, '일렉트론'],
+  [/\bWhisper\b/g, '위스퍼'],
+  [/\bOpenAI\b/g, '오픈에이아이'],
+  [/\bAnthropic\b/g, '앤트로픽'],
+  [/\bOllama\b/g, '올라마'],
+  [/\bChatGPT\b/g, '챗지피티'],
+  [/\bYouTube\b/g, '유튜브'],
+  [/\bNetflix\b/g, '넷플릭스'],
+  [/\bSpotify\b/g, '스포티파이'],
+  [/\bSlack\b/g, '슬랙'],
+  [/\bNotion\b/g, '노션'],
+  [/\bFigma\b/g, '피그마'],
+  [/\bVite\b/g, '비트'],
+  [/\bNode\.js\b|\bNodeJS\b/g, '노드제이에스'],
+  [/\bNode\b/g, '노드'],
+  [/\bNova\b/g, '노바'],
+]
+
 export function sanitizeTTSText(raw: string): string {
   let t = raw
 
   // 1. 마크다운 코드 블록 전체 → "코드 생략"
   t = t.replace(/```[\s\S]*?```/g, '코드 생략.')
 
-  // 2. 인라인 코드 (`...`) → 내용만
-  t = t.replace(/`([^`\n]+)`/g, '$1')
+  // 2. 인라인 코드 (`...`) → 내용 제거 (코드 식별자는 TTS에 부적합)
+  t = t.replace(/`[^`\n]+`/g, '')
 
   // 3. 마크다운 헤더 (## 제목) → 제목만
   t = t.replace(/^#{1,6}\s+(.+)$/gm, '$1')
@@ -738,11 +788,8 @@ export function sanitizeTTSText(raw: string): string {
   // 5. URL (http/https) → "링크 생략"
   t = t.replace(/https?:\/\/[^\s)>\]"',]+/g, '링크 생략')
 
-  // 6. 파일 경로 (/path/to/file) → 파일명만
-  t = t.replace(/(?:\/[\w.-]+){3,}/g, (m) => {
-    const parts = m.split('/')
-    return parts[parts.length - 1] || m
-  })
+  // 6. 파일 경로 (/path/to/file) → 제거 (파일명도 TTS에 어색함)
+  t = t.replace(/(?:\/[\w.-]+){3,}/g, '')
 
   // 7. 긴 ID / 해시 (16자 이상 영숫자 혼합) → 제거
   t = t.replace(/\b[A-Za-z0-9_-]{16,}\b/g, '')
@@ -750,8 +797,8 @@ export function sanitizeTTSText(raw: string): string {
   // 8. IP 주소 → "아이피 주소"
   t = t.replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, '아이피 주소')
 
-  // 9. localhost:포트 → "로컬 {포트}번 포트"
-  t = t.replace(/localhost:(\d+)/g, (_, p) => `로컬 ${p}번 포트`)
+  // 9. localhost:포트 → "로컬 서버"
+  t = t.replace(/localhost:\d+/g, '로컬 서버')
 
   // 10. 마크다운 리스트 기호 (- / * / •) → 제거
   t = t.replace(/^[ \t]*[-*•]\s+/gm, '')
@@ -763,10 +810,61 @@ export function sanitizeTTSText(raw: string): string {
   t = t.replace(/\|[-:| ]+\|/g, '')
   t = t.replace(/\|/g, ' ')
 
-  // 13. 괄호 안 영문 약어만 있는 경우 (예: (API), (TTS)) → 제거
-  t = t.replace(/\(([A-Z]{2,6})\)/g, '')
+  // 13. 괄호 안 약어/코드 → 제거
+  t = t.replace(/\([A-Za-z0-9_.-]{2,}\)/g, '')
 
-  // 14. 연속 공백·줄바꿈 정리
+  // 14. 이모지 제거 (TTS 엔진이 이모지 발음 시 어색하거나 건너뜀)
+  t = t.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FEFF}]/gu, '')
+
+  // 15. 특수기호 → 자연스러운 표현 또는 제거
+  t = t.replace(/→|▶|►/g, '로')
+  t = t.replace(/←/g, '에서')
+  t = t.replace(/↑/g, '위로')
+  t = t.replace(/↓/g, '아래로')
+  t = t.replace(/[✓✔☑]/g, '완료')
+  t = t.replace(/[★☆✦✧]/g, '')
+  t = t.replace(/[…⋯]/g, '.')
+  t = t.replace(/[—–ー]/g, ' ')
+  t = t.replace(/[«»""'']/g, '')
+  t = t.replace(/[·•·⋅]/g, '')
+  t = t.replace(/[♪♫♬]/g, '')
+  t = t.replace(/[❌✗]/g, '실패')
+  t = t.replace(/[⚠⚡]/g, '')
+
+  // 16. 버전 번호 (v1.0.0, v2.3, v0.5.12) → "버전"
+  t = t.replace(/\bv\d+(?:\.\d+){1,3}\b/gi, '버전')
+
+  // 17. 번호 목록 (1. / 2) / 가. 등) → 제거
+  t = t.replace(/^\s*\d+[.)]\s+/gm, '')
+  t = t.replace(/^\s*[가-힣][.)]\s+/gm, '')
+
+  // 18. 브랜드·제품명 → 한국어 음성 (한국어 TTS 영어 발음 어색함 방지, 약어 처리 전 우선 적용)
+  for (const [pattern, ko] of TTS_BRAND_KO) {
+    t = t.replace(pattern, ko)
+  }
+
+  // 18b. 영문 대문자 약어 → 한국어 발음 (문장 중 자연스럽게 읽히도록)
+  t = t.replace(/\b([A-Z]{2,6})\b/g, (m) => TTS_ABBR_MAP[m] || m)
+
+  // 19. snake_case 식별자 → 제거 (한글 컨텍스트에서 코드 변수명)
+  t = t.replace(/\b\w+_\w[\w_]*\b/g, '')
+
+  // 20. camelCase 식별자 (소문자 시작, 대문자 포함) → 제거
+  t = t.replace(/\b[a-z][a-z0-9]*[A-Z]\w*\b/g, '')
+
+  // 21. 한국어 컨텍스트 숫자 정규화 (50%→오십퍼센트, 2026년→이천이십육년 등)
+  if (/[가-힣]/.test(t)) {
+    t = normalizeKoreanNumbers(t)
+  }
+
+  // 22. 연속된 구두점 정리 (,, / .. / ... 등)
+  t = t.replace(/[.,!?]{2,}/g, (m) => m[0])
+  t = t.replace(/\s*,\s*,/g, ',')
+
+  // 23. 줄 시작의 외로운 구두점 제거
+  t = t.replace(/^\s*[,.:;·]\s*/gm, '')
+
+  // 24. 연속 공백·줄바꿈 정리
   t = t.replace(/\n{3,}/g, '\n')
   t = t.replace(/[ \t]{2,}/g, ' ')
   t = t.trim()
@@ -802,6 +900,129 @@ function splitLanguageSegments(text: string): Array<{ text: string; lang: 'ko' |
   }
 
   return segments.filter(s => s.text.trim().length > 0)
+}
+
+// ─── WAV 후미 무음 제거 ────────────────────────────────────────────────────────
+// MLX TTS 모델들이 합성 끝에 붙이는 무음 패딩(200-500ms)을 제거해 청크 간 갭 최소화
+// threshold: 16-bit PCM 절댓값 기준 (0~32767)
+//   200이면 한국어 문장 끝 조용한 발음("요","다")이 잘릴 수 있어 80으로 낮춤
+// keepTrailMs: 마지막 유효 샘플 이후 유지할 트레일 (50ms → 120ms로 늘려 클리핑 방지)
+function trimWAVSilence(buf: Buffer, keepTrailMs = 120, sampleRate = 24000, threshold = 80): Buffer {
+  const HDR = 44
+  if (buf.length <= HDR + 200) return buf  // 너무 짧으면 패스
+  const data = buf.slice(HDR)
+  const BPS = 2  // 16-bit LE = 2 bytes/sample
+
+  // 뒤에서부터 threshold 초과 샘플 탐색
+  let end = data.length
+  while (end >= BPS) {
+    if (Math.abs(data.readInt16LE(end - BPS)) > threshold) break
+    end -= BPS
+  }
+
+  // 최소 트레일 유지 (자연스러운 끝맺음, 클리핑 방지)
+  const keepBytes = Math.floor(sampleRate * (keepTrailMs / 1000)) * BPS
+  end = Math.min(data.length, end + keepBytes)
+  if (end >= data.length) return buf  // 제거할 것 없음
+
+  // WAV 헤더 재조립
+  const result = Buffer.alloc(HDR + end)
+  buf.copy(result, 0, 0, HDR)
+  buf.copy(result, HDR, HDR, HDR + end)
+  result.writeUInt32LE(HDR + end - 8, 4)  // RIFF chunk size
+  result.writeUInt32LE(end, 40)            // data chunk size
+
+  const trimmedMs = Math.round(((data.length - end) / BPS / sampleRate) * 1000)
+  if (trimmedMs > 20) console.log(`[TTS-trim] 후미 무음 ${trimmedMs}ms 제거`)
+  return result
+}
+
+// ─── Peekable Promise ─────────────────────────────────────────────────────────
+// Promise 완료 여부를 블로킹 없이 확인 — 청크 병합 판단용
+function createPeekable<T>(p: Promise<T>) {
+  let done = false
+  let val: T | undefined
+  p.then(v => { done = true; val = v }).catch(() => { done = true })
+  return {
+    promise: p,
+    isReady: () => done,
+    get: () => val,
+  }
+}
+
+// ─── 공용 청크 파이프라인 ─────────────────────────────────────────────────────
+// 4개 엔진(Qwen3/MLX-KO/MLX-EN/Spark) 공용 — synthFn만 다름
+//
+// 최적화 레이어:
+//  (1) 후미 무음 제거 — synthFn에서 trimWAVSilence 적용
+//  (2) lookahead 2   — 청크[i+1]과 청크[i+2]를 동시 합성 선행 시작
+//  (3) WAV 병합      — 다음 청크가 이미 합성 완료 시 mergeWAVBuffers → afplay 1회 절감
+//
+// enableMerge: WAV 샘플레이트가 동일한 MLX 엔진에서만 true (Qwen3 :7860은 false)
+async function runChunkedPipeline(
+  chunks: string[],
+  cacheDir: string,
+  synthFn: (text: string) => Promise<string | null>,
+  enableMerge = true
+): Promise<void> {
+  if (chunks.length === 0) return
+  if (chunks.length === 1) {
+    const p = await synthFn(chunks[0])
+    if (p) await playAudio(p)
+    return
+  }
+
+  // Lookahead 2: 청크[0]과 청크[1]을 동시에 합성 시작
+  let cur = createPeekable(synthFn(chunks[0]))
+  let nxt: ReturnType<typeof createPeekable<string | null>> | null =
+    chunks.length > 1 ? createPeekable(synthFn(chunks[1])) : null
+  let nextSynthIdx = 2  // 다음에 합성 시작할 청크 인덱스
+
+  let i = 0
+  while (i < chunks.length) {
+    const curPath = await cur.promise
+
+    // 다음 청크 이미 합성 완료 + WAV 병합 가능? → afplay 재기동 1회 절감
+    if (enableMerge && curPath && nxt && nxt.isReady() && i + 1 < chunks.length) {
+      const nxtPath = nxt.get()
+      if (nxtPath) {
+        try {
+          const merged = mergeWAVBuffers([fs.readFileSync(curPath), fs.readFileSync(nxtPath)])
+          const mergedPath = path.join(cacheDir,
+            `merged-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
+          fs.writeFileSync(mergedPath, merged)
+
+          // 병합 재생 중 lookahead: 다음 두 청크 합성 선행 시작
+          const newCur = nextSynthIdx < chunks.length
+            ? createPeekable(synthFn(chunks[nextSynthIdx])) : null
+          const newNxt = nextSynthIdx + 1 < chunks.length
+            ? createPeekable(synthFn(chunks[nextSynthIdx + 1])) : null
+
+          await playAudio(mergedPath)
+
+          i += 2
+          nextSynthIdx += 2
+          if (newCur) { cur = newCur; nxt = newNxt }
+          else break
+          continue
+        } catch (e) {
+          console.warn('[TTS-pipeline] WAV 병합 실패, 개별 재생:', (e as Error).message)
+        }
+      }
+    }
+
+    // 개별 재생
+    if (curPath) await playAudio(curPath)
+
+    i++
+    if (i >= chunks.length) break
+
+    // 다음 이터레이션 준비: nxt → cur, 새 lookahead 시작
+    cur = nxt || createPeekable(synthFn(chunks[i]))
+    nxt = nextSynthIdx < chunks.length
+      ? createPeekable(synthFn(chunks[nextSynthIdx])) : null
+    nextSynthIdx++
+  }
 }
 
 // WAV 병합 (24000Hz / Mono / 16-bit 고정 — 두 모델 모두 동일)
@@ -958,14 +1179,15 @@ async function _doSmartSpeak(text: string, options?: Partial<TTSOptions>): Promi
 
   if (model === 'mlx') {
     try {
-      // 언어별 최적 청크 파이프라인 — chunk[N] 재생 중 chunk[N+1] 합성
+      // 목소리 일관성 정책: 한국어가 있으면 항상 MLX-KO (Qwen3-TTS)
+      // 이전: hasKorean && hasLatin → Spark → 연속 발화 중 목소리 변경 버그
+      // 수정: 순수 영어만 MLX-EN, 한국어 포함(한영 혼용 포함) → MLX-KO 단일화
       const hasKorean = /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(text)
       const hasLatin  = /[a-zA-Z]/.test(text)
       if (!hasKorean && hasLatin) {
         await speakMLXEnChunked(text, undefined, MLX_EN_API, MLX_EN_MODEL)
-      } else if (hasKorean && hasLatin) {
-        await speakSparkChunked(text, getSparkVoice(mlxTTSVoice))
       } else {
+        // 한국어 있거나 한영 혼용 → MLX-KO (목소리 고정, Qwen3이 영어 단어도 처리)
         await speakMLXKoChunked(text, mlxTTSVoice, MLX_KO_API, MLX_KO_MODEL)
       }
       return

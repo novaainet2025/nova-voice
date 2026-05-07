@@ -132,33 +132,31 @@ export function HomePage() {
 
     const files = Array.from(e.dataTransfer.files)
 
-    // Claude Terminal이 사용 가능하면 파일을 직접 Claude에 전달
-    if (window.electronAPI?.claudeSend) {
-      for (const file of files) {
-        const filePath = (file as any).path as string | undefined
-        let msg = ''
-        if (filePath) {
-          msg = `파일을 첨부합니다: ${filePath}`
-        } else {
-          const att = await readFileAsAttachment(file)
-          if (att?.content) {
-            msg = `파일: ${file.name}\n\`\`\`\n${att.content.slice(0, 8000)}\n\`\`\``
-          } else {
-            msg = `파일 첨부: ${file.name}`
-          }
-        }
-        if (msg) {
-          try { await window.electronAPI.claudeSend(msg) }
-          catch (err) { console.error('[Drop→Claude] 전송 실패:', err) }
+    // PTY Claude Code 또는 claude -p로 파일 전달
+    for (const file of files) {
+      const filePath = window.electronAPI.getPathForFile(file) || undefined
+      let msg = ''
+      if (filePath) {
+        msg = `이 파일을 읽고 분석해줘: ${filePath}`
+      } else {
+        const att = await readFileAsAttachment(file)
+        if (att?.content) {
+          msg = `파일 내용 (${file.name}):\n\`\`\`\n${att.content.slice(0, 8000)}\n\`\`\``
         }
       }
-      return
-    }
+      if (!msg) continue
 
-    // Claude Terminal 미사용 시 기존 동작 (대기열 추가)
-    for (const file of files) {
-      const attachment = await readFileAsAttachment(file)
-      if (attachment) addAttachment(attachment)
+      try {
+        const ptyStatus = await window.electronAPI?.ptyClaudeRunning?.()
+        if (ptyStatus?.claudeDetected) {
+          await window.electronAPI!.ptyType(msg)
+          continue
+        }
+      } catch { /* PTY Claude 감지 실패 → claudeSend 폴백 */ }
+
+      try {
+        await window.electronAPI?.claudeSend?.(msg)
+      } catch (err) { console.error('[Drop→Claude] 전송 실패:', err) }
     }
   }, [addAttachment])
 

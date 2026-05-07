@@ -51,6 +51,8 @@ declare global {
       ptyResize: (cols: number, rows: number) => void
       ptyCreate: (cols?: number, rows?: number, force?: boolean) => Promise<{ ok: boolean }>
       ptyStatus: () => Promise<{ shell: string; ready: boolean }>
+      getPathForFile: (file: File) => string
+      ptyClaudeRunning: () => Promise<{ ready: boolean; claudeDetected: boolean }>
       ptyType: (command: string) => Promise<{ ok: boolean }>
       onPtyData: (callback: (data: string) => void) => () => void
       onPtyExit: (callback: (code: number) => void) => () => void

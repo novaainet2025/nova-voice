@@ -496,7 +496,7 @@ export const COMMANDS: VoiceCommand[] = [
       // 1. 캡처된 선택 텍스트 가져오기
       const selectedText = getCapturedSelectedText() || clipboard.readText()
       if (!selectedText || !selectedText.trim()) {
-        return { success: false, message: '선택된 텍스트가 없습니다. 번역할 텍스트를 먼저 선택해주세요.' }
+        return { success: false, message: '번역할 텍스트가 없어요. 먼저 텍스트를 선택해주세요.' }
       }
 
       try {
@@ -509,7 +509,7 @@ export const COMMANDS: VoiceCommand[] = [
         })
         const translated = result.text.trim()
         if (!translated) {
-          return { success: false, message: '번역 실패: 빈 응답' }
+          return { success: false, message: '번역에 실패했어요.' }
         }
 
         // 3. 번역 결과를 이전 앱에 주입 (클립보드 경유 Paste)
@@ -518,9 +518,9 @@ export const COMMANDS: VoiceCommand[] = [
         await injectText(translated, appName || undefined, bundleId || undefined)
 
         const preview = translated.length > 60 ? translated.substring(0, 60) + '…' : translated
-        return { success: true, message: `번역 완료: ${preview}` }
+        return { success: true, message: `번역됐어요: ${preview}` }
       } catch (e) {
-        return { success: false, message: `번역 오류: ${(e as Error).message.substring(0, 80)}` }
+        return { success: false, message: '번역 중 오류가 생겼어요.' }
       }
     },
     dangerous: false,

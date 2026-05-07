@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AppSettings, TranscriptionResult } from '../shared/types'
 
 const api = {
@@ -131,7 +131,10 @@ const api = {
   ptyInput: (data: string) => ipcRenderer.send('pty:input', data),
   ptyResize: (cols: number, rows: number) => ipcRenderer.send('pty:resize', cols, rows),
   ptyCreate: (cols?: number, rows?: number, force?: boolean) => ipcRenderer.invoke('pty:create', cols, rows, force),
+  // Electron 32+: file.path deprecated → webUtils.getPathForFile() 사용
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   ptyStatus: () => ipcRenderer.invoke('pty:status'),
+  ptyClaudeRunning: (): Promise<{ ready: boolean; claudeDetected: boolean }> => ipcRenderer.invoke('pty:claude-running'),
   ptyType: (command: string) => ipcRenderer.invoke('pty:type', command),
   onPtyData: (callback: (data: string) => void) => {
     const handler = (_e: Electron.IpcRendererEvent, data: string) => callback(data)

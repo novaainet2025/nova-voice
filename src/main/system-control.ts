@@ -43,9 +43,9 @@ export async function openApp(appName: string): Promise<CommandResult> {
         execFile('sh', ['-c', `${appName} &`])
       )
     }
-    return { success: true, message: `${appName} 열기 완료` }
+    return { success: true, message: `${appName} 열었어요.` }
   } catch {
-    return { success: false, message: `${appName}을(를) 찾을 수 없습니다` }
+    return { success: false, message: `${appName}을 찾지 못했어요.` }
   }
 }
 
@@ -63,9 +63,9 @@ export async function closeApp(appName: string): Promise<CommandResult> {
     } else if (isWin) {
       await powershell(`Stop-Process -Name "${appName}" -Force -ErrorAction SilentlyContinue`)
     }
-    return { success: true, message: `${appName} 종료 완료` }
+    return { success: true, message: `${appName} 종료했어요.` }
   } catch {
-    return { success: false, message: `${appName} 종료 실패` }
+    return { success: false, message: `${appName} 종료에 실패했어요.` }
   }
 }
 
@@ -76,9 +76,9 @@ export async function switchApp(appName: string): Promise<CommandResult> {
     } else if (isWin) {
       await powershell(`(Get-Process "${appName}" -ErrorAction SilentlyContinue | Select-Object -First 1).MainWindowHandle | ForEach-Object { [void][System.Runtime.InteropServices.Marshal]::GetObjectForIUnknown($_) }`)
     }
-    return { success: true, message: `${appName}(으)로 전환` }
+    return { success: true, message: `${appName}으로 전환할게요.` }
   } catch {
-    return { success: false, message: `${appName} 전환 실패` }
+    return { success: false, message: `${appName} 전환에 실패했어요.` }
   }
 }
 
@@ -98,9 +98,9 @@ export async function minimizeWindow(): Promise<CommandResult> {
         $shell.MinimizeAll()
       `)
     }
-    return { success: true, message: '창 최소화 완료' }
+    return { success: true, message: '창 최소화했어요.' }
   } catch {
-    return { success: false, message: '최소화 실패' }
+    return { success: false, message: '창 최소화에 실패했어요.' }
   }
 }
 
@@ -118,9 +118,9 @@ export async function maximizeWindow(): Promise<CommandResult> {
         [System.Windows.Forms.SendKeys]::SendWait("{F11}")
       `)
     }
-    return { success: true, message: '창 최대화 완료' }
+    return { success: true, message: '창 최대화했어요.' }
   } catch {
-    return { success: false, message: '최대화 실패' }
+    return { success: false, message: '창 최대화에 실패했어요.' }
   }
 }
 
@@ -135,11 +135,11 @@ export async function volumeUp(amount = 10): Promise<CommandResult> {
       return { success: true, message: `볼륨 ${newVol}%` }
     } else if (isWin) {
       await powershell(`$obj = New-Object -com wscript.shell; ${'$'}obj.SendKeys([char]175)`)
-      return { success: true, message: '볼륨 올림' }
+      return { success: true, message: '볼륨 올렸어요.' }
     }
-    return { success: false, message: '지원되지 않는 플랫폼' }
+    return { success: false, message: '이 플랫폼에서는 지원되지 않아요.' }
   } catch {
-    return { success: false, message: '볼륨 조절 실패' }
+    return { success: false, message: '볼륨 조절에 실패했어요.' }
   }
 }
 
@@ -152,11 +152,11 @@ export async function volumeDown(amount = 10): Promise<CommandResult> {
       return { success: true, message: `볼륨 ${newVol}%` }
     } else if (isWin) {
       await powershell(`$obj = New-Object -com wscript.shell; $obj.SendKeys([char]174)`)
-      return { success: true, message: '볼륨 내림' }
+      return { success: true, message: '볼륨 낮췄어요.' }
     }
-    return { success: true, message: '볼륨 내림' }
+    return { success: true, message: '볼륨 낮췄어요.' }
   } catch {
-    return { success: false, message: '볼륨 조절 실패' }
+    return { success: false, message: '볼륨 조절에 실패했어요.' }
   }
 }
 
@@ -167,9 +167,9 @@ export async function mute(): Promise<CommandResult> {
     } else if (isWin) {
       await powershell(`$obj = New-Object -com wscript.shell; $obj.SendKeys([char]173)`)
     }
-    return { success: true, message: '음소거' }
+    return { success: true, message: '음소거했어요.' }
   } catch {
-    return { success: false, message: '음소거 실패' }
+    return { success: false, message: '음소거에 실패했어요.' }
   }
 }
 
@@ -180,9 +180,9 @@ export async function unmute(): Promise<CommandResult> {
     } else if (isWin) {
       await powershell(`$obj = New-Object -com wscript.shell; $obj.SendKeys([char]173)`)
     }
-    return { success: true, message: '음소거 해제' }
+    return { success: true, message: '음소거 해제했어요.' }
   } catch {
-    return { success: false, message: '음소거 해제 실패' }
+    return { success: false, message: '음소거 해제에 실패했어요.' }
   }
 }
 
@@ -214,9 +214,9 @@ export async function newTab(): Promise<CommandResult> {
     if (isMac) {
       await osascript('tell application "System Events" to keystroke "t" using command down')
     }
-    return { success: true, message: '새 탭' }
+    return { success: true, message: '새 탭 열었어요.' }
   } catch {
-    return { success: false, message: '새 탭 실패' }
+    return { success: false, message: '새 탭 열기에 실패했어요.' }
   }
 }
 
@@ -225,9 +225,9 @@ export async function browserBack(): Promise<CommandResult> {
     if (isMac) {
       await osascript('tell application "System Events" to keystroke "[" using command down')
     }
-    return { success: true, message: '뒤로 가기' }
+    return { success: true, message: '뒤로 갔어요.' }
   } catch {
-    return { success: false, message: '실패' }
+    return { success: false, message: '뒤로 가기에 실패했어요.' }
   }
 }
 
@@ -236,9 +236,9 @@ export async function refreshPage(): Promise<CommandResult> {
     if (isMac) {
       await osascript('tell application "System Events" to keystroke "r" using command down')
     }
-    return { success: true, message: '새로고침' }
+    return { success: true, message: '새로고침했어요.' }
   } catch {
-    return { success: false, message: '새로고침 실패' }
+    return { success: false, message: '새로고침에 실패했어요.' }
   }
 }
 
@@ -256,7 +256,7 @@ export async function takeScreenshot(): Promise<CommandResult> {
       await powershell(`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::PrimaryScreen | ForEach-Object { $bmp = New-Object System.Drawing.Bitmap($_.Bounds.Width, $_.Bounds.Height); $g = [System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($_.Bounds.Location, [System.Drawing.Point]::Empty, $_.Bounds.Size); $bmp.Save('${p}'); }`)
       return { success: true, message: `스크린샷 저장: ${p}` }
     }
-    return { success: false, message: '지원되지 않는 플랫폼' }
+    return { success: false, message: '이 플랫폼에서는 지원되지 않아요.' }
   } catch {
     return { success: false, message: '스크린샷 실패' }
   }
@@ -279,9 +279,9 @@ export async function lockScreen(): Promise<CommandResult> {
     } else if (isWin) {
       await powershell('rundll32.exe user32.dll, LockWorkStation')
     }
-    return { success: true, message: '화면 잠금' }
+    return { success: true, message: '화면 잠갔어요.' }
   } catch {
-    return { success: false, message: '잠금 실패' }
+    return { success: false, message: '화면 잠금에 실패했어요.' }
   }
 }
 
@@ -292,9 +292,9 @@ export async function sleepSystem(): Promise<CommandResult> {
     } else if (isWin) {
       await powershell('Add-Type -Assembly System.Windows.Forms; [System.Windows.Forms.Application]::SetSuspendState("Suspend", $false, $false)')
     }
-    return { success: true, message: '절전 모드' }
+    return { success: true, message: '절전 모드로 전환할게요.' }
   } catch {
-    return { success: false, message: '절전 실패' }
+    return { success: false, message: '절전 모드 전환에 실패했어요.' }
   }
 }
 
@@ -371,27 +371,32 @@ export async function getMemoryInfo(): Promise<CommandResult> {
       const free = parseInt(vmstat.match(/Pages free:\s+(\d+)/)?.[1] || '0')
       const totalPhys = (wired + active + inactive + free) * pageSize
       const usedPhys = (wired + active) * pageSize
-      const toGB = (b: number) => (b / 1024 / 1024 / 1024).toFixed(1)
       const pct = Math.round(usedPhys / totalPhys * 100)
-      return { success: true, message: `메모리: ${toGB(usedPhys)}GB 사용 / ${toGB(totalPhys)}GB (${pct}%)` }
+      const usedGB = Math.round(usedPhys / 1024 / 1024 / 1024)
+      const totalGB = Math.round(totalPhys / 1024 / 1024 / 1024)
+      return { success: true, message: `메모리 ${pct}% 사용 중이에요. 전체 ${totalGB}기가 중 ${usedGB}기가예요.` }
     } else if (isWin) {
       const out = await powershell('Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize,FreePhysicalMemory | ConvertTo-Json')
       const d = JSON.parse(out)
       const total = d.TotalVisibleMemorySize * 1024
       const free = d.FreePhysicalMemory * 1024
       const used = total - free
-      const toGB = (b: number) => (b / 1024 / 1024 / 1024).toFixed(1)
-      return { success: true, message: `메모리: ${toGB(used)}GB 사용 / ${toGB(total)}GB` }
+      const pct = Math.round(used / total * 100)
+      const usedGB = Math.round(used / 1024 / 1024 / 1024)
+      const totalGB = Math.round(total / 1024 / 1024 / 1024)
+      return { success: true, message: `메모리 ${pct}% 사용 중이에요. 전체 ${totalGB}기가 중 ${usedGB}기가예요.` }
     } else {
       const { stdout } = await execFile('free', ['-b'], { timeout: 5000 })
       const line = stdout.split('\n')[1].split(/\s+/)
       const total = parseInt(line[1])
       const used = parseInt(line[2])
-      const toGB = (b: number) => (b / 1024 / 1024 / 1024).toFixed(1)
-      return { success: true, message: `메모리: ${toGB(used)}GB 사용 / ${toGB(total)}GB` }
+      const pct = Math.round(used / total * 100)
+      const totalGB = Math.round(total / 1024 / 1024 / 1024)
+      const usedGB = Math.round(used / 1024 / 1024 / 1024)
+      return { success: true, message: `메모리 ${pct}% 사용 중이에요. 전체 ${totalGB}기가 중 ${usedGB}기가예요.` }
     }
   } catch (e) {
-    return { success: false, message: `메모리 조회 실패: ${(e as Error).message}` }
+    return { success: false, message: '메모리 조회에 실패했어요.' }
   }
 }
 
@@ -401,16 +406,16 @@ export async function getCpuUsage(): Promise<CommandResult> {
       const { stdout } = await execFile('top', ['-l', '1', '-s', '0', '-n', '0'], { timeout: 10000 })
       const cpuLine = stdout.match(/CPU usage:\s+([\d.]+)% user,\s+([\d.]+)% sys/)
       if (cpuLine) {
-        const total = (parseFloat(cpuLine[1]) + parseFloat(cpuLine[2])).toFixed(1)
-        return { success: true, message: `CPU 사용률: ${total}%` }
+        const total = Math.round(parseFloat(cpuLine[1]) + parseFloat(cpuLine[2]))
+        return { success: true, message: `CPU 사용률은 ${total}%예요.` }
       }
     } else if (isWin) {
       const out = await powershell('Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average | Select-Object -ExpandProperty Average')
-      return { success: true, message: `CPU 사용률: ${out.trim()}%` }
+      return { success: true, message: `CPU 사용률은 ${out.trim()}%예요.` }
     }
-    return { success: false, message: 'CPU 조회 미지원' }
+    return { success: false, message: 'CPU 정보를 조회할 수 없어요.' }
   } catch (e) {
-    return { success: false, message: `CPU 조회 실패: ${(e as Error).message}` }
+    return { success: false, message: 'CPU 조회에 실패했어요.' }
   }
 }
 
@@ -419,26 +424,28 @@ export async function getDiskInfo(): Promise<CommandResult> {
     if (isMac || process.platform === 'linux') {
       const { stdout } = await execFile('df', ['-h', '/'], { timeout: 5000 })
       const line = stdout.split('\n')[1].split(/\s+/)
-      return { success: true, message: `디스크(/): ${line[2]} 사용 / ${line[1]} (${line[4]})` }
+      const usePct = line[4]?.replace('%', '') || '?'
+      return { success: true, message: `디스크 사용률은 ${usePct}%예요.` }
     } else if (isWin) {
       const out = await powershell('Get-PSDrive C | Select-Object Used,Free | ConvertTo-Json')
       const d = JSON.parse(out)
-      const used = (d.Used / 1024 / 1024 / 1024).toFixed(1)
-      const total = ((d.Used + d.Free) / 1024 / 1024 / 1024).toFixed(1)
-      return { success: true, message: `디스크(C:): ${used}GB 사용 / ${total}GB` }
+      const used = Math.round(d.Used / 1024 / 1024 / 1024)
+      const total = Math.round((d.Used + d.Free) / 1024 / 1024 / 1024)
+      const pct = Math.round(d.Used / (d.Used + d.Free) * 100)
+      return { success: true, message: `디스크 ${pct}% 사용 중이에요. 전체 ${total}기가 중 ${used}기가예요.` }
     }
-    return { success: false, message: '디스크 조회 미지원' }
+    return { success: false, message: '디스크 정보를 조회할 수 없어요.' }
   } catch (e) {
-    return { success: false, message: `디스크 조회 실패: ${(e as Error).message}` }
+    return { success: false, message: '디스크 조회에 실패했어요.' }
   }
 }
 
 export async function getSystemInfo(): Promise<CommandResult> {
   try {
     const [mem, cpu, disk] = await Promise.all([getMemoryInfo(), getCpuUsage(), getDiskInfo()])
-    return { success: true, message: [mem.message, cpu.message, disk.message].join(' | ') }
+    return { success: true, message: [mem.message, cpu.message, disk.message].join(' ') }
   } catch (e) {
-    return { success: false, message: `시스템 정보 조회 실패: ${(e as Error).message}` }
+    return { success: false, message: '시스템 정보 조회에 실패했어요.' }
   }
 }
 
@@ -446,7 +453,7 @@ export async function getSystemInfo(): Promise<CommandResult> {
 
 export async function getCalendarEvents(period: 'today' | 'tomorrow' | 'week' = 'today'): Promise<CommandResult> {
   try {
-    if (!isMac) return { success: false, message: '캘린더 조회는 macOS에서만 지원됩니다' }
+    if (!isMac) return { success: false, message: '캘린더는 맥에서만 지원돼요.' }
     const label = period === 'today' ? '오늘' : period === 'tomorrow' ? '내일' : '이번 주'
     const daysAhead = period === 'today' ? 1 : period === 'tomorrow' ? 2 : 7
     const startOffset = period === 'tomorrow' ? 1 : 0
@@ -462,10 +469,10 @@ export async function getCalendarEvents(period: 'today' | 'tomorrow' | 'week' = 
           end repeat
         end repeat
         if length of allEvents = 0 then
-          return "${label} 일정 없음"
+          return "${label} 일정이 없어요."
         else
           set AppleScript's text item delimiters to ", "
-          return "${label} 일정: " & (allEvents as string)
+          return "${label} 일정이에요: " & (allEvents as string)
         end if
       end tell
     `
@@ -478,7 +485,7 @@ export async function getCalendarEvents(period: 'today' | 'tomorrow' | 'week' = 
 
 export async function addCalendarEvent(title: string, startTime?: string): Promise<CommandResult> {
   try {
-    if (!isMac) return { success: false, message: 'macOS에서만 지원됩니다' }
+    if (!isMac) return { success: false, message: '맥에서만 지원돼요.' }
     const safeTitle = title.replace(/"/g, '\\"')
     const script = `
       tell application "Calendar"
@@ -487,7 +494,7 @@ export async function addCalendarEvent(title: string, startTime?: string): Promi
         end tell
         reload calendars
       end tell
-      return "일정 추가 완료: ${safeTitle}"
+      return "일정을 추가했어요: ${safeTitle}"
     `
     const result = await osascript(script)
     return { success: true, message: result }
@@ -500,13 +507,13 @@ export async function addCalendarEvent(title: string, startTime?: string): Promi
 
 export async function searchContacts(name: string): Promise<CommandResult> {
   try {
-    if (!isMac) return { success: false, message: 'macOS에서만 지원됩니다' }
+    if (!isMac) return { success: false, message: '맥에서만 지원돼요.' }
     const safeName = name.replace(/"/g, '\\"')
     const script = `
       tell application "Contacts"
         set matches to every person whose name contains "${safeName}"
         if length of matches = 0 then
-          return "연락처 없음: ${safeName}"
+          return "${safeName} 연락처가 없어요."
         end if
         set info to ""
         repeat with p in matches
@@ -538,7 +545,7 @@ export async function getWeather(location = '서울'): Promise<CommandResult> {
       `https://wttr.in/${encodeURIComponent(location)}?format=%l:+%C+%t+(%f)+습도+%h+바람+%w&lang=ko`
     ], { timeout: 10000 })
     if (stdout.trim()) {
-      return { success: true, message: `날씨 - ${stdout.trim()}` }
+      return { success: true, message: stdout.trim() }
     }
     throw new Error('empty response')
   } catch (e) {
@@ -550,13 +557,13 @@ export async function getWeather(location = '서울'): Promise<CommandResult> {
 
 export async function addReminder(title: string, dueDate?: string): Promise<CommandResult> {
   try {
-    if (!isMac) return { success: false, message: 'macOS에서만 지원됩니다' }
+    if (!isMac) return { success: false, message: '맥에서만 지원돼요.' }
     const safeTitle = title.replace(/"/g, '\\"')
     const script = dueDate
       ? `tell application "Reminders" to make new reminder with properties {name:"${safeTitle}", due date:date "${dueDate}"}`
       : `tell application "Reminders" to make new reminder with properties {name:"${safeTitle}"}`
     await osascript(script)
-    return { success: true, message: `리마인더 추가: "${title}"` }
+    return { success: true, message: `리마인더 추가했어요: "${title}"` }
   } catch (e) {
     return { success: false, message: `리마인더 추가 실패: ${(e as Error).message}` }
   }

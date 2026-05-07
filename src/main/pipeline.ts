@@ -97,12 +97,17 @@ function stripMarkdown(text: string): string {
 
 /**
  * Split text into sentences for streaming TTS
+ * 소수점(3.14), 약어(e.g., i.e.) 앞 마침표는 문장 경계로 보지 않음
  */
 function splitSentences(text: string): string[] {
+  // 마침표 앞이 숫자이거나 단일 소문자 알파벳인 경우는 분리하지 않음 (소수점/약어)
   return text
-    .split(/(?<=[.!?。！？])\s*/)
+    .replace(/([.!?。！？])\s+/g, '$1\x00')  // 마침표+공백 → 마침표+\x00 마킹
+    .replace(/(\d)\x00/g, '$1 ')              // 숫자 뒤 마침표는 복원 (소수점 컨텍스트 없음이나 안전하게)
+    .replace(/\b([a-z])\.\x00/g, '$1. ')      // 단일 소문자 약어 복원 (e.g., i.e.)
+    .split('\x00')
     .map(s => s.trim())
-    .filter(s => s.length > 0)
+    .filter(s => s.length > 3)  // 너무 짧은 조각 제거
 }
 
 /**
@@ -165,16 +170,16 @@ export function speakProgress(message: string, priority: 'low' | 'normal' | 'hig
   }
 }
 
-// 진행 알림 프리셋 — 자주 쓰는 메시지
+// 진행 알림 프리셋 — 자주 쓰는 메시지 (구어체)
 export const ProgressMessages = {
-  taskStart:    (name: string) => `${name} 시작`,
-  taskDone:     (name: string) => `${name} 완료`,
-  taskFailed:   (name: string) => `${name} 실패`,
-  allDone:      (count: number) => `${count}개 작업 모두 완료`,
-  installing:   (pkg: string)  => `${pkg} 설치 중`,
-  installed:    (pkg: string)  => `${pkg} 설치 완료`,
-  serverStart:  (name: string) => `${name} 서버 시작`,
-  serverReady:  (name: string) => `${name} 준비 완료`,
+  taskStart:    (_name: string) => '시작할게요.',
+  taskDone:     (_name: string) => '완료됐어요.',
+  taskFailed:   (_name: string) => '잠시 문제가 생겼어요.',
+  allDone:      (count: number) => count > 1 ? `${count}개 작업 모두 끝났어요.` : '완료됐어요.',
+  installing:   (_pkg: string)  => '설치 중이에요.',
+  installed:    (_pkg: string)  => '설치 완료됐어요.',
+  serverStart:  (_name: string) => '서버 시작 중이에요.',
+  serverReady:  (_name: string) => '준비됐어요.',
 } as const
 
 /**
@@ -193,7 +198,7 @@ export async function runParallelWithProgress<T>(
 
   // 시작 알림 (태스크 수가 1개 초과 시만)
   if (tasks.length > 1) {
-    speakProgress(`${tasks.length}개 작업을 동시에 시작합니다`)
+    speakProgress(`${tasks.length}개 작업을 동시에 시작할게요.`)
   }
 
   const results = await Promise.allSettled(
@@ -223,7 +228,7 @@ export async function runParallelWithProgress<T>(
     if (failed.length === 0) {
       speakProgress(ProgressMessages.allDone(done.length))
     } else {
-      speakProgress(`${done.length}개 성공, ${failed.length}개 실패`)
+      speakProgress(`${done.length}개 완료됐고, ${failed.length}개 실패했어요.`)
     }
   }
 

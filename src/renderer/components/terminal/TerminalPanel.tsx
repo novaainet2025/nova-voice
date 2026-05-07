@@ -181,7 +181,7 @@ export function TerminalPanel() {
           const files = Array.from(e.dataTransfer.files)
           if (files.length === 0) return
           // Electron에서 File 객체에 path 속성 제공
-          const paths = files.map(f => (f as unknown as { path: string }).path).filter(Boolean)
+          const paths = files.map(f => window.electronAPI.getPathForFile(f)).filter(Boolean)
           if (paths.length > 0) {
             // 파일 경로를 PTY 입력으로 삽입 (공백으로 구분)
             const pathStr = paths.map(p => p.includes(' ') ? `"${p}"` : p).join(' ')
