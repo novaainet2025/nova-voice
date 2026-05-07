@@ -687,6 +687,14 @@ function toSinoKorean(n: number): string {
     const man = Math.floor(n / 10000), rest = n % 10000
     return toSinoKorean(man) + '만' + (rest ? toSinoKorean(rest) : '')
   }
+  if (n < 1000000000000) {  // 1조 미만
+    const eok = Math.floor(n / 100000000), rest = n % 100000000
+    return toSinoKorean(eok) + '억' + (rest ? toSinoKorean(rest) : '')
+  }
+  if (n < 10000000000000000) {  // 1경 미만 (Number.MAX_SAFE_INTEGER 이내)
+    const jo = Math.floor(n / 1000000000000), rest = n % 1000000000000
+    return toSinoKorean(jo) + '조' + (rest ? toSinoKorean(rest) : '')
+  }
   return n.toString()
 }
 
@@ -756,6 +764,9 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d+)번(?!째)/g, (_, n) => { const v = parseInt(n); return (v <= 20 ? toNativeKorean(v) : toSinoKorean(v)) + ' 번' })
     // 회 (횟수/차례) — 한자어 수사 (\b는 한국어 앞 미동작 → (?!\d)로 처리)
     .replace(/(?<!\.)\b(\d+)회(?!\d)/g, (_, n) => toSinoKorean(parseInt(n)) + '회')
+    // 개/명 — 콤마 포함 큰 수 우선 처리 (50,000개 → 오만 개)
+    .replace(/\b(\d{1,3}(?:,\d{3})+)개/g, (_, m) => { const v = parseInt(m.replace(/,/g, '')); return (v < 100000000 ? toNativeKorean(v) : toSinoKorean(v)) + ' 개' })
+    .replace(/\b(\d{1,3}(?:,\d{3})+)명/g, (_, m) => { const v = parseInt(m.replace(/,/g, '')); return (v < 100000000 ? toNativeKorean(v) : toSinoKorean(v)) + ' 명' })
     .replace(/(?<!\.)\b(\d+)개/g,      (_, n) => { const v = parseInt(n); return v < 10000 ? toNativeKorean(v) + ' 개' : n + '개' })
     .replace(/(?<!\.)\b(\d+)명/g,      (_, n) => { const v = parseInt(n); return v < 10000 ? toNativeKorean(v) + ' 명' : n + '명' })
     // 살 (나이) · 마리 (동물) · 장 (종이) · 권 (책) · 잔 (음료) — 순우리말 수사
@@ -796,20 +807,21 @@ export function normalizeKoreanNumbers(text: string): string {
     // 금액 단위 — 콤마 숫자 + 원 (1,500원 → 천오백 원, 350만원 → 삼백오십만 원)
     .replace(/\b(\d{1,3}(?:,\d{3})+)원/g, (_, m) => {
       const v = parseInt(m.replace(/,/g, ''))
-      return (v < 100000000 ? toSinoKorean(v) : m) + ' 원'
+      return (Number.isSafeInteger(v) ? toSinoKorean(v) : m) + ' 원'
     })
     .replace(/(?<!\.)\b(\d+)만\s*원/g, (_, n) => toSinoKorean(parseInt(n)) + '만 원')
     .replace(/(?<!\.)\b(\d+)천\s*원/g, (_, n) => toSinoKorean(parseInt(n)) + '천 원')
     .replace(/(?<!\.)\b(\d+)\s*원(?!\s*[가-힣])/g, (_, n) => { const v = parseInt(n); return v < 100000000 ? toSinoKorean(v) + ' 원' : n + '원' })
-    // 천단위 콤마 숫자 (1,000 / 50,000 / 1,234,567) → 한국어
+    // 천단위 콤마 숫자 (1,000 / 50,000 / 1,234,567 / 1,000,000,000) → 한국어
     .replace(/\b(\d{1,3}(?:,\d{3})+)\b/g, (m) => {
       const v = parseInt(m.replace(/,/g, ''))
-      return v < 100000000 ? toSinoKorean(v) : m
+      return Number.isSafeInteger(v) ? toSinoKorean(v) : m
     })
     // 단독 소수점 (단위 없음, 한국어 컨텍스트): 3.14 → 삼점일사
     .replace(/(?<!\d)(\d+)\.(\d+)(?!\d|[%a-zA-Z])/g, (_, n, d) =>
       toSinoKorean(parseInt(n)) + '점' + d.split('').map((c: string) => toSinoKorean(parseInt(c))).join(''))
-    .replace(/(?<![\d.])(\d+)(?![\d.])/g, (_, n) => { const v = parseInt(n); return v < 100000 ? toSinoKorean(v) : n })
+    // 단독 정수 — 콤마 뒤 숫자는 이미 위에서 처리됐으므로 제외
+    .replace(/(?<![\d.,])(\d+)(?![\d.,])/g, (_, n) => { const v = parseInt(n); return v < 100000 ? toSinoKorean(v) : n })
 }
 
 // ─── TTS 텍스트 정제 — 음성 출력에 부적합한 요소 제거/요약 ──────────────────────
