@@ -768,17 +768,17 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\d)(\d+)\.(\d+)점/g, (_, n, d) =>
       toSinoKorean(parseInt(n)) + '점' + d.split('').map((c: string) => toSinoKorean(parseInt(c))).join('') + ' 점')
     .replace(/(?<![\d.])\b(\d+)\.(\d+)%/g,   (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 퍼센트')
-    .replace(/(?<![\d.])\b(\d+)\.(\d+)GB/gi, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + '기가바이트')
-    .replace(/(?<![\d.])\b(\d+)\.(\d+)MB/gi, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + '메가바이트')
+    .replace(/(?<![\d.])\b(\d+)\.(\d+)GB/gi, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 기가바이트')
+    .replace(/(?<![\d.])\b(\d+)\.(\d+)MB/gi, (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 메가바이트')
     .replace(/(?<!\.)\b(\d+)%/g,       (_, n) => toSinoKorean(parseInt(n)) + ' 퍼센트')
-    .replace(/(?<!\.)\b(\d+)GB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '기가바이트')
-    .replace(/(?<!\.)\b(\d+)MB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '메가바이트')
-    .replace(/(?<!\.)\b(\d+)KB/gi,     (_, n) => toSinoKorean(parseInt(n)) + '킬로바이트')
+    .replace(/(?<!\.)\b(\d+)GB/gi,     (_, n) => toSinoKorean(parseInt(n)) + ' 기가바이트')
+    .replace(/(?<!\.)\b(\d+)MB/gi,     (_, n) => toSinoKorean(parseInt(n)) + ' 메가바이트')
+    .replace(/(?<!\.)\b(\d+)KB/gi,     (_, n) => toSinoKorean(parseInt(n)) + ' 킬로바이트')
     // 기가/메가 (한국어로 이미 쓰인 단위, e.g. 메모리 정보 메시지)
     .replace(/(?<!\.)\b(\d+)기가/g,    (_, n) => toSinoKorean(parseInt(n)) + '기가')
     .replace(/(?<!\.)\b(\d+)메가/g,    (_, n) => toSinoKorean(parseInt(n)) + '메가')
     // ms (밀리초) 단위
-    .replace(/(?<!\.)\b(\d+)ms\b/gi,   (_, n) => toSinoKorean(parseInt(n)) + '밀리초')
+    .replace(/(?<!\.)\b(\d+)ms\b/gi,   (_, n) => toSinoKorean(parseInt(n)) + ' 밀리초')
     // 시간·기간 단위 (기존 패턴에 없는 시간/주/배)
     // 주의: 한국어는 \W이므로 한국어로 끝나는 패턴에 trailing \b 사용 불가
     .replace(/(?<!\.)\b(\d+)시간/g,    (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 시간' })
