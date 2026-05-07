@@ -817,6 +817,24 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bwebpack\b/gi, '웹팩'],
   [/\bpnpm\b/g, '피엔피엠'],
   [/\byarn\b/gi, '얀'],
+  // 브라우저·앱·도구
+  [/\bChrome\b/g, '크롬'],
+  [/\bFirefox\b/g, '파이어폭스'],
+  [/\bSafari\b/g, '사파리'],
+  [/\bDiscord\b/g, '디스코드'],
+  [/\bTelegram\b/g, '텔레그램'],
+  [/\bZoom\b/g, '줌'],
+  [/\bCursor\b/g, '커서'],
+  [/\bCopilot\b/g, '코파일럿'],
+  [/\bHomebrew\b/g, '홈브루'],
+  [/\bRaycast\b/g, '레이캐스트'],
+  [/\bTailwind\b/g, '테일윈드'],
+  [/\bPrisma\b/g, '프리즈마'],
+  [/\bDeno\b/g, '디노'],
+  [/\bBun\b/g, '번'],
+  [/\bJest\b/g, '제스트'],
+  [/\bVitest\b/g, '비테스트'],
+  [/\bPlaywright\b/g, '플레이라이트'],
 ]
 
 export function sanitizeTTSText(raw: string): string {
