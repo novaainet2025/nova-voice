@@ -779,9 +779,21 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bNova\b/g, '노바'],
   [/\bnpm\b/g, '엔피엠'],         // Node 패키지 관리자
   [/\bbrew\b/g, '브루'],          // Homebrew (macOS)
-  [/\bdocker\b/gi, '도커'],       // 컨테이너
+  [/\bdocker\b/gi, '도커'],          // 컨테이너
   [/\bkubernetes\b/gi, '쿠버네티스'], // 오케스트레이션
-  [/\bterraform\b/gi, '테라폼'],  // IaC
+  [/\bterraform\b/gi, '테라폼'],     // IaC
+  [/\bVS\s*Code\b|\bVSCode\b/g, '브이에스코드'],
+  [/\bXcode\b/g, '엑스코드'],
+  [/\bAndroid\b/g, '안드로이드'],
+  [/\bFlutter\b/g, '플러터'],
+  [/\bVercel\b/g, '버셀'],
+  [/\bNext\.js\b|\bNextjs\b/g, '넥스트제이에스'],
+  [/\bSvelteKit\b|\bSvelte\b/g, '스벨트'],
+  [/\bVue\b/g, '뷰'],
+  [/\bSupabase\b/g, '수파베이스'],
+  [/\bwebpack\b/gi, '웹팩'],
+  [/\bpnpm\b/g, '피엔피엠'],
+  [/\byarn\b/gi, '얀'],
 ]
 
 export function sanitizeTTSText(raw: string): string {
@@ -808,6 +820,11 @@ export function sanitizeTTSText(raw: string): string {
   // 6. 파일 경로 → 제거 (절대 /path/to/file 및 상대 src/main/ipc.ts 모두)
   // 최소 3세그먼트(/)이면 절대경로, 2세그먼트+확장자이면 상대경로
   t = t.replace(/(?:^|(?<=\s))[\w.-]*(?:\/[\w.-]+){2,}(?:\.\w{1,5})?(?=\s|$)/gm, '')
+  // 단일 파일명 (확장자 포함, 슬래시 없음): package.json, tsconfig.ts, ipc.ts 등
+  t = t.replace(/\b[\w-]+\.(ts|js|tsx|jsx|json|yaml|yml|toml|env|sh|py|rs|go|md)\b/g, '')
+
+  // 6b. 이메일 주소 → "이메일 주소"
+  t = t.replace(/\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b/gi, '이메일 주소')
 
   // 7. 긴 ID / 해시 (16자 이상 영숫자 혼합) → 제거
   t = t.replace(/\b[A-Za-z0-9_-]{16,}\b/g, '')
