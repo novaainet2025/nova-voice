@@ -751,6 +751,10 @@ export function normalizeKoreanNumbers(text: string): string {
       if (v === 1) return '첫 번째'
       return (v <= 20 ? toNativeKorean(v) : toSinoKorean(v)) + ' 번째'
     })
+    // 번 (횟수) — 번째 처리 이후에 와야 중복 매칭 없음
+    .replace(/(?<!\.)\b(\d+)번(?!째)/g, (_, n) => { const v = parseInt(n); return (v <= 20 ? toNativeKorean(v) : toSinoKorean(v)) + ' 번' })
+    // 회 (횟수/차례) — 한자어 수사 (\b는 한국어 앞 미동작 → (?!\d)로 처리)
+    .replace(/(?<!\.)\b(\d+)회(?!\d)/g, (_, n) => toSinoKorean(parseInt(n)) + '회')
     .replace(/(?<!\.)\b(\d+)개/g,      (_, n) => { const v = parseInt(n); return v < 10000 ? toNativeKorean(v) + ' 개' : n + '개' })
     .replace(/(?<!\.)\b(\d+)명/g,      (_, n) => { const v = parseInt(n); return v < 10000 ? toNativeKorean(v) + ' 명' : n + '명' })
     // 살 (나이) · 마리 (동물) · 장 (종이) · 권 (책) · 잔 (음료) — 순우리말 수사
