@@ -808,7 +808,7 @@ export function normalizeKoreanNumbers(text: string): string {
     // 소수점 + 점 단위 (평점/점수): 4.5점 → 사점오 점
     .replace(/(?<!\d)(\d+)\.(\d+)점/g, (_, n, d) =>
       toSinoKorean(parseInt(n)) + '점' + d.split('').map((c: string) => toSinoKorean(parseInt(c))).join('') + ' 점')
-    .replace(/(?<![\d.])\b(\d+)\.(\d+)%/g,   (_, n, d) => toSinoKorean(parseInt(n)) + '점' + toSinoKorean(parseInt(d)) + ' 퍼센트')
+    .replace(/(?<![\d.])\b(\d+)\.(\d+)%/g,   (_, n, d) => toSinoKorean(parseInt(n)) + '점' + d.split('').map((c: string) => toSinoKorean(parseInt(c))).join('') + ' 퍼센트')
     // FPS (프레임레이트) — \bfps\b는 \d+fps에서 단어경계 없어 BRAND_KO 매칭 실패, 여기서 처리
     .replace(/(?<!\.)\b(\d+)fps\b/gi,   (_, n) => toSinoKorean(parseInt(n)) + ' 에프피에스')
     // Gbps/Mbps/Kbps (네트워크 속도) — GB/MB/KB보다 반드시 앞에 처리 (GB가 먼저 매칭되면 bps 잔류)
@@ -890,7 +890,10 @@ export function normalizeKoreanNumbers(text: string): string {
       const v = parseInt(m.replace(/,/g, ''))
       return Number.isSafeInteger(v) ? toSinoKorean(v) : m
     })
-    // 단독 소수점 (단위 없음, 한국어 컨텍스트): 3.14 → 삼점일사
+    // 단독 소수점 (단위 없음, 한국어 컨텍스트): 3.14 → 삼점일사, 17.4.1 → 십칠점사점일
+    // 3부 버전 (X.Y.Z) 먼저 처리 (2부 패턴이 먼저 매칭되면 .Z가 남음)
+    .replace(/(?<!\d)(\d+)\.(\d+)\.(\d+)(?!\d|[%a-zA-Z])/g, (_, a, b, c) =>
+      toSinoKorean(parseInt(a)) + '점' + b.split('').map((cc: string) => toSinoKorean(parseInt(cc))).join('') + '점' + c.split('').map((cc: string) => toSinoKorean(parseInt(cc))).join(''))
     .replace(/(?<!\d)(\d+)\.(\d+)(?!\d|[%a-zA-Z])/g, (_, n, d) =>
       toSinoKorean(parseInt(n)) + '점' + d.split('').map((c: string) => toSinoKorean(parseInt(c))).join(''))
     // 단독 정수 — 콤마 뒤 숫자는 이미 위에서 처리됐으므로 제외
@@ -958,6 +961,10 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\biPad\b/g, '아이패드'],
   [/\bMacBook\b/g, '맥북'],
   [/\bMacOS\b|\bmacOS\b/g, '맥'],
+  [/\bwatchOS\b/g, '애플 워치 오에스'],
+  [/\btvOS\b/g, '애플 티비 오에스'],
+  [/\biPadOS\b/g, '아이패드 오에스'],
+  [/\bvisionOS\b/g, '비전 오에스'],
   [/\bWindows\b/g, '윈도우'],
   [/\bLinux\b/g, '리눅스'],
   // GitHub 복합 패턴 먼저 (단순 GitHub 패턴보다 앞에 와야 함)
