@@ -840,8 +840,9 @@ export function sanitizeTTSText(raw: string): string {
   // 6. 파일 경로 → 제거 (절대 /path/to/file 및 상대 src/main/ipc.ts 모두)
   // 최소 3세그먼트(/)이면 절대경로, 2세그먼트+확장자이면 상대경로
   t = t.replace(/(?:^|(?<=\s))[\w.-]*(?:\/[\w.-]+){2,}(?:\.\w{1,5})?[가-힣]{0,4}/gm, '')
-  // 단일 파일명 (확장자 포함, 슬래시 없음): package.json, tsconfig.ts, ipc.ts 등
-  t = t.replace(/\b[\w-]+\.(ts|js|tsx|jsx|json|yaml|yml|toml|env|sh|py|rs|go|md)\b/g, '')
+  // 단일 파일명 (소문자 시작, 슬래시 없음): package.json, tsconfig.ts, ipc.ts 등
+  // 대문자 시작(Node.js, Next.js 등 브랜드명)은 Rule 18(TTS_BRAND_KO)에서 처리
+  t = t.replace(/\b[a-z][\w-]*\.(ts|js|tsx|jsx|json|yaml|yml|toml|env|sh|py|rs|go|md)\b/g, '')
 
   // 6b. 이메일 주소 → "이메일 주소"
   t = t.replace(/\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b/gi, '이메일 주소')
