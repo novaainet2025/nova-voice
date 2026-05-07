@@ -800,6 +800,10 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d+)장/g,      (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 장' })
     .replace(/(?<!\.)\b(\d+)권/g,      (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 권' })
     .replace(/(?<!\.)\b(\d+)잔/g,      (_, n) => { const v = parseInt(n); return toNativeKorean(v) + ' 잔' })
+    // 가지 (종류) · 곳/군데 (장소) — 순우리말 수사 + 공백
+    .replace(/(?<!\.)\b(\d+)가지/g,    (_, n) => { const v = parseInt(n); return (v <= 20 ? toNativeKorean(v) : toSinoKorean(v)) + ' 가지' })
+    .replace(/(?<!\.)\b(\d+)곳/g,      (_, n) => { const v = parseInt(n); return (v <= 20 ? toNativeKorean(v) : toSinoKorean(v)) + ' 곳' })
+    .replace(/(?<!\.)\b(\d+)군데/g,    (_, n) => { const v = parseInt(n); return (v <= 20 ? toNativeKorean(v) : toSinoKorean(v)) + ' 군데' })
     // 소수점 포함 단위 — 정수 패턴보다 먼저 처리 (3.5GB, 99.7% 등)
     // 소수점 + 점 단위 (평점/점수): 4.5점 → 사점오 점
     .replace(/(?<!\d)(\d+)\.(\d+)점/g, (_, n, d) =>
