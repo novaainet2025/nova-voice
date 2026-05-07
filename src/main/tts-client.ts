@@ -968,7 +968,7 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\biPhone\b/g, '아이폰'],
   [/\biPad\b/g, '아이패드'],
   [/\bMacBook\b/g, '맥북'],
-  [/\bMacOS\b|\bmacOS\b/g, '맥'],
+  [/\bMacOS\b|\bmacOS\b/g, '맥오에스'],
   [/\bwatchOS\b/g, '애플 워치 오에스'],
   [/\btvOS\b/g, '애플 티비 오에스'],
   [/\biPadOS\b/g, '아이패드 오에스'],
@@ -1087,7 +1087,7 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bheadless\b/gi, '헤드리스'],
   [/\bfps\b/gi, '에프피에스'],
   // 혼합 대소문자·하이픈 패턴 (ABBR_MAP/PascalCase 규칙으로 불가)
-  [/\bWi-Fi\b/gi, '와이파이'],
+  [/\bWi-Fi\b|\bWiFi\b/gi, '와이파이'],
   [/\bBluetooth\b/gi, '블루투스'],
   [/\bUSB-C\b/gi, '유에스비씨'],
   [/\bUSB-A\b/gi, '유에스비에이'],
