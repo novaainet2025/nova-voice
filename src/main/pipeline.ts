@@ -84,13 +84,19 @@ export async function pipelineSpeak(
 /**
  * Split text into sentences for streaming TTS
  * 소수점(3.14), 약어(e.g., i.e.) 앞 마침표는 문장 경계로 보지 않음
+ * 한국어 문장 끝(다. 요. 죠. 어. 네. 지.)도 명시 감지
  */
 function splitSentences(text: string): string[] {
-  // 마침표 앞이 숫자이거나 단일 소문자 알파벳인 경우는 분리하지 않음 (소수점/약어)
   return text
-    .replace(/([.!?。！？])\s+/g, '$1\x00')  // 마침표+공백 → 마침표+\x00 마킹
-    .replace(/(\d)\x00/g, '$1 ')              // 숫자 뒤 마침표는 복원 (소수점 컨텍스트 없음이나 안전하게)
-    .replace(/\b([a-z])\.\x00/g, '$1. ')      // 단일 소문자 약어 복원 (e.g., i.e.)
+    // 마침표/느낌표/물음표+공백 → 마킹
+    .replace(/([.!?。！？])\s+/g, '$1\x00')
+    // 한국어 구어체 문장 끝 (다. 요. 죠. 어. 네. 지.) + 공백 → 마킹
+    // 숫자 뒤 마침표(소수점)·영어 약어는 제외
+    .replace(/(?<=[가-힣])([.。])\s+/g, '$1\x00')
+    // 숫자 뒤 마침표 복원 (소수점 오인 방지)
+    .replace(/(\d)\x00/g, '$1 ')
+    // 단일 소문자 약어 복원 (e.g., i.e.)
+    .replace(/\b([a-z])\.\x00/g, '$1. ')
     .split('\x00')
     .map(s => s.trim())
     .filter(s => s.length > 3)  // 너무 짧은 조각 제거
