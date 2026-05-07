@@ -879,7 +879,11 @@ export function normalizeKoreanNumbers(text: string): string {
     .replace(/(?<!\.)\b(\d+)배/g,      (_, n) => toSinoKorean(parseInt(n)) + ' 배')
     // 한국어 단위 사이 ~ (물결표 범위) 후처리: 백 밀리초~이백 밀리초 → 백 밀리초에서 이백 밀리초
     .replace(/([가-힣])\s*~\s*([가-힣\d])/g, '$1에서 $2')
-    // 금액 단위 — 콤마 숫자 + 원 (1,500원 → 천오백 원, 350만원 → 삼백오십만 원)
+    // 금액 단위 — 콤마 숫자 + 한국어 단위 (5,000만 원 → 오천만 원, 1,500원 → 천오백 원)
+    // ※ 콤마 포함 만/억/조 단위 먼저 (단순 \d+만 패턴이 ,000 부분만 매칭하는 오류 방지)
+    .replace(/\b(\d{1,3}(?:,\d{3})+)조\s*원/g, (_, m) => { const v = parseInt(m.replace(/,/g, '')); return (Number.isSafeInteger(v) ? toSinoKorean(v) : m) + '조 원' })
+    .replace(/\b(\d{1,3}(?:,\d{3})+)억\s*원/g, (_, m) => { const v = parseInt(m.replace(/,/g, '')); return (Number.isSafeInteger(v) ? toSinoKorean(v) : m) + '억 원' })
+    .replace(/\b(\d{1,3}(?:,\d{3})+)만\s*원/g, (_, m) => { const v = parseInt(m.replace(/,/g, '')); return (Number.isSafeInteger(v) ? toSinoKorean(v) : m) + '만 원' })
     .replace(/\b(\d{1,3}(?:,\d{3})+)원/g, (_, m) => {
       const v = parseInt(m.replace(/,/g, ''))
       return (Number.isSafeInteger(v) ? toSinoKorean(v) : m) + ' 원'
