@@ -834,8 +834,10 @@ export function normalizeKoreanNumbers(text: string): string {
       const v = parseInt(m.replace(/,/g, ''))
       return (Number.isSafeInteger(v) ? toSinoKorean(v) : m) + ' 원'
     })
-    .replace(/(?<!\.)\b(\d+)만\s*원/g, (_, n) => toSinoKorean(parseInt(n)) + '만 원')
-    .replace(/(?<!\.)\b(\d+)천\s*원/g, (_, n) => toSinoKorean(parseInt(n)) + '천 원')
+    .replace(/(?<!\.)\b(\d+)조\s*원/g,  (_, n) => toSinoKorean(parseInt(n)) + '조 원')
+    .replace(/(?<!\.)\b(\d+)억\s*원/g,  (_, n) => toSinoKorean(parseInt(n)) + '억 원')
+    .replace(/(?<!\.)\b(\d+)만\s*원/g,  (_, n) => toSinoKorean(parseInt(n)) + '만 원')
+    .replace(/(?<!\.)\b(\d+)천\s*원/g,  (_, n) => toSinoKorean(parseInt(n)) + '천 원')
     .replace(/(?<!\.)\b(\d+)\s*원(?!\s*[가-힣])/g, (_, n) => { const v = parseInt(n); return v < 100000000 ? toSinoKorean(v) + ' 원' : n + '원' })
     // 천단위 콤마 숫자 (1,000 / 50,000 / 1,234,567 / 1,000,000,000) → 한국어
     .replace(/\b(\d{1,3}(?:,\d{3})+)\b/g, (m) => {
@@ -1100,6 +1102,15 @@ export function sanitizeTTSText(raw: string): string {
   t = t.replace(/ㅠㅠ+|ㅜㅜ+/g, '')          // 울음 이모티콘 제거
   t = t.replace(/ㅡㅡ|ㄷㄷ/g, '')            // 기타 자모 이모티콘 제거
   t = t.replace(/[ㄱ-ㅎㅏ-ㅣ]{2,}/g, '')     // 2개 이상 연속 자모 (잔여) 제거
+
+  // 13d. Q&A 형식 레이블 제거 (Q: A: → 레이블 없이)
+  t = t.replace(/^[QA]\s*:\s*/gm, '')
+
+  // 13e. 코드 예약어 → 한국어 (한국어 컨텍스트에서 자연스럽게)
+  t = t.replace(/\btrue\b/g, '참')
+  t = t.replace(/\bfalse\b/g, '거짓')
+  t = t.replace(/\bnull\b/g, '널')
+  t = t.replace(/\bundefined\b/g, '정의되지 않음')
 
   // 14. 이모지 제거 (TTS 엔진이 이모지 발음 시 어색하거나 건너뜀)
   t = t.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FEFF}]/gu, '')
