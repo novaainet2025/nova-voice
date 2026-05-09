@@ -310,9 +310,9 @@ async function processWithNCO(prompt: string, preferredAI?: string): Promise<Omi
     const data = await httpRequest(`${NCO_URL}/api/task`, { method: 'POST', body })
     const result = JSON.parse(data)
 
-    // Poll for task result
+    // Poll for task result — 120s timeout (단일 스레드 NCO 서버 큐 대기 포함)
     if (result.taskId) {
-      return await pollNCOTask(result.taskId)
+      return await pollNCOTask(result.taskId, 120000)
     }
     return { text: result.result || result.response || JSON.stringify(result), provider: 'nco', model: preferredAI }
   }
@@ -323,7 +323,7 @@ async function processWithNCO(prompt: string, preferredAI?: string): Promise<Omi
   const result = JSON.parse(data)
 
   if (result.taskId) {
-    return await pollNCOTask(result.taskId)
+    return await pollNCOTask(result.taskId, 120000)
   }
 
   // Try to extract text from various response formats

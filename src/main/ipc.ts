@@ -709,7 +709,11 @@ JSON만:`
             'nco/discuss': 'AI들이 토론할게요.', 'nco/team': 'AI 팀이 작업할게요.', 'nco/agent': '에이전트가 시작할게요.',
             'nco/hive': '전체 AI를 동원할게요.', 'nco/code': 'AI가 코딩할게요.', nco: '실행할게요.',
           }
-          speakWork(WORK_LABELS[ncoSubtype ? `nco/${ncoSubtype}` : intent] ?? '')
+          // discuss/team/agent/hive — confirmMsg (line ~863)가 더 상세한 TTS를 직접 호출하므로 중복 방지
+          const isLongNCO = ['discuss', 'team', 'agent', 'hive'].includes(ncoSubtype || '')
+          if (!isLongNCO) {
+            speakWork(WORK_LABELS[ncoSubtype ? `nco/${ncoSubtype}` : intent] ?? '')
+          }
 
           // 취소 체크 #2 — 인텐트 분류 후 실행 전
           if (abortSignal.aborted) {
