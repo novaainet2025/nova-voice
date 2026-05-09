@@ -63,24 +63,44 @@ export function createPTY(cols = 120, rows = 30): void {
     updateRecentPTYOutput(data)
     // Claude 신뢰 프롬프트 자동 승인 (1. Yes, I trust this folder)
     autoConfirmClaudeTrust()
-    // 응답 캡처 중이면 버퍼에 추가 + idle 타이머 리셋
-    // (상태바 노이즈는 리셋 제외 — 계속 업데이트되면 idle 타이머가 영원히 리셋됨)
+    // 응답 캡처 중이면:
+    //   - idle 타이머: 모든 데이터에 리셋 (스피너 포함) → Claude 마지막 출력 후 idleMs 뒤에 flush
+    //   - 버퍼: 실제 콘텐츠만 추가 (노이즈 제외) → 추출 품질 향상
+    // ⚠️ 이전 버그: 노이즈=타이머 리셋 안 함 → 에코 후 3초에 조기 flush (Claude 응답 전!)
     if (capture) {
-      capture.buffer += data
+      // \n 보존 — 라인별 노이즈 감지를 위해 \x0a(\n) 제외하고 제어문자 제거
       const stripped = data
         .replace(/\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g, '')  // CSI
         .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')            // OSC
         .replace(/\x1b./g, '')                                          // 기타 ESC
-        .replace(/[\x00-\x1f\x7f]/g, '')                               // 제어문자
-        .trim()
-      // Claude Code 상태바 패턴 — idle 타이머 리셋 안 함
-      const isStatusBarNoise = stripped.length === 0
-        || /api\s*[x+]\s*ws|NCO.*(?:직접|↑|↓|%)|bypass\s*permission|shift.*tab.*cycle/i.test(stripped)
-        || /claude[-\s]?\d.*(?:Sonnet|Opus|Haiku|4\.\d)/i.test(stripped)
-        || /Ctx:\s*\d+%|주별|weekly|\d+%\s*[·•]\s*주별/i.test(stripped)
-      if (!isStatusBarNoise) {
+        .replace(/[\x00-\x09\x0b-\x1f\x7f]/g, '')                     // 제어문자 (\n=\x0a 제외)
+      // 한 줄이 노이즈인지 판단하는 헬퍼
+      const isNoiseLine = (t: string): boolean =>
+        // api ws 패턴: ✗(U+2717) 포함 — "api✗ ws✗ [Cla Opn...]" 상태바 감지
+        /api[^\w\n]{0,3}ws/i.test(t)
+        || /NCO.*(?:직접|↑|↓|%)|bypass\s*permission|shift.*tab.*cycle/i.test(t)
+        || /claude[-\s]?\d.*(?:Sonnet|Opus|Haiku|4\.\d)/i.test(t)
+        || /Ctx:\s*\d+%|주별|weekly|\d+%\s*[·•]\s*주별/i.test(t)
+        || /^[✢✳✦✧✸✼❋✻✶✷✹✺]\s+\w+[…\.]*\s*$/.test(t)
+        || /^[✢✳✦✧✸✼❋✻✶✷✹✺·]\s*[a-zA-Z0-9.…]*$/.test(t)
+        || /^[⎿└]\s+Tip:/i.test(t)
+        // Claude Code 스피너 단어: -ing/-ting/-zing 으로 끝나는 단일 영문 단어
+        || /^[a-zA-Z]+(?:ing|ting|zing)[.…]*$/i.test(t)
+        // Flambé 등 라틴 확장 문자 포함 단일 대문자 시작 단어 (6-25자)
+        || /^[A-Z\u00C0-\u00D6\u00D8-\u00DE][a-zA-Z\u00C0-\u024F]{5,24}[.…!]?$/.test(t)
+        // 수평선으로 시작하는 장식/구분선 (내용 있어도 제거)
+        || /^[─━═╌╍┄┅]{5,}/.test(t)
+        || /^\??\d{1,3}$/.test(t)
+      const nonEmptyLines = stripped.split('\n').map(l => l.trim()).filter(l => l.length > 0)
+      if (nonEmptyLines.length > 0) {
+        // idle 타이머는 항상 리셋 (스피너도 포함) — Claude 출력이 완전히 멈춘 후 flush
         if (capture.idleTimer) clearTimeout(capture.idleTimer)
         capture.idleTimer = setTimeout(flushCapture, capture.idleMs ?? 1500)
+        // 버퍼에는 실제 콘텐츠가 있는 청크만 추가 (순수 노이즈 청크 제외)
+        const hasRealContent = nonEmptyLines.some(l => !isNoiseLine(l))
+        if (hasRealContent) {
+          capture.buffer += data
+        }
       }
     }
   })
@@ -248,11 +268,12 @@ export function startPTYResponseCapture(
 ): void {
   stopPTYResponseCapture()
   capture = { buffer: '', idleTimer: null, maxTimer: null, idleMs, callback }
+  // maxTimer만 즉시 시작 — idle 타이머는 첫 실제 컨텐츠 도착 시 시작
+  // (즉시 idleTimer 시작 시 Claude 응답이 3초+ 걸리면 빈 버퍼로 조기 flush됨)
   capture.maxTimer = setTimeout(() => {
     if (capture) (capture as any)._timedOut = true
     flushCapture()
   }, maxMs)
-  capture.idleTimer = setTimeout(flushCapture, idleMs)
 }
 
 export function stopPTYResponseCapture(): void {
@@ -268,14 +289,10 @@ function flushCapture(): void {
   const { buffer, callback } = capture
   stopPTYResponseCapture()
 
-  // ANSI/VT 전체 제거 후 raw 텍스트 전달 (필터링은 호출자가 판단)
+  // ANSI/VT 전체 제거 후 raw 텍스트 전달
+  // ⚠️ \r 덮어쓰기 시뮬레이션 금지 — Claude Code 상태바가 \r로 응답 텍스트를 덮어 clean=0이 됨
   const clean = buffer
-    // \r 처리: 줄 안에서 \r 이후 내용만 유지 (덮어쓰기 시뮬레이션)
-    .split('\n').map(line => {
-      const parts = line.split('\r')
-      return parts[parts.length - 1]  // 마지막 \r 이후 내용만
-    }).join('\n')
-    // CSI 시퀀스 (색상, 커서, 지우기 등) — ? ~ < = > ! 파라미터 포함
+    // CSI 시퀀스 (색상, 커서, 지우기 등) — 먼저 제거
     .replace(/\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g, '')
     // OSC 시퀀스 (타이틀, 링크 등)
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
@@ -283,12 +300,16 @@ function flushCapture(): void {
     .replace(/\x1b[PX^_][^\x1b]*\x1b\\/g, '')
     // 나머지 단일 ESC 시퀀스
     .replace(/\x1b./g, '')
+    // \r → 줄바꿈으로 변환 (덮어쓰기 시뮬레이션 대신 줄 분리)
+    .replace(/\r/g, '\n')
     // 남은 제어문자 (줄바꿈 \x0a 제외)
     .replace(/[\x00-\x09\x0b-\x1f\x7f]/g, '')
+    // 중복 줄바꿈 정리
+    .replace(/\n{3,}/g, '\n\n')
     .trim()
 
   if (timedOut) console.log("[PTY] Response capture timed out")
-  console.log(`[PTY Capture] flushed ${clean.length} chars`)
+  console.log(`[PTY Capture] buf=${buffer.length} clean=${clean.length} preview="${clean.substring(0, 80).replace(/\n/g,' ')}"`)
   if (clean.length > 10) {
     callback(clean)
   }
@@ -307,14 +328,35 @@ export function extractClaudeResponseFromPTY(raw: string, question: string): str
   // 2. 스피너/진행표시 라인 제거
   lines = lines.filter(l => !/^[⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷●○◐◑◒◓\s]*$/.test(l.trim() || ' '))
   lines = lines.filter(l => !/^\s*[⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷].*(?:Thinking|Working|Analyzing|Running|Searching)/i.test(l))
+  // Claude Code 사고 단계 스피너: ✢ ✶ ✳ ✦ + 공백 + 단어 패턴 (공백 있음)
+  lines = lines.filter(l => !/^[✢✳✦✧✸✼❋✻✶✷✹✺]\s+\w+[…\.]*\s*$/.test(l.trim()))
+  // 스피너 char + 붙어쓰기 영문 단편: ✶c, ✻Nu, ✸Nucl 등 (공백 없이 붙음)
+  lines = lines.filter(l => !/^[✢✳✦✧✸✼❋✻✶✷✹✺·]\s*[a-zA-Z0-9.…]*$/.test(l.trim()))
+  // Claude Code 스피너 단어 — 단일 영문 단어가 -ing/-ting/-zing으로 끝나는 줄 전체 제거
+  // (Nucleating, Computing, Razzmatazzing, Riffing 등 현재/미래 모든 스피너 포괄)
+  lines = lines.filter(l => !/^[a-zA-Z]+(?:ing|ting|zing)[.…]*$/i.test(l.trim()))
+  // 위 패턴으로 잡히지 않는 기타 스피너 단어: ASCII+라틴확장 단일 단어 6-25자 (Flambé 등)
+  // 대문자 시작 + 소문자 계속 → 스피너 단어 패턴 (한국어 응답에 영향 없음)
+  lines = lines.filter(l => !/^[A-Z\u00C0-\u00D6\u00D8-\u00DE][a-zA-Z\u00C0-\u024F]{5,24}[.…!]?$/.test(l.trim()))
+  // 위 패턴으로 잡히지 않는 기타 컴퓨팅 라벨 단편 (Nuclei, Perplex 등)
+  lines = lines.filter(l => !/^(?:Nuclei|Perplex|Analyz|Synthes|Theori|Reflect)[a-zA-Z.…]*$/i.test(l.trim()))
+  // 짧은 영문 단편 (1-4자, 한국어 없음) — \r 덮어쓰기 애니메이션 잔여 조각
+  lines = lines.filter(l => !/^[a-zA-Z]{1,4}[.…]?$/.test(l.trim()))
+  // Tip 라인 (extractClaudeResponseFromPTY 레벨 추가 차단 — 다중줄 청크 누락 방어)
+  lines = lines.filter(l => !/^[⎿└]\s+Tip:/i.test(l.trim()))
+  // 괄호로만 감싸인 한국어 상태 메시지 (예: "(턴 종료 분석 중...)")
+  lines = lines.filter(l => !/^\([가-힣\w\s.…]*(?:중|ing)[.…]*\)$/.test(l.trim()))
+  // Claude Code UI 장식 라인: ─────… / ━━━… 등 수평선 (뒤에 내용 있어도 제거 — $ 앵커 제거)
+  // "──────────────────────────────────────삼십구m" 같은 구분선+내용 포함
+  lines = lines.filter(l => !/^[─━═╌╍┄┅]{5,}/.test(l.trim()))
 
   // 3. Claude Code 상태바/UI 라인 제거 (포괄적 패턴)
   lines = lines.filter(l => {
     const t = l.replace(/\s+/g, ' ').trim()  // 공백 정규화 (붙어쓰기 처리)
     if (!t) return false  // 빈 줄은 일단 유지 (후처리에서 정리)
 
-    // 상태바 첫 줄: "apix ws [Cla Opn Gem …]" 프로바이더 목록
-    if (/api\s*[x+]\s*ws\s*\[/i.test(t)) return false
+    // 상태바 첫 줄: "api ws [Cla Opn Gem …]" — ✗(U+2717) 포함 모든 변형 처리
+    if (/api[^\w\n]{0,3}ws/i.test(t)) return false
     // NCO 진행바: "NCO ░▒█ 0%(NCO:0↑직접:0↓)" — 진행바 문자 또는 %+직접 패턴
     if (/NCO[\s\S]{0,20}(?:직접|↑|↓)/i.test(t)) return false
     if (/NCO.*\d+%/i.test(t) && /직접|↑|↓/.test(t)) return false

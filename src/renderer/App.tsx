@@ -17,7 +17,7 @@ function App() {
     })
     return () => cleanup?.()
   }, [setCurrentView])
-  const { startRecording, stopRecording } = useRecorder()
+  const { startRecording, stopRecording, cancelRecording } = useRecorder()
 
   // Check if this is the overlay window
   const isOverlay = window.location.hash === '#/overlay'
@@ -27,6 +27,11 @@ function App() {
 
     // Listen for recording state from main process
     const cleanupState = window.electronAPI.onRecordingState((state) => {
+      if ((state as any).cancelled && !isOverlay) {
+        // 취소: MediaRecorder 중단 + 오디오 폐기 (STT 처리 없음)
+        cancelRecording()
+        return
+      }
       setRecording(state.isRecording)
       if (state.isRecording && !isOverlay) {
         startRecording()

@@ -267,24 +267,52 @@ export async function synthesize(options: TTSOptions): Promise<TTSResult> {
   }
 }
 
-// Stop any currently playing audio
+// ─── 오디오 플레이리스트 큐 ────────────────────────────────────────────────
+// playAudio 호출이 겹치지 않도록 전역 직렬화 — 동시 재생 방지
+type PlaylistItem = { path: string; resolve: () => void; reject: (e: Error) => void }
+let _audioPlaylist: PlaylistItem[] = []
+let _playlistRunning = false
+
+async function _drainPlaylist(): Promise<void> {
+  if (_playlistRunning) return
+  _playlistRunning = true
+  while (_audioPlaylist.length > 0) {
+    const item = _audioPlaylist.shift()!
+    try {
+      await _playAudioDirect(item.path)
+      item.resolve()
+    } catch (e) {
+      item.reject(e as Error)
+    }
+  }
+  _playlistRunning = false
+}
+
+// Stop current playback AND clear queued playlist
 export function stopPlayback(): void {
+  // 큐 전체 취소 — 남은 항목들 즉시 resolve (무음 처리)
+  for (const item of _audioPlaylist) item.resolve()
+  _audioPlaylist = []
   if (currentPlayback && !currentPlayback.killed) {
     currentPlayback.kill('SIGTERM')
     currentPlayback = null
-    console.log('[TTS] Stopped previous playback')
+    console.log('[TTS] Playback stopped + playlist cleared')
   }
 }
 
-// Play audio file using system player
+// Play audio file — 플레이리스트 큐에 추가, 순차 재생 보장
 export async function playAudio(wavPath: string): Promise<void> {
   if (!fs.existsSync(wavPath)) {
     throw new Error(`Audio file not found: ${wavPath}`)
   }
+  return new Promise<void>((resolve, reject) => {
+    _audioPlaylist.push({ path: wavPath, resolve, reject })
+    _drainPlaylist()  // fire-and-forget: 이미 실행 중이면 내부에서 처리
+  })
+}
 
-  // Kill previous playback before starting new one
-  stopPlayback()
-
+// 실제 오디오 재생 (직접 실행, 플레이리스트 내부 전용)
+async function _playAudioDirect(wavPath: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const { execFile: execFileCb } = require('child_process')
 
@@ -305,11 +333,9 @@ export async function playAudio(wavPath: string): Promise<void> {
     const proc: ChildProcess = execFileCb(cmd, args, (error: Error | null) => {
       currentPlayback = null
       if (error) {
-        // SIGTERM from stopPlayback() is expected, not an error
         if ((error as any).signal === 'SIGTERM' || (error as any).killed) {
-          resolve()
+          resolve()  // SIGTERM = stopPlayback 의도적 중단, 정상 처리
         } else if (process.platform === 'linux' && cmd === 'aplay') {
-          // Fallback to paplay on Linux
           const fallback: ChildProcess = execFileCb('paplay', [wavPath], (err2: Error | null) => {
             currentPlayback = null
             err2 ? reject(err2) : resolve()
@@ -325,7 +351,6 @@ export async function playAudio(wavPath: string): Promise<void> {
 
     currentPlayback = proc
 
-    // Timeout: kill afplay if it hangs (max 60s)
     const timeout = setTimeout(() => {
       if (proc && !proc.killed) {
         console.warn('[TTS] Playback timeout, killing process')
@@ -348,9 +373,9 @@ export async function speak(text: string, options?: Partial<TTSOptions>): Promis
 // 텍스트를 짧은 청크로 분리 → chunk[i] 재생 중에 chunk[i+1] 동시 합성
 // 효과: 첫 소리 대기 1.5-2s (기존 4-8s), 전체 시간 30-50% 단축
 
-function splitForQwen3Streaming(text: string, maxLen = 100): string[] {
+function splitForQwen3Streaming(text: string, maxLen = 250): string[] {
   // 1단계: 강한 문장 경계에서 분리 (.!?。！？ 및 줄바꿈)
-  // maxLen 100 → 60보다 큰 청크 허용 → afplay 재시작 횟수 감소 → 문장 단위 자연스러운 발화
+  // maxLen 250 → 청크 수 대폭 감소 → afplay 재시작 횟수 감소 → 연속 발화 자연스러움
   const raw = text
     .split(/(?<=[.!?。！？다요죠])\s+|(?<=\n)/)
     .map(s => s.trim())
@@ -441,8 +466,9 @@ export async function speakQwen3Chunked(text: string, options?: Partial<TTSOptio
     }
   }
 
-  // Qwen3 :7860은 샘플레이트가 다를 수 있으므로 WAV 병합 비활성화 (silence trim만 적용)
-  await runChunkedPipeline(chunks, cacheDir, synthFn, false)
+  // enableMerge=true: :7860도 24kHz/16bit/mono 일정 출력 → WAV 병합 → afplay 단 1회
+  // 이전: enableMerge=false → 청크마다 별도 afplay → 단어 단위 끊김 버그
+  await runChunkedPipeline(chunks, cacheDir, synthFn, true)
 }
 
 // ─── MLX-KO 청크 스트리밍 (:8800 Qwen3-TTS 전용) ─────────────────────────────
@@ -1506,9 +1532,9 @@ function createPeekable<T>(p: Promise<T>) {
 // 4개 엔진(Qwen3/MLX-KO/MLX-EN/Spark) 공용 — synthFn만 다름
 //
 // 최적화 레이어:
-//  (1) 후미 무음 제거 — synthFn에서 trimWAVSilence 적용
-//  (2) lookahead 2   — 청크[i+1]과 청크[i+2]를 동시 합성 선행 시작
-//  (3) WAV 병합      — 다음 청크가 이미 합성 완료 시 mergeWAVBuffers → afplay 1회 절감
+//  (1) 모든 청크 병렬 합성  — Promise.all로 동시 합성 → 총 대기 = max(청크 합성 시간)
+//  (2) WAV 전체 병합         — 합성 결과를 하나의 WAV로 연결 → afplay 단 1회
+//  (3) 병합 실패 시 순차 재생 — try/catch 폴백, 청크별 에러 건너뜀
 //
 // enableMerge: WAV 샘플레이트가 동일한 MLX 엔진에서만 true (Qwen3 :7860은 false)
 async function runChunkedPipeline(
@@ -1524,56 +1550,29 @@ async function runChunkedPipeline(
     return
   }
 
-  // Lookahead 2: 청크[0]과 청크[1]을 동시에 합성 시작
-  let cur = createPeekable(synthFn(chunks[0]))
-  let nxt: ReturnType<typeof createPeekable<string | null>> | null =
-    chunks.length > 1 ? createPeekable(synthFn(chunks[1])) : null
-  let nextSynthIdx = 2  // 다음에 합성 시작할 청크 인덱스
+  // 모든 청크를 병렬 합성 (합성 총 시간 = 가장 긴 청크 시간)
+  const paths = await Promise.all(chunks.map(c => synthFn(c).catch(() => null)))
+  const validPaths = paths.filter((p): p is string => p !== null)
+  if (validPaths.length === 0) return
 
-  let i = 0
-  while (i < chunks.length) {
-    const curPath = await cur.promise
-
-    // 다음 청크 이미 합성 완료 + WAV 병합 가능? → afplay 재기동 1회 절감
-    if (enableMerge && curPath && nxt && nxt.isReady() && i + 1 < chunks.length) {
-      const nxtPath = nxt.get()
-      if (nxtPath) {
-        try {
-          const merged = mergeWAVBuffers([fs.readFileSync(curPath), fs.readFileSync(nxtPath)])
-          const mergedPath = path.join(cacheDir,
-            `merged-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
-          fs.writeFileSync(mergedPath, merged)
-
-          // 병합 재생 중 lookahead: 다음 두 청크 합성 선행 시작
-          const newCur = nextSynthIdx < chunks.length
-            ? createPeekable(synthFn(chunks[nextSynthIdx])) : null
-          const newNxt = nextSynthIdx + 1 < chunks.length
-            ? createPeekable(synthFn(chunks[nextSynthIdx + 1])) : null
-
-          await playAudio(mergedPath)
-
-          i += 2
-          nextSynthIdx += 2
-          if (newCur) { cur = newCur; nxt = newNxt }
-          else break
-          continue
-        } catch (e) {
-          console.warn('[TTS-pipeline] WAV 병합 실패, 개별 재생:', (e as Error).message)
-        }
-      }
+  // WAV 병합 경로 (MLX 계열: 샘플레이트 동일)
+  if (enableMerge && validPaths.length > 1) {
+    try {
+      const merged = mergeWAVBuffers(validPaths.map(p => fs.readFileSync(p)))
+      const mergedPath = path.join(cacheDir, `merged-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
+      fs.writeFileSync(mergedPath, merged)
+      await playAudio(mergedPath)
+      return
+    } catch (e) {
+      console.warn('[TTS-pipeline] WAV 병합 실패, 순차 재생 폴백:', (e as Error).message)
     }
+  }
 
-    // 개별 재생
-    if (curPath) await playAudio(curPath)
-
-    i++
-    if (i >= chunks.length) break
-
-    // 다음 이터레이션 준비: nxt → cur, 새 lookahead 시작
-    cur = nxt || createPeekable(synthFn(chunks[i]))
-    nxt = nextSynthIdx < chunks.length
-      ? createPeekable(synthFn(chunks[nextSynthIdx])) : null
-    nextSynthIdx++
+  // 비병합 폴백 (Qwen3 :7860 또는 병합 실패) — 순차 재생, 청크별 에러 건너뜀
+  for (const p of validPaths) {
+    try { await playAudio(p) } catch (e) {
+      console.warn('[TTS-pipeline] 재생 실패 건너뜀:', (e as Error).message)
+    }
   }
 }
 
@@ -1691,6 +1690,16 @@ export async function synthesizeMLX(text: string): Promise<string> {
 let _ttsModel: string = 'qwen3'
 let _sayVoice: string = 'Yuna'
 
+// 동일 서버 중복 시작 방지 락
+const _serverAutoStarting = new Set<string>()
+function autoStartServer(modelId: string): void {
+  if (_serverAutoStarting.has(modelId)) return
+  _serverAutoStarting.add(modelId)
+  startTTSServer(modelId as keyof typeof SERVER_CONFIGS)
+    .catch(() => {})
+    .finally(() => _serverAutoStarting.delete(modelId))
+}
+
 export function setActiveTTSModel(model: string): void { _ttsModel = model }
 export function setActiveSayVoice(voice: string): void { _sayVoice = voice }
 export function getActiveTTSModel(): string { return _ttsModel }
@@ -1708,16 +1717,34 @@ export const SAY_VOICES = [
 // ─── TTS 직렬화 뮤텍스 — 동시 synthesis 방지 ────────────────────────────────
 // .catch()로 비동기 발사된 smartSpeak 호출이 겹치면 목소리가 섞이는 문제 해결
 let _ttsQueue: Promise<void> = Promise.resolve()
+let _ttsQueueDepth = 0
+const TTS_QUEUE_MAX = 3  // 큐 최대 깊이 — 초과 시 새 메시지 드롭
 
 // Smart speak: 설정된 ttsModel 우선 — MLX 계열은 say로만 폴백 (다른 엔진으로 폴백 금지)
 export async function smartSpeak(text: string, options?: Partial<TTSOptions>): Promise<void> {
   const clean = sanitizeTTSText(text)
   if (!clean.trim()) return  // 정제 후 내용 없으면 스킵
+  // 큐 포화 시 드롭 — 너무 많은 진행 알림이 쌓이는 것 방지
+  if (_ttsQueueDepth >= TTS_QUEUE_MAX) {
+    console.warn('[TTS] 큐 포화 — 메시지 드롭:', clean.substring(0, 40))
+    return
+  }
+  _ttsQueueDepth++
   // 직렬화: 이전 TTS 완료 후 다음 시작
-  const result = new Promise<void>((resolve, reject) => {
-    _ttsQueue = _ttsQueue.then(() => _doSmartSpeak(clean, options).then(resolve, reject)).catch(() => {})
+  return new Promise<void>((resolve, reject) => {
+    _ttsQueue = _ttsQueue.then(async () => {
+      try {
+        await _doSmartSpeak(clean, options)
+        resolve()
+      } catch (e) {
+        reject(e)
+      } finally {
+        _ttsQueueDepth = Math.max(0, _ttsQueueDepth - 1)
+      }
+    }).catch(() => {
+      _ttsQueueDepth = Math.max(0, _ttsQueueDepth - 1)
+    })
   })
-  return result
 }
 
 async function _doSmartSpeak(text: string, options?: Partial<TTSOptions>): Promise<void> {
@@ -1731,24 +1758,18 @@ async function _doSmartSpeak(text: string, options?: Partial<TTSOptions>): Promi
 
   if (model === 'mlx') {
     try {
-      // 목소리 일관성 정책: 한국어가 있으면 항상 MLX-KO (Qwen3-TTS)
-      // 이전: hasKorean && hasLatin → Spark → 연속 발화 중 목소리 변경 버그
-      // 수정: 순수 영어만 MLX-EN, 한국어 포함(한영 혼용 포함) → MLX-KO 단일화
-      const hasKorean = /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(text)
-      const hasLatin  = /[a-zA-Z]/.test(text)
-      if (!hasKorean && hasLatin) {
-        await speakMLXEnChunked(text, undefined, MLX_EN_API, MLX_EN_MODEL)
-      } else {
-        // 한국어 있거나 한영 혼용 → MLX-KO (목소리 고정, Qwen3이 영어 단어도 처리)
-        await speakMLXKoChunked(text, mlxTTSVoice, MLX_KO_API, MLX_KO_MODEL)
-      }
+      // 화자 단일화 정책: 언어 무관 항상 MLX-KO (:8800 Qwen3-TTS) 사용
+      // 이전: 영어→Kokoro(:8801), 혼용→Spark(:8802) → 청크마다 다른 목소리 전환 버그
+      // 수정: Qwen3-TTS는 한영 혼용 처리 가능 → 단일 엔진으로 화자 일관성 보장
+      await speakMLXKoChunked(text, mlxTTSVoice, MLX_KO_API, MLX_KO_MODEL)
       return
     } catch (e) {
       console.log('[TTS-MLX] Failed:', (e as Error).message)
       invalidateMLXCache()
     }
-    // MLX 실패 → 침묵 (say 폴백 금지 — 목소리 혼합 방지)
-    console.warn('[TTS-MLX] 실패, 침묵 처리 (목소리 통일 정책)')
+    // MLX 서버 다운 → 자동 시작 후 다음 호출에서 사용 (설정 모델 유지)
+    console.warn('[TTS-MLX] 서버 다운 — 자동 시작 중')
+    autoStartServer('mlx_ko')
     return
   }
 
@@ -1760,20 +1781,21 @@ async function _doSmartSpeak(text: string, options?: Partial<TTSOptions>): Promi
       console.log('[TTS-MLX-KO] Failed:', (e as Error).message)
       invalidateMLXCache()
     }
-    console.warn('[TTS-MLX-KO] 실패, 침묵 처리')
+    console.warn('[TTS-MLX-KO] 서버 다운 — 자동 시작 중')
+    autoStartServer('mlx_ko')
     return
   }
 
   if (model === 'mlx_en') {
     try {
-      await speakMLXEnChunked(text, 'af_heart', MLX_EN_API, MLX_EN_MODEL)
+      await speakMLXEnChunked(text, getKokoroVoice(mlxTTSVoice), MLX_EN_API, MLX_EN_MODEL)
       return
     } catch (e) {
       console.log('[TTS-MLX-EN] Failed:', (e as Error).message)
       invalidateMLXCache()
     }
-    // mlx_en 실패 → 침묵 (목소리 통일 정책)
-    console.warn('[TTS-MLX-EN] 실패, 침묵 처리')
+    console.warn('[TTS-MLX-EN] 서버 다운 — 자동 시작 중')
+    autoStartServer('mlx_en')
     return
   }
 
@@ -1787,8 +1809,8 @@ async function _doSmartSpeak(text: string, options?: Partial<TTSOptions>): Promi
       console.log('[TTS-Spark-Chunked] Failed:', (e as Error).message)
       invalidateMLXCache()
     }
-    // mlx_mix 실패 → 침묵 (목소리 통일 정책)
-    console.warn('[TTS-MLX-MIX] 실패, 침묵 처리')
+    console.warn('[TTS-MLX-MIX] 서버 다운 — 자동 시작 중')
+    autoStartServer('mlx_mix')
     return
   }
 
@@ -1800,10 +1822,10 @@ async function _doSmartSpeak(text: string, options?: Partial<TTSOptions>): Promi
         return
       }
     } catch (e) {
-      console.log('[CosyVoice2] Failed, falling back:', (e as Error).message)
+      console.log('[CosyVoice2] Failed:', (e as Error).message)
     }
-    // cosyvoice 실패 → 침묵 (목소리 통일 정책)
-    console.warn('[CosyVoice2] 실패, 침묵 처리')
+    console.warn('[CosyVoice2] 서버 다운 — 자동 시작 중')
+    autoStartServer('cosyvoice')
     return
   }
 
@@ -1822,41 +1844,14 @@ async function _doSmartSpeak(text: string, options?: Partial<TTSOptions>): Promi
     } catch (e) {
       console.log('[Qwen3-TTS] Failed:', (e as Error).message)
     }
-    // qwen3 실패 → mlx_ko (:8800) 폴백 (침묵 대신 목소리 유지)
-    try {
-      if (await isMLXAvailable()) {
-        console.log('[Qwen3→MLX-KO fallback] qwen3 실패, :8800 폴백')
-        await speakMLXKoChunked(text, mlxTTSVoice, MLX_KO_API, MLX_KO_MODEL)
-        return
-      }
-    } catch (e2) {
-      console.warn('[Qwen3→MLX-KO fallback] 폴백도 실패:', (e2 as Error).message)
-    }
-    console.warn('[Qwen3-TTS] 실패, 침묵 처리')
+    // qwen3 서버 다운 → 자동 시작 후 다음 호출에서 사용 (설정 모델 유지)
+    console.warn('[Qwen3-TTS] 서버 다운 — 자동 시작 중')
+    autoStartServer('qwen3')
     return
   }
 
-  try {
-    if (await isMLXAvailable()) {
-      const audioPath = await synthesizeMLX(text)
-      await playAudio(audioPath)
-      return
-    }
-  } catch (e) {
-    console.log('[TTS-MLX] Failed, trying CosyVoice2:', (e as Error).message)
-  }
-
-  try {
-    if (await isCosyVoiceAvailable()) {
-      const audioPath = await synthesizeCosyVoice(text)
-      await playAudio(audioPath)
-      return
-    }
-  } catch (e) {
-    console.log('[CosyVoice2] Failed, using say:', (e as Error).message)
-  }
-
-  console.warn('[TTS] 모든 TTS 서버 불가 → 침묵 (목소리 통일 정책)')
+  console.warn('[TTS] 알 수 없는 모델 — 자동 시작 시도')
+  autoStartServer(_ttsModel as keyof typeof SERVER_CONFIGS)
 }
 
 // Get available speakers

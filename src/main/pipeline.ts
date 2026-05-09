@@ -17,7 +17,7 @@
  *     → [Hand] 결과를 커서 위치에 텍스트 삽입
  */
 
-import { smartSpeak, isTTSAvailable, isMLXAvailable, ensureTTSServer, synthesizeMLX, playAudio, startMLXInBackground, sanitizeTTSText } from './tts-client'
+import { smartSpeak, isTTSAvailable, isMLXAvailable, ensureTTSServer, synthesizeMLX, playAudio, startMLXInBackground, startTTSServer, getActiveTTSModel, sanitizeTTSText } from './tts-client'
 import { BrowserWindow } from 'electron'
 
 export interface PipelineConfig {
@@ -193,14 +193,13 @@ export async function runParallelWithProgress<T>(
 
   const results = await Promise.allSettled(
     tasks.map(async (task) => {
-      if (!task.silent) speakProgress(ProgressMessages.taskStart(task.name))
+      // 태스크별 개별 알림 제거 — 병렬 실행 시 큐 쌓임 방지
+      // 시작/완료 알림은 배치 요약(allDone/failure)에서만 처리
       try {
         const result = await task.fn()
-        if (!task.silent) speakProgress(ProgressMessages.taskDone(task.name))
         return { name: task.name, result }
       } catch (e) {
         const err = e as Error
-        if (!task.silent) speakProgress(ProgressMessages.taskFailed(task.name), 'high')
         console.error(`[Pipeline] Task "${task.name}" failed:`, err.message)
         return { name: task.name, error: err }
       }
@@ -229,16 +228,26 @@ export async function runParallelWithProgress<T>(
  * Initialize pipeline — ensure TTS server is ready
  */
 export async function initPipeline(): Promise<{ tts: boolean }> {
-  // Start MLX-Audio server (Qwen3-TTS 4-bit) in background — no blocking at startup
-  // Model warm-up happens async; first TTS call ~960ms, subsequent calls ~960ms (warm)
-  startMLXInBackground()
+  const activeModel = getActiveTTSModel()
+  console.log(`[Pipeline] TTS 모델: ${activeModel} (설정값)`)
 
-  // Also check legacy Qwen3-TTS server (port 7860) for status reporting
-  const ttsReady = config.ttsEnabled ? await isTTSAvailable() : false
-  console.log(`[Pipeline] Legacy TTS (:7860): ${ttsReady ? 'ready' : 'not running'}`)
-  console.log('[Pipeline] MLX-Audio (:8800): starting in background...')
+  if (activeModel === "say") {
+    console.log("[Pipeline] say 모델 — 서버 불필요")
+  } else if (["mlx", "mlx_ko", "mlx_en", "mlx_mix"].includes(activeModel)) {
+    startMLXInBackground()
+    console.log("[Pipeline] MLX-Audio: 백그라운드 시작 중...")
+  } else if (activeModel === "qwen3") {
+    ensureTTSServer().then(ok =>
+      console.log(`[Pipeline] Qwen3-TTS (:7860): ${ok ? "준비됨" : "시작 실패"}`)
+    ).catch(() => {})
+    console.log("[Pipeline] Qwen3-TTS: 백그라운드 시작 중...")
+  } else if (activeModel === "cosyvoice") {
+    isTTSAvailable().then(ok =>
+      console.log(`[Pipeline] CosyVoice2 (:8900): ${ok ? "준비됨" : "미실행"}`)
+    ).catch(() => {})
+  }
 
-  return { tts: true }  // MLX is our primary — always returns ready
+  return { tts: true }
 }
 
 /**

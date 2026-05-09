@@ -201,7 +201,12 @@ export function HomePage() {
   const stageLabels: Record<string, string> = {
     'transcribing': 'Transcribing...',
     'ai_processing': `AI Processing (${currentMode})...`,
+    'ai_answering': '💬 Generating answer...',
+    'ai_searching': '🔍 Searching...',
+    'screen_capture': '📷 Capturing screen...',
+    'screen_analyzing': '👁 Analyzing screen...',
     'command_parsing': '🎮 Parsing command...',
+    'nco_processing': '🧠 NCO Processing...',
     'confirm_required': '⚠️ Confirming...',
     'nco_discussion': '🗣️ NCO Discussion running...',
     'nco_parallel': '👥 NCO Team executing...',
@@ -209,9 +214,13 @@ export function HomePage() {
     'nco_hive': '🐝 NCO Hive collaborating...',
     'done': ''
   }
-  const stageLabel = stageLabels[aiStage] || ''
+  const colonIdx = aiStage.indexOf(':')
+  const stageKey = colonIdx >= 0 ? aiStage.substring(0, colonIdx) : aiStage
+  const stageDetail = colonIdx >= 0 ? aiStage.substring(colonIdx + 1) : ''
+  const stageLabel = stageLabels[stageKey] || ''
+  const stageDisplay = stageLabel + (stageDetail ? ` — ${stageDetail}` : '')
 
-  const isBusy = isTranscribing || isProcessingAttachment || (aiStage && aiStage !== 'idle' && aiStage !== 'done')
+  const isBusy = isTranscribing || isProcessingAttachment || (aiStage && stageKey !== 'idle' && stageKey !== 'done')
 
   return (
     <div
@@ -343,7 +352,7 @@ export function HomePage() {
       {isBusy && (
         <div className="flex items-center gap-2 mb-4">
           <div className="w-5 h-5 border-2 border-primary-400 border-t-transparent rounded-full animate-spin" />
-          <span className="text-sm text-white/60">{stageLabel || 'Processing...'}</span>
+          <span className="text-sm text-white/60">{stageDisplay || 'Processing...'}</span>
         </div>
       )}
 

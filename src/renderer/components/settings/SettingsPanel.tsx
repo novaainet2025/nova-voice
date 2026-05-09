@@ -305,8 +305,10 @@ export function SettingsPanel() {
                       onClick={async (e) => {
                         e.stopPropagation()
                         setServerBusy(b => ({ ...b, [`preview_${voiceId}`]: 'previewing' }))
-                        // 화자 카드 미리듣기는 항상 :7860 Qwen3-TTS 사용 — 8화자 고유 목소리 구분
-                        try { await window.electronAPI.previewTTSVoice('qwen3', voiceId) }
+                        // 현재 TTS 모델 서버로 미리듣기 (mlx/mlx_ko는 단일화자라 qwen3으로 대체)
+                        const previewMdl = (localSettings.ttsModel === 'mlx' || localSettings.ttsModel === 'mlx_ko' || localSettings.ttsModel === 'qwen3' || localSettings.ttsModel === 'say')
+                          ? 'qwen3' : localSettings.ttsModel
+                        try { await window.electronAPI.previewTTSVoice(previewMdl as any, voiceId) }
                         finally { setServerBusy(b => ({ ...b, [`preview_${voiceId}`]: null })) }
                       }}
                       className="flex-shrink-0 mt-0.5 text-[10px] px-2 py-1 rounded-md bg-white/8 hover:bg-white/20 transition-colors"
@@ -405,6 +407,73 @@ export function SettingsPanel() {
                 </div>
               )
             })}
+
+            {/* MLX 화자 선택 — mlx_en/mlx_mix만 표시 (mlx/mlx_ko는 단일화자라 숨김) */}
+            {['mlx','mlx_ko'].includes(localSettings.ttsModel) && (
+              <div className="px-3 py-2 border-t border-white/8 bg-yellow-400/3">
+                <p className="text-[11px] text-yellow-300/60 leading-relaxed">
+                  ⚠️ MLX-Auto · MLX-Qwen3은 한국어를 <strong className="text-yellow-200/80">단일화자(:8800)</strong>로 출력합니다.<br/>
+                  화자를 선택하려면 아래 <strong className="text-white/60">Qwen3-TTS</strong>를 선택하세요 (9화자 지원).
+                </p>
+              </div>
+            )}
+            {['mlx_en','mlx_mix'].includes(localSettings.ttsModel) && (
+              <div className="px-3 py-3 border-t border-white/8 bg-white/2">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] text-white/40 font-medium">화자 고정</span>
+                  <span className="text-[10px] text-white/25">
+                    {localSettings.ttsModel === 'mlx_en' ? 'Kokoro(:8801) 화자' : 'Spark(:8802) 화자'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {Object.entries(
+                    localSettings.ttsModel === 'mlx_en' ? KOKORO_VOICE_LABELS :
+                    localSettings.ttsModel === 'mlx_mix' ? SPARK_VOICE_LABELS :
+                    MLX_VOICE_LABELS
+                  ).map(([voiceId, label]) => {
+                    const isActive = currentVoice === voiceId
+                    return (
+                      <div
+                        key={voiceId}
+                        onClick={async () => {
+                          updateSetting('mlxVoice', voiceId)
+                          await window.electronAPI.setMLXVoice(voiceId)
+                          const updated = { ...localSettings!, mlxVoice: voiceId }
+                          await window.electronAPI.setSettings(updated)
+                        }}
+                        className={`relative text-left rounded-lg px-2 py-1.5 transition-all border text-[11px] cursor-pointer ${
+                          isActive
+                            ? 'border-primary-400 bg-primary-400/15 text-primary-300 font-medium'
+                            : 'border-white/8 hover:border-white/20 text-white/50 hover:text-white/70'
+                        }`}
+                      >
+                        <div className="font-medium">{voiceId}</div>
+                        <div className="text-[9px] opacity-60 truncate">{label.split('·')[0].replace(voiceId + ' ', '').trim()}</div>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            setServerBusy(b => ({ ...b, [`inline_preview_${voiceId}`]: 'previewing' }))
+                            try {
+                              // mlx/mlx_ko(:8800)는 단일화자 → :7860 Qwen3-TTS로 화자 차이 시연
+                              const previewModel = (localSettings.ttsModel === 'mlx' || localSettings.ttsModel === 'mlx_ko')
+                                ? 'qwen3' : localSettings.ttsModel as any
+                              await window.electronAPI.previewTTSVoice(previewModel, voiceId)
+                            } finally {
+                              setServerBusy(b => ({ ...b, [`inline_preview_${voiceId}`]: null }))
+                            }
+                          }}
+                          className="absolute top-1 right-1 w-4 h-4 flex items-center justify-center rounded text-[8px] bg-white/10 hover:bg-white/25 transition-colors"
+                        >
+                          {serverBusy[`inline_preview_${voiceId}`] === 'previewing'
+                            ? <span className="w-2 h-2 border border-white/40 border-t-transparent rounded-full animate-spin inline-block" />
+                            : '▶'}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 나머지 모델 */}

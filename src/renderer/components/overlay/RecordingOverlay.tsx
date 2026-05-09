@@ -32,7 +32,11 @@ export function RecordingOverlay() {
     'nco_agent':       '🤖 에이전트 작업 중...',
     'nco_hive':        '🐝 하이브 실행 중...',
   }
-  const stageLabel = stageLabels[aiStage] || ''
+  const colonIdx = aiStage.indexOf(':')
+  const stageKey = colonIdx >= 0 ? aiStage.substring(0, colonIdx) : aiStage
+  const stageDetail = colonIdx >= 0 ? aiStage.substring(colonIdx + 1) : ''
+  const stageLabel = stageLabels[stageKey] || ''
+  const stageDisplay = stageLabel + (stageDetail ? ` — ${stageDetail}` : '')
 
   return (
     <div className="flex items-center justify-center w-full h-full p-4">
@@ -67,6 +71,12 @@ export function RecordingOverlay() {
                 )
               })}
             </div>
+            <button
+              onClick={() => window.electronAPI?.cancelRecording?.()}
+              className="w-full text-xs text-white/30 hover:text-red-400 transition-colors py-1"
+            >
+              취소 (Esc)
+            </button>
           </>
         )}
 
@@ -74,27 +84,27 @@ export function RecordingOverlay() {
         {stageLabel && !isRecording && (
           <div className="flex items-center gap-2 mb-2">
             <div className={`w-4 h-4 border-2 border-t-transparent rounded-full animate-spin ${
-              aiStage.startsWith('screen') ? 'border-cyan-400' :
-              aiStage === 'ai_searching' ? 'border-yellow-400' :
-              aiStage === 'ai_answering' ? 'border-green-400' :
-              aiStage === 'command_parsing' ? 'border-orange-400' :
-              aiStage.startsWith('nco') ? 'border-purple-400' :
+              stageKey.startsWith('screen') ? 'border-cyan-400' :
+              stageKey === 'ai_searching' ? 'border-yellow-400' :
+              stageKey === 'ai_answering' ? 'border-green-400' :
+              stageKey === 'command_parsing' ? 'border-orange-400' :
+              stageKey.startsWith('nco') ? 'border-purple-400' :
               'border-primary-400'
             }`} />
             <span className={`text-sm ${
-              aiStage.startsWith('screen') ? 'text-cyan-300' :
-              aiStage === 'ai_searching' ? 'text-yellow-300' :
-              aiStage === 'ai_answering' ? 'text-green-300' :
-              aiStage === 'command_parsing' ? 'text-orange-300' :
-              aiStage.startsWith('nco') ? 'text-purple-300' :
+              stageKey.startsWith('screen') ? 'text-cyan-300' :
+              stageKey === 'ai_searching' ? 'text-yellow-300' :
+              stageKey === 'ai_answering' ? 'text-green-300' :
+              stageKey === 'command_parsing' ? 'text-orange-300' :
+              stageKey.startsWith('nco') ? 'text-purple-300' :
               'text-white/60'
-            }`}>{stageLabel}</span>
+            }`}>{stageDisplay}</span>
           </div>
         )}
 
         {currentTranscription && !isRecording && !stageLabel && (
           <div className="mt-1">
-            <p className="text-sm text-white/90 leading-relaxed line-clamp-3">
+            <p className="text-sm text-white/90 leading-relaxed line-clamp-5">
               {currentTranscription}
             </p>
           </div>

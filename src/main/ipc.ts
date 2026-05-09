@@ -203,9 +203,6 @@ async function askClaudeForFix(errorContext: string, originalQuery: string): Pro
 function prepareSpeakText(text: string, aiResult?: string): string | null {
   if (!text?.trim()) return null
 
-  // Claude CLI 라우팅 결과 — 터미널 출력이므로 TTS 건너뜀
-  if (aiResult?.startsWith('[Smart→Claude]')) return null
-
   // Smart→Answer/Search/Screen/Error — smartSpeak()이 이미 직접 호출했으므로 중복 방지
   if (aiResult?.startsWith('[Smart→Answer') ||
       aiResult?.startsWith('[Smart→Search') ||
@@ -222,30 +219,26 @@ function prepareSpeakText(text: string, aiResult?: string): string | null {
       aiResult?.startsWith('[Agent]') ||
       aiResult?.startsWith('[Hive]')) return null
 
-  // 코드 블록 포함 시 건너뜀
-  if (text.includes('```') || (text.includes('    ') && text.includes('\n')) || /\bconst\b|\bfunction\b|\bimport\b|\breturn\b/.test(text)) return null
+  // sanitizeTTSText 먼저 적용 — 코드/URL/경로/마크다운 정제
+  // raw text에서 패턴 검사 시 AI 응답이 항상 코드/URL 포함 → 거의 항상 null 반환하는 버그 수정
+  const cleaned = sanitizeTTSText(text)
+  if (!cleaned.trim()) return null
 
-  // 파일 경로 포함 시 건너뜀 (/var/folders/, /tmp/, ~/..., C:\...)
-  if (/\/(?:var|tmp|usr|etc|home|Users|private|Library|Applications)\//i.test(text)) return null
-  if (/[A-Za-z]:\\/.test(text)) return null // Windows 경로
+  // 500자 이하 → 전체 읽기 (이전: 300자 → 너무 짧아 내용이 잘림)
+  if (cleaned.length <= 500) return cleaned
 
-  // URL 포함 시 건너뜀
-  if (/https?:\/\/|file:\/\//.test(text)) return null
-
-  // 임시 파일명 패턴 (NSIRD_, TemporaryItems, 긴 랜덤 hex 등)
-  if (/NSIRD_|TemporaryItems|\.tmp\b|\.png\b|\.jpg\b|\.pdf\b|\.mov\b|\.mp4\b/.test(text)) return null
-
-  // 300자 이하 → 전체 읽기
-  if (text.length <= 300) return text
-
-  // 300~600자 → 첫 문장만 읽기
-  if (text.length <= 600) {
-    const firstSentence = text.split(/(?<=[.!?。])\s|(?<=다)\.\s|(?<=요)\.\s/)[0]?.trim()
-    if (firstSentence && firstSentence.length <= 200) return firstSentence
+  // 500~1000자 → 첫 두 문장까지 (최대 500자)
+  if (cleaned.length <= 1000) {
+    const sentences = cleaned.split(/(?<=[.!?。])\s+|(?<=[다요죠])\s+/)
+    const twoSentences = sentences.slice(0, 2).join(' ').trim()
+    if (twoSentences.length >= 5) return twoSentences.substring(0, 500)
   }
 
-  // 600자 초과 → TTS 건너뜀
-  return null
+  // 1000자 초과 → 첫 문장 (최대 500자)
+  const firstSent = cleaned.split(/(?<=[.!?。요다])\s+/)[0]?.trim()
+  if (firstSent && firstSent.length >= 5) return firstSent.substring(0, 500)
+
+  return cleaned.substring(0, 500)
 }
 
 export function setupIPC(mainWindow: BrowserWindow): void {
@@ -406,12 +399,13 @@ export function setupIPC(mainWindow: BrowserWindow): void {
       }
 
       // Notify: transcribing
-      const sendProgress = (stage: string, progress: number) => {
+      const sendProgress = (stage: string, progress: number, detail?: string) => {
+        const stageMsg = detail ? `${stage}:${detail}` : stage
         mainWindow.webContents.send('transcription:progress', progress)
-        mainWindow.webContents.send('ai:stage', stage)
+        mainWindow.webContents.send('ai:stage', stageMsg)
         if (overlayWindow) {
           overlayWindow.webContents.send('transcription:progress', progress)
-          overlayWindow.webContents.send('ai:stage', stage)
+          overlayWindow.webContents.send('ai:stage', stageMsg)
         }
       }
 
@@ -752,25 +746,9 @@ JSON만:`
               mainWindow.webContents.send('view:navigate', 'terminal')
 
               if (usePTYClaude) {
-                // ── PTY Claude 직접 통합 — 응답 캡처 후 TTS ──────────────────
-                askClaudeViaPTY(text, (response) => {
-                  // 코드/경로 포함 시 자연어 요약만 (핵심만 간결하게)
-                  const hasCode = response.includes('```') || response.includes('function ') || response.includes('const ') || response.includes('  at ')
-                  const hasPath = /\/(?:Users|home|var|tmp|src|lib)\//i.test(response)
-                  if (hasCode || hasPath) {
-                    smartSpeak('완료됐어요. 화면에서 확인해주세요.', { lang: 'ko' }).catch(() => {})
-                    return
-                  }
-                  const stripped = sanitizeTTSText(response)
-                  // 첫 완성 문장 최대 80자 (이전 300자)
-                  const ptySentences = stripped.split(/(?<=[.!?。요다])\s+/)
-                  const firstSent = ptySentences[0]?.trim() || stripped.substring(0, 80)
-                  const ttsSnippet = firstSent.length <= 80 ? firstSent : firstSent.substring(0, 80)
-                  if (ttsSnippet.length > 5) {
-                    smartSpeak(ttsSnippet, { lang: 'ko' }).catch(() => {})
-                    debugBroadcast('success', `[PTY-Claude] TTS: "${ttsSnippet.substring(0, 60)}"`)
-                  }
-                }, { idleMs: 3000, maxMs: 90000 }).catch(() => {})
+                // ── PTY Claude — Stop 훅(nova-voice-tts.sh)이 TTS 담당 ────────
+                // PTY 캡처 TTS 제거: 터미널 노이즈(스피너·상태바)가 섞여 잘못된 TTS 발생
+                sendCommandToPTY(text)  // 질문만 전달 — TTS는 Stop 훅이 처리
                 finalText = text
                 aiResult = `[Smart→PTY-Claude] 질문 전달 완료`
               } else {
@@ -845,33 +823,28 @@ JSON만:`
             // NCO 결과 TTS 헬퍼 — 최종 결과를 자연어로 요약해 읽기
             const speakNCOResult = (resultText: string, _label: string) => {
               if (!resultText?.trim()) return
+              // stripMdForTTS = sanitizeTTSText: 코드/URL/경로/마크다운 정제
               const stripped = stripMdForTTS(resultText)
-
-              // 코드 블록 포함 → 완료 알림만 (코드는 TTS 부적합)
-              if (resultText.includes('```') || resultText.includes('function ') || resultText.includes('const ')) {
-                smartSpeak('완료됐어요. 화면에서 확인해주세요.', { lang: 'ko' }).catch(() => {})
+              if (!stripped.trim()) {
+                smartSpeak('완료됐어요.', { lang: 'ko' }).catch(() => {})
                 return
               }
 
-              // 경로/URL 포함 → 완료 알림만
-              if (/\/(?:Users|home|var|tmp|src|lib)\//i.test(stripped) || /https?:\/\//.test(stripped)) {
-                smartSpeak('완료됐어요. 화면에서 확인해주세요.', { lang: 'ko' }).catch(() => {})
-                return
-              }
+              // raw resultText 패턴 검사 제거 — sanitizeTTSText가 이미 처리함
+              // (이전: raw text에 코드/URL 있으면 무조건 "완료됐어요." → 비정보적 출력 버그)
 
-              // 결론/핵심 문장 우선 추출
+              // 결론/핵심 문장 우선 추출 (최대 200자)
               const conclusionMatch = stripped.match(/(?:결론|요약|핵심|최종|권장|추천|정리)[^.!?。]*[.!?。]/)
               if (conclusionMatch) {
-                const snippet = conclusionMatch[0].substring(0, 80)
-                smartSpeak(snippet, { lang: 'ko' }).catch(() => {})
+                smartSpeak(conclusionMatch[0].substring(0, 200), { lang: 'ko' }).catch(() => {})
                 return
               }
 
-              // 첫 완성 문장 추출 — 최대 70자, 그 이상은 "결과가 나왔어요."
+              // 첫 완성 문장 추출 — 최대 200자 (이전: 70자 → 너무 짧아 대부분 "결과가 나왔어요." 출력)
               const sentences = stripped.split(/(?<=[.!?。다요])\s+/)
               const firstSentence = (sentences[0] || stripped).trim()
-              if (firstSentence.length >= 5 && firstSentence.length <= 70) {
-                smartSpeak(firstSentence, { lang: 'ko' }).catch(e => console.error('[TTS NCO]', (e as Error).message))
+              if (firstSentence.length >= 5) {
+                smartSpeak(firstSentence.substring(0, 200), { lang: 'ko' }).catch(e => console.error('[TTS NCO]', (e as Error).message))
               } else {
                 smartSpeak('결과가 나왔어요. 화면에서 확인해주세요.', { lang: 'ko' }).catch(() => {})
               }
@@ -1101,34 +1074,21 @@ JSON만:`
             const claudeProvider = 'claude-cli'
             sendProgress(isSearch ? 'ai_searching' : 'ai_answering', 0.6)
 
-            // ── PTY Claude 우선 라우팅 — 응답 캡처 후 TTS 출력 ──────────────────────
+            // ── PTY Claude 우선 라우팅 — Stop 훅(nova-voice-tts.sh)이 TTS 담당 ──────────
+            // ⚠️ PTY 캡처 TTS 제거: Stop 훅이 last_assistant_message로 정확한 TTS 처리
+            // PTY 캡처는 터미널 노이즈(상태바·스피너)가 섞여 잘못된 TTS가 나오는 구조적 문제 있음
+            let ptyUsed = false
             if (isPTYReady() && isClaudeRunningInPTY()) {
-              askClaudeViaPTY(text, (response) => {
-                const strippedFull = stripMd(response)
-                // 첫 완성 문장 추출 (최대 300자) — 문장 중간 잘림 방지
-                const firstSent = strippedFull.split(/(?<=[.!?。요다])\s/)[0] || strippedFull
-                const stripped = firstSent.length <= 300 ? firstSent : firstSent.substring(0, 300)
-                debugBroadcast('success', `[${label}] PTY Claude 응답 (${response.length}자): "${stripped.substring(0, 80)}"`)
-                smartSpeak(stripped, { lang: 'ko' }).catch(e => console.error('[TTS] PTY-Claude:', (e as Error).message))
-                debugBroadcast('info', `[TTS] PTY Claude 음성 출력: "${stripped.substring(0, 60)}"`)
-              }, { idleMs: 3000, maxMs: 90000 }).catch(e => {
-                const msg = (e as Error).message
-                console.error('[PTY-Claude] askClaudeViaPTY error:', msg)
-                if (msg.includes('timeout') || msg.includes('타임아웃') || msg.includes('maxMs')) {
-                  smartSpeak('응답 시간이 너무 길어요. 잠시 후 다시 해볼게요.', { lang: 'ko' }).catch(() => {})
-                  debugBroadcast('warn', '[PTY-Claude] 90초 응답 캡처 타임아웃')
-                } else {
-                  debugBroadcast('error', `[PTY-Claude] 캡처 실패: ${msg.substring(0, 80)}`)
-                }
-              })
-              finalText = text  // Gemini 폴백 스킵
-              aiResult = `[Smart→${label}:PTY-Claude] 질문 전달 완료 (응답 캡처 중)`
-              debugBroadcast('info', `[${label}] PTY Claude에 질문 전달 — 응답 후 TTS 출력 예정`)
+              sendCommandToPTY(text)  // 질문만 전달 — TTS는 Stop 훅이 처리
+              finalText = text
+              aiResult = `[Smart→${label}:PTY-Claude] 질문 전달 완료`
+              debugBroadcast('info', `[${label}] PTY Claude에 질문 전달 (Stop 훅이 응답 TTS 처리)`)
+              ptyUsed = true
             }
 
-            // PTY Claude 성공 시 Gemini/Claude CLI 전체 스킵
+            // PTY Claude 사용 시 Gemini/Claude CLI 전체 스킵
             let geminiOk = false
-            if (!finalText) {
+            if (!ptyUsed) {
 
             // Tier 1 health check — skip Gemini if in cooldown
             const geminiHealthy = isProviderHealthy(geminiProvider)
@@ -1202,15 +1162,17 @@ JSON만:`
                   // 음성 비서 질문 — nova-voice CLAUDE.md 컨텍스트 차단 위해 homedir에서 실행
                   const claudeQuery = `당신은 범용 음성 비서입니다. Nova Voice 프로젝트나 NCO와 무관하게 사용자 질문에 직접 답하세요.\n오늘은 ${nowDate}입니다. ${VOICE_ANSWER_GUIDE}\n\n사용자 질문: ${text}`
                   let claudeFullText = ""
+                  const _ttsAccum: string[] = []
                   await processWithClaudeStreaming(
                     claudeQuery,
                     (sentence) => {
-                      smartSpeak(sentence, { lang: 'ko' }).catch(e => console.error('[TTS]', (e as Error).message))
+                      _ttsAccum.push(sentence)
                       debugBroadcast('info', `[TTS] Claude streaming sentence: "${sentence.substring(0, 60)}"`)
                     },
                     { cwd: require('os').homedir() }
                   )
                   .then(result => {
+                    if (_ttsAccum.length > 0) smartSpeak(_ttsAccum.join(' '), { lang: 'ko' }).catch(e => console.error('[TTS]', (e as Error).message))
                     claudeFullText = result.text
                     recordProviderSuccess(claudeProvider)
                     debugBroadcast('success', `[${label}] Claude 스트리밍 완료 (${claudeFullText.length}자)`)
@@ -1242,7 +1204,7 @@ JSON만:`
             }
             debugBroadcast('info', `[${label}] 완료 — geminiOk=${geminiOk}, aiResult="${aiResult.substring(0, 60)}"`)
 
-            } // end if (!finalText) — PTY Claude 스킵 블록
+            } // end if (!ptyUsed) — PTY Claude 스킵 블록
           }
 
         // ============= COMMAND MODE =============
@@ -1587,8 +1549,11 @@ JSON만:`
     // (단, 코드 블록 포함 또는 500자 초과 시 건너뜀)
     const attachTTSText = (() => {
       if (!finalText?.trim()) return null
-      if (finalText.includes('```') || finalText.length > 500) return null
-      return finalText
+      // sanitizeTTSText로 정제 후 길이 판단 (raw text에서 코드블록 검사 제거)
+      const cleaned = sanitizeTTSText(finalText)
+      if (!cleaned.trim()) return null
+      if (cleaned.length > 500) return cleaned.substring(0, 500)
+      return cleaned
     })()
     if (attachTTSText) {
       pipelineSpeakStreaming(attachTTSText, 'ai_result').catch(e =>
@@ -1655,12 +1620,10 @@ JSON만:`
       const answer = await new Promise<string>((resolve) => {
         askClaudeViaPTY(question, (response) => resolve(response), { idleMs: 3000, maxMs: 90000 })
       })
-      // TTS 자동 출력
-      const ttsText = answer
-        .replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1')
-        .replace(/```[\s\S]*?```/g, '').replace(/`([^`]+)`/g, '$1')
-        .replace(/^#+\s+/gm, '').replace(/\n{2,}/g, '. ')
-        .trim()
+      // TTS 자동 출력 — sanitizeTTSText 적용 + 300자 제한 (첫 완성 문장만)
+      const sanitized = sanitizeTTSText(answer)
+      const firstSentCA = sanitized.split(/(?<=[.!?。요다])\s+/)[0]?.trim() || sanitized
+      const ttsText = firstSentCA.length <= 300 ? firstSentCA : firstSentCA.substring(0, 300)
       if (ttsText.length > 5) smartSpeak(ttsText, { lang: 'ko' }).catch(() => {})
       return { ok: true, answer, ttsText }
     } catch (e) {

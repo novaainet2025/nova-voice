@@ -222,8 +222,9 @@ app.whenReady().then(async () => {
     if (getRecordingState()) {
       setRecordingState(false)
       if (durationTimer) { clearInterval(durationTimer); durationTimer = null }
-      mainWindow?.webContents.send('recording:state', { isRecording: false, duration: 0 })
-      overlayWindow?.webContents.send('recording:state', { isRecording: false, duration: 0 })
+      // cancelled: true → App.tsx에서 cancelRecording() 호출 (오디오 폐기)
+      mainWindow?.webContents.send('recording:state', { isRecording: false, duration: 0, cancelled: true })
+      overlayWindow?.webContents.send('recording:state', { isRecording: false, duration: 0, cancelled: true })
       updateTrayMenu(mainWindow!, false)
       updateTrayIcon(false)
     }
@@ -299,8 +300,27 @@ app.whenReady().then(async () => {
     }
   }
 
+  // 녹음 취소 함수 (오디오 폐기, STT 처리 없음)
+  function cancelRecordingGlobal(): void {
+    if (getRecordingState()) {
+      setRecordingState(false)
+      if (durationTimer) { clearInterval(durationTimer); durationTimer = null }
+      mainWindow?.webContents.send('recording:state', { isRecording: false, duration: 0, cancelled: true })
+      overlayWindow?.webContents.send('recording:state', { isRecording: false, duration: 0, cancelled: true })
+      overlayWindow?.hide()
+      updateTrayMenu(mainWindow!, false)
+      updateTrayIcon(false)
+      console.log('[Cancel] 녹음 취소 (글로벌 단축키)')
+    }
+  }
+
   const settings = getSettings()
-  registerShortcuts(mainWindow, settings.shortcut, toggleRecording, cancelCurrentProcessing)
+  // 글로벌 취소: 녹음 중이면 녹음 취소, 아니면 AI 처리 취소
+  const onCancelGlobal = () => {
+    if (getRecordingState()) cancelRecordingGlobal()
+    else cancelCurrentProcessing()
+  }
+  registerShortcuts(mainWindow, settings.shortcut, toggleRecording, onCancelGlobal)
 
   app.on('activate', () => {
     if (mainWindow) {

@@ -202,10 +202,14 @@ export function UnifiedPanel() {
       addMsg('system', '⏹ AI 작업이 취소됐습니다 (ESC / Ctrl+Escape)')
     })
 
-    // ESC 키 — 앱 포커스 중 즉시 취소 (렌더러 직접 처리)
+    // ESC 키 — 녹음 중이면 녹음 취소, 아니면 AI 처리 취소
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-        window.electronAPI.cancelAI?.()
+        if (useAppStore.getState().isRecording) {
+          window.electronAPI.cancelRecording?.()
+        } else {
+          window.electronAPI.cancelAI?.()
+        }
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -431,6 +435,13 @@ export function UnifiedPanel() {
                     style={{ width: 2, height: Math.max(2, h), transition: 'height 80ms ease-out' }} />
                 })}
               </div>
+              {/* 녹음 취소 버튼 (ESC) */}
+              <button
+                onClick={() => window.electronAPI.cancelRecording?.()}
+                className="ml-0.5 text-red-400/50 hover:text-red-300 text-[10px] px-1 py-0.5 rounded border border-red-400/20 hover:border-red-300/50 transition-colors"
+                title="녹음 취소 (ESC)">
+                ✕
+              </button>
             </div>
           )}
           {isBusy && !isRecording && (
