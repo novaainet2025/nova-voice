@@ -989,12 +989,12 @@ JSON만:`
               aiResult = `[Smart→NCO:${ncoSubtype}:처리중]`
             } else {
               // 단기 작업 (code, conductor) — await 유지
-              speakWork('처리 중이에요')
+              // speakWork + 별도 smartSpeak 중복 제거 → speakWork 1회만
+              speakWork(ncoSubtype === 'code' ? 'AI가 코딩 분석할게요.' : '분석할게요.')
               try {
                 if (ncoSubtype === 'code') {
                   console.log('[Smart→NCO Code] conductor 라우팅')
                   debugBroadcast('info', '[NCO] code → conductor (aider/codex 자동 선택)')
-                  smartSpeak("분석할게요.", { lang: "ko" }).catch(() => {})
                   const r = await startConductor(ncoPrompt, abortSignal)
                   finalText = r.text
                   aiResult = `[Smart→NCO:Code] ${r.text}`
@@ -1004,7 +1004,6 @@ JSON만:`
                   // subtype 미지정 → conductor (자동 모드+AI 선택)
                   console.log('[Smart→NCO Conductor (auto)]')
                   debugBroadcast('info', '[NCO] conductor 시작 (자동 모드 선택)...')
-                  smartSpeak("분석할게요.", { lang: "ko" }).catch(() => {})
                   const r = await startConductor(ncoPrompt, abortSignal)
                   finalText = r.text
                   aiResult = `[Smart→NCO:${r.mode}] ${r.text}`
@@ -1624,12 +1623,9 @@ JSON만:`
       const answer = await new Promise<string>((resolve) => {
         askClaudeViaPTY(question, (response) => resolve(response), { idleMs: 3000, maxMs: 90000 })
       })
-      // TTS 자동 출력 — sanitizeTTSText 적용 + 300자 제한 (첫 완성 문장만)
-      const sanitized = sanitizeTTSText(answer)
-      const firstSentCA = sanitized.split(/(?<=[.!?。요다])\s+/)[0]?.trim() || sanitized
-      const ttsText = firstSentCA.length <= 300 ? firstSentCA : firstSentCA.substring(0, 300)
-      if (ttsText.length > 5) smartSpeak(ttsText, { lang: 'ko' }).catch(() => {})
-      return { ok: true, answer, ttsText }
+      // TTS는 Stop 훅(nova-voice-tts.sh)이 last_assistant_message로 처리 — 여기서 smartSpeak 금지
+      // (PTY 캡처 텍스트는 노이즈 포함 가능, Stop 훅이 더 정확한 응답 추출)
+      return { ok: true, answer }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
     }

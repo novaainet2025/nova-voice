@@ -74,23 +74,29 @@ export function createPTY(cols = 120, rows = 30): void {
         .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')            // OSC
         .replace(/\x1b./g, '')                                          // 기타 ESC
         .replace(/[\x00-\x09\x0b-\x1f\x7f]/g, '')                     // 제어문자 (\n=\x0a 제외)
-      // 한 줄이 노이즈인지 판단하는 헬퍼
-      const isNoiseLine = (t: string): boolean =>
-        // api ws 패턴: ✗(U+2717) 포함 — "api✗ ws✗ [Cla Opn...]" 상태바 감지
-        /api[^\w\n]{0,3}ws/i.test(t)
-        || /NCO.*(?:직접|↑|↓|%)|bypass\s*permission|shift.*tab.*cycle/i.test(t)
-        || /claude[-\s]?\d.*(?:Sonnet|Opus|Haiku|4\.\d)/i.test(t)
-        || /Ctx:\s*\d+%|주별|weekly|\d+%\s*[·•]\s*주별/i.test(t)
-        || /^[✢✳✦✧✸✼❋✻✶✷✹✺]\s+\w+[…\.]*\s*$/.test(t)
-        || /^[✢✳✦✧✸✼❋✻✶✷✹✺·]\s*[a-zA-Z0-9.…]*$/.test(t)
-        || /^[⎿└]\s+Tip:/i.test(t)
-        // Claude Code 스피너 단어: -ing/-ting/-zing 으로 끝나는 단일 영문 단어
-        || /^[a-zA-Z]+(?:ing|ting|zing)[.…]*$/i.test(t)
-        // Flambé 등 라틴 확장 문자 포함 단일 대문자 시작 단어 (6-25자)
-        || /^[A-Z\u00C0-\u00D6\u00D8-\u00DE][a-zA-Z\u00C0-\u024F]{5,24}[.…!]?$/.test(t)
-        // 수평선으로 시작하는 장식/구분선 (내용 있어도 제거)
-        || /^[─━═╌╍┄┅]{5,}/.test(t)
-        || /^\??\d{1,3}$/.test(t)
+      // 한 줄이 노이즈인지 판단하는 헬퍼 — t는 반드시 trim() 후 전달
+      const isNoiseLine = (t: string): boolean => {
+        const s = t.trim()
+        if (!s) return true
+        return /api[^\w\n]{0,3}ws/i.test(s)
+          || /NCO.*(?:직접|↑|↓|%)|bypass\s*permission|shift.*tab.*cycle/i.test(s)
+          || /claude[-\s]?\d.*(?:Sonnet|Opus|Haiku|4\.\d)/i.test(s)
+          || /Ctx:\s*\d+%|주별|weekly|\d+%\s*[·•]\s*주별/i.test(s)
+          || /^[✢✳✦✧✸✼❋✻✶✷✹✺]\s+\w+[…\.]*\s*$/.test(s)
+          || /^[✢✳✦✧✸✼❋✻✶✷✹✺·]\s*[a-zA-Z0-9.…]*$/.test(s)
+          || /^[⎿└]\s+Tip:/i.test(s)
+          // Claude Code 스피너 단어: -ing/-ting/-zing 으로 끝나는 단일 영문 단어
+          || /^[a-zA-Z]+(?:ing|ting|zing)[.…]*$/i.test(s)
+          // Flambé 등 라틴 확장 문자 포함 단일 대문자 시작 단어 (6-25자)
+          || /^[A-Z\u00C0-\u00D6\u00D8-\u00DE][a-zA-Z\u00C0-\u024F]{5,24}[.…!]?$/.test(s)
+          // 수평선으로 시작하는 장식/구분선 (내용 있어도 제거)
+          || /^[─━═╌╍┄┅]{5,}/.test(s)
+          || /^\??\d{1,3}$/.test(s)
+          // "i h W" 등 1-2글자 파편이 공백으로 나열된 패턴 (애니메이션 잔여)
+          || /^([a-zA-Z]{1,2}\s*){1,6}$/.test(s)
+          // "Reading 일file." 등 스피너 동사로 시작 + 한글/혼합 내용
+          || /^(?:Reading|Writing|Loading|Fetching|Processing|Thinking|Checking)\s+/i.test(s)
+      }
       const nonEmptyLines = stripped.split('\n').map(l => l.trim()).filter(l => l.length > 0)
       if (nonEmptyLines.length > 0) {
         // idle 타이머는 항상 리셋 (스피너도 포함) — Claude 출력이 완전히 멈춘 후 flush
@@ -200,10 +206,19 @@ const CLAUDE_SEEN_TTL = 300_000  // 5분 이내 감지 이력 = 실행 중으로
 
 export function updateRecentPTYOutput(data: string): void {
   _recentPTYOutput = (_recentPTYOutput + data).slice(-4000)  // 최근 4KB만 유지
-  // Claude 감지 시 타임스탬프 갱신 (버퍼 침묵 중 odetection 유지용)
+  // Claude 감지 시 타임스탬프 갱신 (버퍼 침묵 중 detection 유지용)
   if (/claude[-\s]?\d|Claude Code|bypass permissions|Sonnet|Opus|Haiku/i.test(data) ||
       /api.*ws.*Cla/i.test(data)) {
     _claudeLastSeen = Date.now()
+  }
+  // Shell 프롬프트 복귀 감지 — Claude 종료 즉시 TTL 리셋 (오탐지 방지)
+  // zsh: "% " 또는 bash: "$ " 로 끝나는 경우
+  const clean = data.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b./g, '')
+  if (/[\w.\-~]+ [%$#] $/.test(clean) || /^\s*[%$#] $/.test(clean)) {
+    if (_claudeLastSeen > 0) {
+      console.log('[PTY] Shell 프롬프트 감지 — Claude 종료됨, TTL 리셋')
+      _claudeLastSeen = 0
+    }
   }
 }
 
