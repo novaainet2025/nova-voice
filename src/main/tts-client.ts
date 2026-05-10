@@ -1551,56 +1551,49 @@ async function runChunkedPipeline(
     return
   }
 
-  // 모든 청크 합성 즉시 시작 (Peekable로 완료 여부 비블로킹 확인)
-  const peekables = chunks.map(c => createPeekable(synthFn(c).catch(() => null)))
-  const playPromises: Promise<void>[] = []
-  let mergedUpTo = -1
+  // 모든 청크 합성 즉시 시작
+  const synthPromises = chunks.map(c => synthFn(c).catch(() => null))
 
-  for (let i = 0; i < chunks.length; i++) {
-    if (i <= mergedUpTo) continue
-
-    // chunk[i] 완료 대기
-    const wavPath = await peekables[i].promise
-    if (!wavPath) continue
-
-    if (enableMerge) {
-      // 현재 위치부터 끝까지 전부 준비됐으면 한 번에 병합
-      const remaining = peekables.slice(i)
-      if (remaining.every(pk => pk.isReady())) {
-        const allPaths = remaining
-          .map(pk => pk.get())
-          .filter((p): p is string => typeof p === 'string')
-        if (allPaths.length > 1) {
-          try {
-            const merged = mergeWAVBuffers(allPaths.map(p => fs.readFileSync(p)))
-            const mergedPath = path.join(
-              cacheDir,
-              `merged-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`
-            )
-            fs.writeFileSync(mergedPath, merged)
-            playPromises.push(
-              playAudio(mergedPath).catch((e) => {
-                console.warn('[TTS-pipeline] 병합 재생 실패 건너뜀:', (e as Error).message)
-              })
-            )
-            mergedUpTo = chunks.length - 1
-            break
-          } catch (e) {
-            console.warn('[TTS-pipeline] WAV 병합 실패, 개별 enqueue 폴백:', (e as Error).message)
-          }
+  if (enableMerge) {
+    // enableMerge=true: 전체 합성 완료 후 단일 WAV 병합 → afplay 1회 → 갭 없음
+    // (1-ahead + isReady 체크 방식은 단일 스레드 서버에서 합성>재생 시 갭 발생)
+    const paths = await Promise.all(synthPromises)
+    const validPaths = paths.filter((p): p is string => p !== null)
+    if (validPaths.length === 0) return
+    if (validPaths.length === 1) {
+      await playAudio(validPaths[0])
+      return
+    }
+    try {
+      const merged = mergeWAVBuffers(validPaths.map(p => fs.readFileSync(p)))
+      const mergedPath = path.join(cacheDir, `merged-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
+      fs.writeFileSync(mergedPath, merged)
+      await playAudio(mergedPath)
+      return
+    } catch (e) {
+      console.warn('[TTS-pipeline] WAV 병합 실패, 순차 재생 폴백:', (e as Error).message)
+      for (const p of validPaths) {
+        try { await playAudio(p) } catch (err) {
+          console.warn('[TTS-pipeline] 재생 실패 건너뜀:', (err as Error).message)
         }
       }
     }
-
-    // 아직 뒤 청크가 준비 안 됐으면 chunk[i] 즉시 enqueue (1-ahead)
-    playPromises.push(
-      playAudio(wavPath).catch((e) => {
-        console.warn('[TTS-pipeline] 재생 실패 건너뜀:', (e as Error).message)
-      })
-    )
+  } else {
+    // enableMerge=false: 1-ahead 파이프라인 — chunk[i] 재생 중 chunk[i+1] 합성 병행
+    // _audioPlaylist 직렬화로 순서 보장, 합성 < 재생이면 갭 없음
+    const peekables = synthPromises.map(p => createPeekable(p))
+    const playPromises: Promise<void>[] = []
+    for (const pk of peekables) {
+      const wavPath = await pk.promise
+      if (!wavPath) continue
+      playPromises.push(
+        playAudio(wavPath).catch((e) => {
+          console.warn('[TTS-pipeline] 재생 실패 건너뜀:', (e as Error).message)
+        })
+      )
+    }
+    if (playPromises.length > 0) await Promise.all(playPromises)
   }
-
-  if (playPromises.length > 0) await Promise.all(playPromises)
 }
 
 // WAV 병합 (24000Hz / Mono / 16-bit 고정 — 두 모델 모두 동일)
