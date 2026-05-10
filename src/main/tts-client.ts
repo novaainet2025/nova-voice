@@ -1531,10 +1531,11 @@ function createPeekable<T>(p: Promise<T>) {
 // ─── 공용 청크 파이프라인 ─────────────────────────────────────────────────────
 // 4개 엔진(Qwen3/MLX-KO/MLX-EN/Spark) 공용 — synthFn만 다름
 //
-// 최적화 레이어:
-//  (1) 모든 청크 병렬 합성  — Promise.all로 동시 합성 → 총 대기 = max(청크 합성 시간)
-//  (2) WAV 전체 병합         — 합성 결과를 하나의 WAV로 연결 → afplay 단 1회
-//  (3) 병합 실패 시 순차 재생 — try/catch 폴백, 청크별 에러 건너뜀
+// 최적화 레이어 (1-ahead + dynamic merge):
+//  (1) 모든 청크 합성 즉시 시작 — createPeekable로 완료 여부 비블로킹 감지
+//  (2) chunk[i] 완료 즉시 재생 enqueue + chunk[i+1] 동시 합성 진행 (1-ahead)
+//  (3) 나머지 청크가 전부 준비된 시점에 한 번에 병합 → 단일 afplay (dynamic merge)
+//  (4) 병합 실패 시 순차 재생 폴백, 청크별 에러 건너뜀
 //
 // enableMerge: WAV 샘플레이트가 동일한 MLX 엔진에서만 true (Qwen3 :7860은 false)
 async function runChunkedPipeline(
@@ -1550,30 +1551,56 @@ async function runChunkedPipeline(
     return
   }
 
-  // 모든 청크를 병렬 합성 (합성 총 시간 = 가장 긴 청크 시간)
-  const paths = await Promise.all(chunks.map(c => synthFn(c).catch(() => null)))
-  const validPaths = paths.filter((p): p is string => p !== null)
-  if (validPaths.length === 0) return
+  // 모든 청크 합성 즉시 시작 (Peekable로 완료 여부 비블로킹 확인)
+  const peekables = chunks.map(c => createPeekable(synthFn(c).catch(() => null)))
+  const playPromises: Promise<void>[] = []
+  let mergedUpTo = -1
 
-  // WAV 병합 경로 (MLX 계열: 샘플레이트 동일)
-  if (enableMerge && validPaths.length > 1) {
-    try {
-      const merged = mergeWAVBuffers(validPaths.map(p => fs.readFileSync(p)))
-      const mergedPath = path.join(cacheDir, `merged-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
-      fs.writeFileSync(mergedPath, merged)
-      await playAudio(mergedPath)
-      return
-    } catch (e) {
-      console.warn('[TTS-pipeline] WAV 병합 실패, 순차 재생 폴백:', (e as Error).message)
+  for (let i = 0; i < chunks.length; i++) {
+    if (i <= mergedUpTo) continue
+
+    // chunk[i] 완료 대기
+    const wavPath = await peekables[i].promise
+    if (!wavPath) continue
+
+    if (enableMerge) {
+      // 현재 위치부터 끝까지 전부 준비됐으면 한 번에 병합
+      const remaining = peekables.slice(i)
+      if (remaining.every(pk => pk.isReady())) {
+        const allPaths = remaining
+          .map(pk => pk.get())
+          .filter((p): p is string => typeof p === 'string')
+        if (allPaths.length > 1) {
+          try {
+            const merged = mergeWAVBuffers(allPaths.map(p => fs.readFileSync(p)))
+            const mergedPath = path.join(
+              cacheDir,
+              `merged-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`
+            )
+            fs.writeFileSync(mergedPath, merged)
+            playPromises.push(
+              playAudio(mergedPath).catch((e) => {
+                console.warn('[TTS-pipeline] 병합 재생 실패 건너뜀:', (e as Error).message)
+              })
+            )
+            mergedUpTo = chunks.length - 1
+            break
+          } catch (e) {
+            console.warn('[TTS-pipeline] WAV 병합 실패, 개별 enqueue 폴백:', (e as Error).message)
+          }
+        }
+      }
     }
+
+    // 아직 뒤 청크가 준비 안 됐으면 chunk[i] 즉시 enqueue (1-ahead)
+    playPromises.push(
+      playAudio(wavPath).catch((e) => {
+        console.warn('[TTS-pipeline] 재생 실패 건너뜀:', (e as Error).message)
+      })
+    )
   }
 
-  // 비병합 폴백 (Qwen3 :7860 또는 병합 실패) — 순차 재생, 청크별 에러 건너뜀
-  for (const p of validPaths) {
-    try { await playAudio(p) } catch (e) {
-      console.warn('[TTS-pipeline] 재생 실패 건너뜀:', (e as Error).message)
-    }
-  }
+  if (playPromises.length > 0) await Promise.all(playPromises)
 }
 
 // WAV 병합 (24000Hz / Mono / 16-bit 고정 — 두 모델 모두 동일)
