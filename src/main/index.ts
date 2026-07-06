@@ -13,6 +13,7 @@ import { initPTY, createPTY, destroyPTY } from './pty'
 import { startSttServer, stopSttServer } from './stt-server'
 import { join as pathJoin } from 'path'
 import os from 'os'
+import { logError, logInfo, getMainLogPath } from './logger'
 
 // app.whenReady() 이전에 userData 경로 고정 (npx electron 실행 시 "Electron" 기본값 방지)
 app.setName('nova-voice')
@@ -178,17 +179,29 @@ async function toggleRecording(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  logInfo('[Bootstrap] app.whenReady entered', { logFile: getMainLogPath() })
   electronApp.setAppUserModelId('com.novavoice.app')
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
 
+  void startSttServer()
+    .then((ready) => {
+      if (ready) {
+        logInfo('[Bootstrap] STT prestart ready')
+      } else {
+        logError('[Bootstrap] STT prestart returned not ready')
+      }
+    })
+    .catch((error: Error) => {
+      logError('[Bootstrap] STT prestart failed', error)
+    })
+
   // 창이 열리기 전에 현재 foreground 앱을 기억 (V2T 주입 대상)
   await rememberFrontApp()
 
   initDB()
-  await startSttServer()
   await initWhisper()
   // 백그라운드에서 Whisper 워밍업 (첫 녹음 지연 최소화)
   const _warmupModels = getAvailableModels()
@@ -330,10 +343,14 @@ app.whenReady().then(async () => {
       mainWindow.focus()
     }
   })
+}).catch((error: Error) => {
+  logError('[Bootstrap] app.whenReady failed', error)
+  throw error
 })
 
 app.on('before-quit', () => {
   isQuitting = true
+  logInfo('[Shutdown] before-quit')
 })
 
 app.on('will-quit', () => {
@@ -343,6 +360,14 @@ app.on('will-quit', () => {
   destroyPTY()
   stopSttServer()
   stopFrontAppPoller()
+})
+
+process.on('uncaughtException', (error: Error) => {
+  logError('[Process] uncaughtException', error)
+})
+
+process.on('unhandledRejection', (reason: unknown) => {
+  logError('[Process] unhandledRejection', reason)
 })
 
 const gotTheLock = app.requestSingleInstanceLock()

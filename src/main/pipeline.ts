@@ -191,8 +191,8 @@ export async function runParallelWithProgress<T>(
   // 병렬 시작: gate ON + 시작 알림 1회
   if (tasks.length > 1) {
     smartSpeak(`${tasks.length}개 작업을 동시에 시작할게요.`, { lang: config.ttsLang }).catch(() => {})
-    // 시작 알림 큐잉 후 gate 활성화 (시작 알림은 통과시킴)
-    setTimeout(() => setTTSGate(true), 100)
+    // smartSpeak는 gate 검사 후 즉시 큐잉하므로, enqueue 직후 gate를 올려도 시작 알림은 유지된다.
+    setTTSGate(true)
   }
 
   const results = await Promise.allSettled(

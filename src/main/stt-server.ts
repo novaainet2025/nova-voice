@@ -5,6 +5,7 @@
 import { spawn, ChildProcess } from 'child_process'
 import path from 'path'
 import http from 'http'
+import net from 'net'
 import { is } from '@electron-toolkit/utils'
 
 const STT_PORT = 8765
@@ -19,7 +20,26 @@ function getSttServerDir(): string {
 
 let serverProcess: ChildProcess | null = null
 
-function isPortInUse(): Promise<boolean> {
+function canConnectToPort(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: '127.0.0.1', port: STT_PORT })
+    let settled = false
+
+    const finish = (result: boolean) => {
+      if (settled) return
+      settled = true
+      socket.destroy()
+      resolve(result)
+    }
+
+    socket.setTimeout(500)
+    socket.once('connect', () => finish(true))
+    socket.once('error', () => finish(false))
+    socket.once('timeout', () => finish(false))
+  })
+}
+
+function verifySttIdentity(): Promise<boolean> {
   return new Promise((resolve) => {
     const req = http.get(`${STT_URL}/`, { timeout: 2000 }, (res) => {
       let body = ''
@@ -34,11 +54,16 @@ function isPortInUse(): Promise<boolean> {
   })
 }
 
+async function isPortInUse(): Promise<boolean> {
+  if (!await canConnectToPort()) return false
+  return verifySttIdentity()
+}
+
 async function waitForReady(maxWaitMs = 30000): Promise<boolean> {
   const start = Date.now()
   while (Date.now() - start < maxWaitMs) {
     if (await isPortInUse()) return true
-    await new Promise(r => setTimeout(r, 500))
+    await new Promise(r => setTimeout(r, 200))
   }
   return false
 }
