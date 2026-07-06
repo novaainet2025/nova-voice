@@ -14,6 +14,7 @@ import { smartSpeak, getSpeakers, MLX_VOICES, setMLXVoice, getMLXVoice,
   SAY_VOICES, setActiveTTSModel, setActiveSayVoice, getActiveTTSModel, setChunkMode, getChunkMode,
   sanitizeTTSText, setAllTtsAdapter, setAllTtsVoice, getAllTtsAdapters,
   flushTTSQueue, setTTSGate } from './tts-client'
+import { reregisterShortcuts } from './shortcuts'
 import { BUILTIN_MODES, DEFAULT_SETTINGS } from '../shared/types'
 import type { AppSettings, TranscriptionResult, AIMode } from '../shared/types'
 import path from 'path'
@@ -72,17 +73,19 @@ const NOVA_VOICE_BUNDLE = 'com.novavoice.app'
  * 클립보드 붙여넣기 대신 PTY에 직접 타이핑 + Enter를 전송한다.
  * → autoEnter 설정 여부와 관계없이 항상 실행됨.
  *
- * @returns true if routed via PTY (clipboard injection skipped), false otherwise
+ * @returns 'pty' if routed via PTY, 'injected' if clipboard injection succeeded, 'failed' otherwise
  */
-async function injectOrPTY(text: string, appName: string | undefined, bundleId: string | undefined, autoEnter: boolean): Promise<boolean> {
+type InjectResult = 'pty' | 'injected' | 'failed'
+
+async function injectOrPTY(text: string, appName: string | undefined, bundleId: string | undefined, autoEnter: boolean): Promise<InjectResult> {
   const isNovaPTYTarget = (bundleId === NOVA_VOICE_BUNDLE || !bundleId) && isPTYReady() && isClaudeRunningInPTY()
   if (isNovaPTYTarget) {
     sendCommandToPTY(text)  // 안정적 Enter 보장
     console.log(`[PTY-Inject] 직접 주입 → PTY Claude (${text.length}자)`)
-    return true
+    return 'pty'
   }
-  await injectText(text, appName, bundleId, autoEnter)
-  return false
+  const injected = await injectText(text, appName, bundleId, autoEnter)
+  return injected ? 'injected' : 'failed'
 }
 
 let isRecording = false
@@ -299,8 +302,15 @@ export function setupIPC(mainWindow: BrowserWindow): void {
   // Settings
   ipcMain.handle('settings:get', () => settings)
   ipcMain.handle('settings:set', (_event, newSettings: Partial<AppSettings>) => {
+    const shortcutChanged = newSettings.shortcut !== undefined && newSettings.shortcut !== settings.shortcut
     settings = { ...settings, ...newSettings }
     saveSettingsToDisk(settings)
+    if (shortcutChanged) {
+      const ok = reregisterShortcuts(settings.shortcut)
+      if (!ok) {
+        console.error(`[Settings] Failed to re-register shortcut: ${settings.shortcut}`)
+      }
+    }
     // TTS 모델/화자 변경 즉시 반영
     if (newSettings.ttsModel) setActiveTTSModel(newSettings.ttsModel)
     if (newSettings.sayVoice) setActiveSayVoice(newSettings.sayVoice)
@@ -1394,13 +1404,16 @@ JSON만:`
         || (aiResult && aiResult.startsWith('[Smart→Agent'))
         || (aiResult && aiResult.startsWith('[Smart→Hive'))
       if (!isCommandResult && settings.autoInject && finalText.trim()) {
-        const ptyRouted = await injectOrPTY(finalText, getPreviousAppName(), getPreviousBundleId(), settings.autoEnter)
+        const injectResult = await injectOrPTY(finalText, getPreviousAppName(), getPreviousBundleId(), settings.autoEnter)
         const targetApp = getPreviousAppName() || '(frontmost)'
-        if (ptyRouted) {
+        if (injectResult === 'pty') {
           debugBroadcast('info', `[PTY-Inject] PTY Claude에 직접 주입 (${finalText.length}자)`)
-        } else {
+        } else if (injectResult === 'injected') {
           console.log('Text injected into:', targetApp, '/ bundle:', getPreviousBundleId() || '(none)')
           debugBroadcast('info', `[Inject] 텍스트 주입 → ${targetApp} (${finalText.length}자)`)
+        } else {
+          console.error(`[Inject] Failed to inject text into: ${targetApp} / bundle: ${getPreviousBundleId() || '(none)'}`)
+          debugBroadcast('error', `[Inject] 텍스트 주입 실패 → ${targetApp}`)
         }
       }
 

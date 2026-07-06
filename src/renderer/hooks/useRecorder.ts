@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useAppStore } from '../stores/appStore'
 
 declare global {
@@ -97,9 +97,85 @@ export function useRecorder() {
     setCurrentTranscription
   } = useAppStore()
 
+  const cleanupRecordingResources = useCallback(async (options?: {
+    resetState?: boolean
+    discardRecorderHandlers?: boolean
+  }) => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current)
+      animFrameRef.current = 0
+    }
+
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+
+    const mediaRecorder = mediaRecorderRef.current
+    mediaRecorderRef.current = null
+    if (mediaRecorder) {
+      if (options?.discardRecorderHandlers) {
+        mediaRecorder.ondataavailable = null
+        mediaRecorder.onstop = null
+      }
+      if (mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop()
+      }
+    }
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+    }
+
+    const audioContext = audioContextRef.current
+    audioContextRef.current = null
+    if (audioContext && audioContext.state !== 'closed') {
+      try {
+        await audioContext.close()
+      } catch (error) {
+        console.warn('[Recorder] AudioContext close failed:', error)
+      }
+    }
+    analyserRef.current = null
+    silenceStartRef.current = 0
+    hadSpeechRef.current = false
+
+    if (options?.resetState) {
+      setRecording(false)
+      setRecordingDuration(0)
+      setAudioLevel(0)
+    }
+  }, [setRecording, setRecordingDuration, setAudioLevel])
+
+  useEffect(() => {
+    return () => {
+      void cleanupRecordingResources({ discardRecorderHandlers: true })
+    }
+  }, [cleanupRecordingResources])
+
   const startRecording = useCallback(async () => {
     try {
       console.log('[Recorder] Starting...')
+
+      if (streamRef.current || mediaRecorderRef.current) {
+        console.warn('[Recorder] Duplicate start prevented')
+        await cleanupRecordingResources({
+          resetState: true,
+          discardRecorderHandlers: true,
+        })
+        return
+      }
+
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current)
+        animFrameRef.current = 0
+      }
+
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -237,6 +313,10 @@ export function useRecorder() {
 
       console.log('[Recorder] Recording started')
     } catch (error) {
+      await cleanupRecordingResources({
+        resetState: true,
+        discardRecorderHandlers: true,
+      })
       const err = error as DOMException
       let userMsg = '마이크 접근에 실패했어요.'
       if (err.name === 'NotAllowedError') {
@@ -249,81 +329,21 @@ export function useRecorder() {
       console.error('[Recorder] Failed to start:', err.name, err.message)
       setCurrentTranscription(userMsg)
     }
-  }, [setRecording, setRecordingDuration, setAudioLevel, setIsTranscribing, setCurrentTranscription])
+  }, [cleanupRecordingResources, setRecording, setRecordingDuration, setAudioLevel, setIsTranscribing, setCurrentTranscription])
 
   const stopRecording = useCallback(() => {
     console.log('[Recorder] Stopping...')
-
-    // Stop animation frame
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current)
-      animFrameRef.current = 0
-    }
-
-    // Stop MediaRecorder
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop()
-    }
-
-    // Stop mic stream
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop())
-      streamRef.current = null
-    }
-
-    // Close AudioContext
-    if (audioContextRef.current) {
-      audioContextRef.current.close()
-      audioContextRef.current = null
-    }
-    analyserRef.current = null
-
-    // Stop timer
-    if (timerRef.current) {
-      clearInterval(timerRef.current)
-      timerRef.current = null
-    }
-
-    setRecording(false)
-    setRecordingDuration(0)
-    setAudioLevel(0)
-  }, [setRecording, setRecordingDuration, setAudioLevel])
+    void cleanupRecordingResources({ resetState: true })
+  }, [cleanupRecordingResources])
 
   const cancelRecording = useCallback(() => {
     console.log('[Recorder] Cancelling...')
     audioChunksRef.current = []
-
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.ondataavailable = null
-      mediaRecorderRef.current.onstop = null
-      mediaRecorderRef.current.stop()
-    }
-
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current)
-      animFrameRef.current = 0
-    }
-
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop())
-      streamRef.current = null
-    }
-
-    if (audioContextRef.current) {
-      audioContextRef.current.close()
-      audioContextRef.current = null
-    }
-    analyserRef.current = null
-
-    if (timerRef.current) {
-      clearInterval(timerRef.current)
-      timerRef.current = null
-    }
-
-    setRecording(false)
-    setRecordingDuration(0)
-    setAudioLevel(0)
-  }, [setRecording, setRecordingDuration, setAudioLevel])
+    void cleanupRecordingResources({
+      resetState: true,
+      discardRecorderHandlers: true,
+    })
+  }, [cleanupRecordingResources])
 
   return {
     isRecording,

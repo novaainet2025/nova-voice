@@ -8,7 +8,7 @@
  */
 
 import { BrowserWindow } from 'electron'
-import { spawn } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import { execFile as execFileCb } from 'child_process'
 import { promisify } from 'util'
 import fs from 'fs'
@@ -31,14 +31,29 @@ function findClaude(): string {
   return 'claude'  // PATH에서 찾기
 }
 
+function getClaudeStatusFromPath(claudePath: string): boolean {
+  if (claudePath !== 'claude') return fs.existsSync(claudePath)
+
+  const result = spawnSync('command', ['-v', 'claude'], {
+    shell: true,
+    stdio: 'ignore',
+  })
+
+  if (result.status === 0) return true
+
+  console.error('[Claude-Terminal] Claude CLI not found in PATH')
+  return false
+}
+
 export function initClaudeTerminal(win: BrowserWindow): void {
   mainWindow = win
   const claudePath = findClaude()
+  const ready = getClaudeStatusFromPath(claudePath)
   console.log(`[Claude-Terminal] Initialized, binary: ${claudePath}`)
   // 상태 전송
   win.webContents.once('did-finish-load', () => {
     win.webContents.send('claude:status', {
-      ready: fs.existsSync(claudePath) || claudePath === 'claude',
+      ready,
       path: claudePath,
     })
   })
@@ -46,7 +61,7 @@ export function initClaudeTerminal(win: BrowserWindow): void {
 
 export function getClaudeStatus(): { ready: boolean; path: string } {
   const p = findClaude()
-  return { ready: fs.existsSync(p) || p === 'claude', path: p }
+  return { ready: getClaudeStatusFromPath(p), path: p }
 }
 
 // ── 핵심: Claude CLI에 프롬프트 보내고 결과 스트리밍 ─────────────────────

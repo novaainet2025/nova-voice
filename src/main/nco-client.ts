@@ -503,6 +503,7 @@ export async function processWithClaude(
     proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
 
     proc.on('close', (code: number) => {
+      clearTimeout(timeout)
       const text = stdout.trim()
       if (code !== 0 && !text) {
         reject(new Error(`Claude exit ${code}: ${stderr.substring(0, 200)}`))
@@ -511,10 +512,13 @@ export async function processWithClaude(
       }
     })
 
-    proc.on('error', reject)
+    proc.on('error', (err: Error) => {
+      clearTimeout(timeout)
+      reject(err)
+    })
 
     // 60초 타임아웃
-    setTimeout(() => { proc.kill(); reject(new Error('Claude timeout')) }, 60000)
+    const timeout = setTimeout(() => { proc.kill(); reject(new Error('Claude timeout')) }, 60000)
   })
 }
 
@@ -563,6 +567,7 @@ export async function processWithClaudeStreaming(
     proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
 
     proc.on('close', (code: number) => {
+      clearTimeout(timeout)
       // Flush remaining buffer — sanitize 적용
       const remaining = sanitizeTTSText(buffer.trim())
       if (remaining.length > 5) onSentence(remaining)
@@ -574,8 +579,11 @@ export async function processWithClaudeStreaming(
       }
     })
 
-    proc.on('error', reject)
-    setTimeout(() => { proc.kill(); reject(new Error('Claude timeout')) }, 60000)
+    proc.on('error', (err: Error) => {
+      clearTimeout(timeout)
+      reject(err)
+    })
+    const timeout = setTimeout(() => { proc.kill(); reject(new Error('Claude timeout')) }, 60000)
   })
 }
 

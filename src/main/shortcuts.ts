@@ -1,6 +1,9 @@
 import { globalShortcut, BrowserWindow } from 'electron'
 
 let registeredShortcuts: string[] = []
+let lastMainWindow: BrowserWindow | null = null
+let lastOnToggleRecording: (() => void) | null = null
+let lastOnCancelProcessing: (() => void) | undefined
 
 export function registerShortcuts(
   mainWindow: BrowserWindow,
@@ -8,6 +11,9 @@ export function registerShortcuts(
   onToggleRecording: () => void,
   onCancelProcessing?: () => void
 ): void {
+  lastMainWindow = mainWindow
+  lastOnToggleRecording = onToggleRecording
+  lastOnCancelProcessing = onCancelProcessing
   unregisterAll()
 
   // Recording toggle shortcut (e.g. Ctrl+Shift+Space)
@@ -52,6 +58,14 @@ export function registerShortcuts(
       }
     }
   }
+}
+
+export function reregisterShortcuts(shortcut: string): boolean {
+  if (!lastMainWindow || !lastOnToggleRecording) {
+    return false
+  }
+  registerShortcuts(lastMainWindow, shortcut, lastOnToggleRecording, lastOnCancelProcessing)
+  return isShortcutRegistered(shortcut)
 }
 
 export function unregisterAll(): void {

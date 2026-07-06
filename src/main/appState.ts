@@ -21,6 +21,7 @@ export function getCapturedSelectedText(): string {
 // so it works even after Electron may have taken focus.
 export async function captureSelectedText(): Promise<void> {
   capturedSelectedText = ''
+  let prevClip = ''
   if (process.platform !== 'darwin') {
     capturedSelectedText = clipboard.readText()
     return
@@ -30,7 +31,7 @@ export async function captureSelectedText(): Promise<void> {
     return
   }
   try {
-    const prevClip = clipboard.readText()
+    prevClip = clipboard.readText()
     // Clear clipboard so we can detect if Cmd+C actually copied something
     clipboard.writeText('')
     // Send Cmd+C directly to the named process (works even if not frontmost)
@@ -53,6 +54,7 @@ export async function captureSelectedText(): Promise<void> {
       console.log(`[Selection] No text selected in "${previousAppName}"`)
     }
   } catch (e) {
+    try { clipboard.writeText(prevClip) } catch { /* ignore */ }
     console.error('[Selection] Capture failed:', (e as Error).message)
   }
 }

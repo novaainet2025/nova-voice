@@ -106,6 +106,7 @@ export function UnifiedPanel() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const debugBottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const processingAttachmentRef = useRef(false)
 
   // V2T mode = direct (transcription + inject only), Terminal mode = everything else
   const isV2T = currentMode === 'direct'
@@ -233,6 +234,10 @@ export function UnifiedPanel() {
   useEffect(() => {
     if (showDebug) debugBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [debugLogs, showDebug])
+
+  useEffect(() => {
+    processingAttachmentRef.current = isProcessingAttachment
+  }, [isProcessingAttachment])
 
   // ── Paste ─────────────────────────────────────────────────────────────────
 
@@ -374,24 +379,29 @@ export function UnifiedPanel() {
   // ── Process attachments ───────────────────────────────────────────────────
 
   const handleProcessAttachments = useCallback(async () => {
-    if (!window.electronAPI || pendingAttachments.length === 0 || isProcessingAttachment) return
+    if (!window.electronAPI || pendingAttachments.length === 0 || processingAttachmentRef.current) return
+    processingAttachmentRef.current = true
     setProcessingAttachment(true)
     setAIStage('ai_processing')
     addMsg('system', `📎 파일 ${pendingAttachments.length}개 AI 분석 중...`)
-    for (const att of pendingAttachments) {
-      try {
-        addMsg('attachment', att.name, `${fileIcon(att.mimeType)} ${(att.size / 1024).toFixed(0)}KB`)
-        await (window.electronAPI as any).processAttachment({
-          name: att.name, mimeType: att.mimeType,
-          content: att.content, base64: att.base64, modeId: currentMode,
-        })
-      } catch {
-        addMsg('error', `처리 실패: ${att.name}`)
+    try {
+      for (const att of pendingAttachments) {
+        try {
+          addMsg('attachment', att.name, `${fileIcon(att.mimeType)} ${(att.size / 1024).toFixed(0)}KB`)
+          await (window.electronAPI as any).processAttachment({
+            name: att.name, mimeType: att.mimeType,
+            content: att.content, base64: att.base64, modeId: currentMode,
+          })
+        } catch {
+          addMsg('error', `처리 실패: ${att.name}`)
+        }
       }
+      clearAttachments()
+    } finally {
+      processingAttachmentRef.current = false
+      setProcessingAttachment(false)
     }
-    clearAttachments()
-    setProcessingAttachment(false)
-  }, [pendingAttachments, currentMode, isProcessingAttachment, addMsg, setProcessingAttachment, setAIStage, clearAttachments])
+  }, [pendingAttachments, currentMode, addMsg, setProcessingAttachment, setAIStage, clearAttachments])
 
   // ── Derived ───────────────────────────────────────────────────────────────
 

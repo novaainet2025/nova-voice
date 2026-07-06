@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useAppStore } from '../../stores/appStore'
 import type { TranscriptionResult } from '../../../shared/types'
 
@@ -6,24 +6,55 @@ export function HistoryPanel() {
   const { history, setHistory } = useAppStore()
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchSeqRef = useRef(0)
+  const hasMountedSearchEffectRef = useRef(false)
 
-  const loadHistory = useCallback(async () => {
+  const loadHistory = useCallback(async (seq?: number) => {
     const items = await window.electronAPI.getHistory(100, 0)
+    if (typeof seq === 'number' && seq !== searchSeqRef.current) return
     setHistory(items)
   }, [setHistory])
 
   useEffect(() => {
-    loadHistory()
+    const seq = ++searchSeqRef.current
+    void loadHistory(seq)
   }, [loadHistory])
 
-  const handleSearch = async (query: string) => {
-    setSearchQuery(query)
-    if (query.trim()) {
-      const results = await window.electronAPI.searchHistory(query)
-      setHistory(results)
-    } else {
-      loadHistory()
+  useEffect(() => {
+    if (!hasMountedSearchEffectRef.current) {
+      hasMountedSearchEffectRef.current = true
+      return
     }
+
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current)
+    }
+
+    const seq = ++searchSeqRef.current
+    searchDebounceRef.current = setTimeout(() => {
+      void (async () => {
+        if (searchQuery.trim()) {
+          const results = await window.electronAPI.searchHistory(searchQuery)
+          if (seq !== searchSeqRef.current) return
+          setHistory(results)
+          return
+        }
+
+        await loadHistory(seq)
+      })()
+    }, 300)
+
+    return () => {
+      if (searchDebounceRef.current) {
+        clearTimeout(searchDebounceRef.current)
+        searchDebounceRef.current = null
+      }
+    }
+  }, [loadHistory, searchQuery, setHistory])
+
+  const handleSearch = (query: string) => {
+    setSearchQuery(query)
   }
 
   const handleDelete = async (id: string) => {

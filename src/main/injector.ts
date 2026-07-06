@@ -28,12 +28,12 @@ export function checkAccessibilityPermission(prompt = false): boolean {
 //
 // Key insight: keep clipboard set, activation, and keystroke as separate async steps
 // so each can succeed independently without timing conflicts.
-export async function injectText(text: string, targetApp?: string, bundleId?: string, autoEnter = false): Promise<void> {
+export async function injectText(text: string, targetApp?: string, bundleId?: string, autoEnter = false): Promise<boolean> {
   if (process.platform === 'darwin') {
     if (!systemPreferences.isTrustedAccessibilityClient(false)) {
       console.error('[Inject] BLOCKED — no Accessibility permission')
       systemPreferences.isTrustedAccessibilityClient(true)
-      return
+      return false
     }
   }
 
@@ -97,10 +97,12 @@ export async function injectText(text: string, targetApp?: string, bundleId?: st
         console.log(`[Inject] OK → frontmost: "${result.stdout.trim()}"${autoEnter ? ' + Enter' : ''}`)
       }
 
+      return true
     } catch (e) {
       console.error('[Inject] Failed:', (e as Error).message)
       // text already in clipboard — user can Cmd+V manually
       console.log('[Inject] Text is in clipboard — press Cmd+V to paste manually')
+      return false
     } finally {
       // Restore original clipboard after 3s
       setTimeout(() => {
@@ -117,12 +119,22 @@ export async function injectText(text: string, targetApp?: string, bundleId?: st
         '-Command',
         `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("${sendKeys}")`
       ])
+      return true
+    } catch (e) {
+      console.error('[Inject] Failed:', (e as Error).message)
+      return false
     } finally {
       setTimeout(() => { try { clipboard.writeText(prevClip) } catch { /* ignore */ } }, 3000)
     }
   } else {
     // Linux: type text directly via xdotool
-    await execFile('xdotool', ['type', '--clearmodifiers', text])
-    if (autoEnter) await execFile('xdotool', ['key', 'Return'])
+    try {
+      await execFile('xdotool', ['type', '--clearmodifiers', text])
+      if (autoEnter) await execFile('xdotool', ['key', 'Return'])
+      return true
+    } catch (e) {
+      console.error('[Inject] Failed:', (e as Error).message)
+      return false
+    }
   }
 }

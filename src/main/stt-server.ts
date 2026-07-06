@@ -22,8 +22,12 @@ let serverProcess: ChildProcess | null = null
 function isPortInUse(): Promise<boolean> {
   return new Promise((resolve) => {
     const req = http.get(`${STT_URL}/`, { timeout: 2000 }, (res) => {
-      res.resume()
-      resolve(true)
+      let body = ''
+      res.setEncoding('utf8')
+      res.on('data', (chunk) => { body += chunk })
+      res.on('end', () => {
+        resolve(res.statusCode === 200 && /whisper|stt/i.test(body))
+      })
     })
     req.on('error', () => resolve(false))
     req.on('timeout', () => { req.destroy(); resolve(false) })
@@ -58,22 +62,31 @@ export async function startSttServer(): Promise<boolean> {
     detached: false,
   })
 
-  serverProcess.stdout?.on('data', (d: Buffer) => {
+  const stdoutHandler = (d: Buffer) => {
     console.log(`[STT Server] ${d.toString().trimEnd()}`)
-  })
-  serverProcess.stderr?.on('data', (d: Buffer) => {
+  }
+  const stderrHandler = (d: Buffer) => {
     console.log(`[STT Server/err] ${d.toString().trimEnd()}`)
-  })
-  serverProcess.on('exit', (code) => {
+  }
+  const exitHandler = (code: number | null) => {
     console.log(`[STT Server] Exited with code ${code}`)
     serverProcess = null
-  })
+  }
+
+  serverProcess.stdout?.on('data', stdoutHandler)
+  serverProcess.stderr?.on('data', stderrHandler)
+  serverProcess.on('exit', exitHandler)
 
   const ready = await waitForReady()
   if (ready) {
     console.log(`[STT Server] Ready on :${STT_PORT}`)
   } else {
     console.error(`[STT Server] Failed to start within 30s`)
+    serverProcess?.stdout?.off('data', stdoutHandler)
+    serverProcess?.stderr?.off('data', stderrHandler)
+    serverProcess?.off('exit', exitHandler)
+    serverProcess?.kill('SIGTERM')
+    serverProcess = null
   }
   return ready
 }
