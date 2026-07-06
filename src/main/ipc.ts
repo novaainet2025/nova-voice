@@ -4,16 +4,17 @@ import { getHistory, searchHistory, deleteTranscription, saveTranscription } fro
 import { transcribe, getModelsDir, getAvailableModels } from './whisper'
 import { injectText } from './injector'
 import { getOverlayWindow, hideOverlay, getCapturedSelectedText, getPreviousAppName, getPreviousBundleId } from './appState'
-import { processWithAI, processWithClaude, processWithClaudeStreaming, searchWithGemini, processImageWithGemini, processImageWithOllama, isOllamaAvailable, getProviderStatus, startDiscussion, startParallel, startAgent, startHive, startConductor, summarizeWithGemini, checkAllProviders, processWithNCOTask } from './nco-client'
+import { processWithAI, isNCOAvailable, processWithClaude, processWithClaudeStreaming, searchWithGemini, processImageWithGemini, getProviderStatus, startDiscussion, startParallel, startAgent, startHive, startConductor, summarizeWithGemini, checkAllProviders, processWithNCOTask } from './nco-client'
 import { parseVoiceCommand, parseCommand } from './voice-commands'
 import { showNotification, captureScreenBase64 } from './system-control'
 import { pipelineSpeak, pipelineSpeakStreaming, getPipelineStatus, initPipeline, setPipelineConfig, getPipelineConfig, speakProgress, runParallelWithProgress, ProgressMessages } from './pipeline'
 import { createPTY, writeToPTY, sendCommandToPTY, resizePTY, destroyPTY, typeCommandInPTY, isPTYReady, startPTYResponseCapture, askClaudeViaPTY, isClaudeRunningInPTY } from './pty'
 import { smartSpeak, getSpeakers, MLX_VOICES, setMLXVoice, getMLXVoice,
   getTTSServerStatuses, startTTSServer, stopTTSServer, previewTTSVoice,
-  SAY_VOICES, setActiveTTSModel, setActiveSayVoice, getActiveTTSModel,
-  sanitizeTTSText } from './tts-client'
-import { BUILTIN_MODES } from '../shared/types'
+  SAY_VOICES, setActiveTTSModel, setActiveSayVoice, getActiveTTSModel, setChunkMode, getChunkMode,
+  sanitizeTTSText, setAllTtsAdapter, setAllTtsVoice, getAllTtsAdapters,
+  flushTTSQueue, setTTSGate } from './tts-client'
+import { BUILTIN_MODES, DEFAULT_SETTINGS } from '../shared/types'
 import type { AppSettings, TranscriptionResult, AIMode } from '../shared/types'
 import path from 'path'
 import fs from 'fs'
@@ -24,24 +25,7 @@ import {
 } from './self-heal'
 import { NCO_FULL_CONTEXT, NCO_CODING_CONTEXT, VOICE_ANSWER_GUIDE } from './nova-context'
 
-const DEFAULT_SETTINGS: AppSettings = {
-  shortcut: 'Ctrl+Shift+Space',
-  language: 'auto',
-  modelPath: '',
-  modelName: 'large-v3-turbo',
-  autoInject: true,
-  showOverlay: true,
-  voiceCorrection: false,
-  theme: 'dark',
-  overlayPosition: 'center',
-  aiMode: 'direct',
-  aiProvider: 'auto',
-  customModes: [],
-  ttsModel: 'qwen3',
-  sayVoice: 'Yuna',
-  mlxVoice: 'Ryan',
-  autoEnter: false,
-}
+// DEFAULT_SETTINGS는 shared/types.ts에서 단일 소스로 import (중복 정의 제거)
 
 // 설정 파일 경로 — app.ready 이후에만 호출 가능
 let _settingsPath: string | null = null
@@ -115,6 +99,9 @@ export function cancelCurrentProcessing(): void {
     _currentAbortController = null
   }
   _isAIProcessing = false
+  // TTS 즉시 중단 — 큐에 남은 모든 TTS flush + 현재 재생 kill
+  flushTTSQueue()
+  setTTSGate(false)  // gate도 해제 (병렬 모드였을 수 있음)
 }
 
 /** 현재 AI 처리 중 여부 */
@@ -220,47 +207,64 @@ function prepareSpeakText(text: string, aiResult?: string): string | null {
       aiResult?.startsWith('[Hive]')) return null
 
   // sanitizeTTSText 먼저 적용 — 코드/URL/경로/마크다운 정제
-  // raw text에서 패턴 검사 시 AI 응답이 항상 코드/URL 포함 → 거의 항상 null 반환하는 버그 수정
   const cleaned = sanitizeTTSText(text)
   if (!cleaned.trim()) return null
 
-  // 500자 이하 → 전체 읽기 (이전: 300자 → 너무 짧아 내용이 잘림)
-  if (cleaned.length <= 500) return cleaned
+  // 문장 단위 분리 (한국어+영어 구어체 끝맺음 모두 포함)
+  const SENT_RE = /(?<=[.!?。！？])\s+|(?<=[다요죠어네지])[.。]?\s+/
+  const sents = cleaned.split(SENT_RE).map(s => s.trim()).filter(s => s.length >= 4)
 
-  // 500~1000자 → 첫 두 문장까지 (최대 500자)
-  if (cleaned.length <= 1000) {
-    const sentences = cleaned.split(/(?<=[.!?。])\s+|(?<=[다요죠])\s+/)
-    const twoSentences = sentences.slice(0, 2).join(' ').trim()
-    if (twoSentences.length >= 5) return twoSentences.substring(0, 500)
+  // 100자 이하 → 전체 읽기 (짧은 알림/완료 메시지)
+  if (cleaned.length <= 100) return cleaned
+
+  // 첫 완전한 문장이 200자 이하 → 첫 문장만 (맥락 끊김 없음)
+  const first = sents[0]
+  if (first && first.length <= 200) {
+    // 원본이 더 길면 "요약됨" 명시
+    if (sents.length > 1) return first + ' 자세한 내용은 화면을 확인해주세요.'
+    return first
   }
 
-  // 1000자 초과 → 첫 문장 (최대 500자)
-  const firstSent = cleaned.split(/(?<=[.!?。요다])\s+/)[0]?.trim()
-  if (firstSent && firstSent.length >= 5) return firstSent.substring(0, 500)
-
-  return cleaned.substring(0, 500)
+  // 첫 문장 자체가 200자 초과 → 문장 경계 기준으로 200자 내 최대 확보
+  const truncated = cleaned.substring(0, 200)
+  const lastBoundary = truncated.search(/[다요죠어네지][.。]?\s*$|[.!?。！？]\s*$/)
+  if (lastBoundary > 20) return cleaned.substring(0, lastBoundary + 1) + ' 화면을 확인해주세요.'
+  return truncated + '... 자세한 내용은 화면을 확인해주세요.'
 }
 
 export function setupIPC(mainWindow: BrowserWindow): void {
   // app.ready 이후이므로 이 시점에 파일 로드 가능
   settings = loadSettingsFromDisk()
 
-  // ── TTS 모델 마이그레이션 (구버전 → qwen3) ──────────────────────────────
+  // ── TTS 모델 마이그레이션 (구버전 → all_tts) ──────────────────────────────
   // mlx / mlx_ko / mlx_mix 는 :8800/:8802 MLX 서버 필요 — 기본 비활성.
-  // @@gentop :7860 Qwen3-TTS가 항상 실행 중이므로 qwen3를 기본으로 마이그레이션.
-  const legacyMLXModels = ['mlx', 'mlx_ko', 'mlx_en', 'mlx_mix']
-  if (legacyMLXModels.includes(settings.ttsModel)) {
-    console.log(`[Settings] TTS 모델 마이그레이션: ${settings.ttsModel} → qwen3`)
-    settings.ttsModel = 'qwen3'
+  // qwen3는 :7860 로컬 서버 필요. edge-tts 스트리밍이 즉시 사용 가능하므로 all_tts를 기본으로 마이그레이션.
+  const legacyModels = ['mlx', 'mlx_ko', 'mlx_en', 'mlx_mix', 'qwen3']
+  if (legacyModels.includes(settings.ttsModel)) {
+    console.log(`[Settings] TTS 모델 마이그레이션: ${settings.ttsModel} → all_tts`)
+    settings.ttsModel = 'all_tts'
     saveSettingsToDisk(settings)
   }
 
   // 저장된 TTS 설정 즉시 적용
-  setActiveTTSModel(settings.ttsModel || 'qwen3')
+  setActiveTTSModel(settings.ttsModel || 'all_tts')
   setActiveSayVoice(settings.sayVoice || 'Yuna')
+  setChunkMode(settings.ttsChunkMode ?? true)
   if (settings.mlxVoice) setMLXVoice(settings.mlxVoice)
-  // pipeline speaker를 settings에서 동기화 (defaultConfig의 'sohee' 하드코딩 덮어쓰기)
-  setPipelineConfig({ ttsSpeaker: settings.mlxVoice || 'Ryan' })
+  // pipeline speaker/speed/enabled를 settings에서 동기화 (defaultConfig 하드코딩 덮어쓰기)
+  setPipelineConfig({
+    ttsSpeaker: settings.mlxVoice || 'Ryan',
+    ...(settings.ttsSpeed !== undefined ? { ttsSpeed: settings.ttsSpeed } : {}),
+    ...(settings.ttsEnabled !== undefined ? { ttsEnabled: settings.ttsEnabled } : {}),
+  })
+
+  // all-tts 어댑터/음성 동기화
+  if (settings.allTtsAdapter) {
+    setAllTtsAdapter(settings.allTtsAdapter)
+  }
+  if (settings.allTtsVoice) {
+    setAllTtsVoice(settings.allTtsVoice)
+  }
 
   // Claude Terminal 초기화
   initClaudeTerminal(mainWindow)
@@ -300,10 +304,15 @@ export function setupIPC(mainWindow: BrowserWindow): void {
     // TTS 모델/화자 변경 즉시 반영
     if (newSettings.ttsModel) setActiveTTSModel(newSettings.ttsModel)
     if (newSettings.sayVoice) setActiveSayVoice(newSettings.sayVoice)
+    if (newSettings.ttsChunkMode !== undefined) setChunkMode(newSettings.ttsChunkMode)
     if (newSettings.mlxVoice) {
       setMLXVoice(newSettings.mlxVoice)
       setPipelineConfig({ ttsSpeaker: newSettings.mlxVoice })
     }
+    if (newSettings.ttsSpeed !== undefined) setPipelineConfig({ ttsSpeed: newSettings.ttsSpeed })
+    if (newSettings.ttsEnabled !== undefined) setPipelineConfig({ ttsEnabled: newSettings.ttsEnabled })
+    if (newSettings.allTtsAdapter) setAllTtsAdapter(newSettings.allTtsAdapter)
+    if (newSettings.allTtsVoice) setAllTtsVoice(newSettings.allTtsVoice)
   })
 
   // History
@@ -1133,24 +1142,24 @@ JSON만:`
               const claudeHealthy = isProviderHealthy(claudeProvider)
               if (!claudeHealthy) {
                 const snap = getHealthSnapshots().find(h => h.provider === claudeProvider)
-                debugBroadcast('warn', `[${label}] Claude도 쿨다운 중 (${snap?.cooldownRemainSec}s) — Ollama 시도`)
-                // ── Ollama 최후 폴백 (Gemini+Claude 모두 쿨다운) ───────────────
-                if (await isOllamaAvailable()) {
+                debugBroadcast('warn', `[${label}] Claude도 쿨다운 중 (${snap?.cooldownRemainSec}s) — NCO 시도`)
+                // ── NCO 최후 폴백 (Gemini+Claude 모두 쿨다운) ───────────────
+                if (await isNCOAvailable()) {
                   try {
                     sendProgress('ai_processing', 0.8)
-                    const ollamaQuery = `당신은 음성 비서입니다. 오늘은 ${nowDate}입니다. ${VOICE_ANSWER_GUIDE}\n\n질문: ${text}`
-                    const ollamaResult = await processWithAI({ prompt: ollamaQuery, text: '' })
-                    if (ollamaResult.text) {
-                      const strippedOllama = stripMd(ollamaResult.text)
-                      const firstSentO = strippedOllama.split(/(?<=[.!?。요다])\s/)[0] || strippedOllama
-                      const stripped = firstSentO.length <= 300 ? firstSentO : firstSentO.substring(0, 300)
-                      debugBroadcast('success', `[${label}] Ollama 폴백 성공: "${stripped.substring(0, 80)}"`)
+                    const ncoQuery = `당신은 음성 비서입니다. 오늘은 ${nowDate}입니다. ${VOICE_ANSWER_GUIDE}\n\n질문: ${text}`
+                    const ncoResult = await processWithAI({ prompt: ncoQuery, text: '' })
+                    if (ncoResult.text) {
+                      const strippedNco = stripMd(ncoResult.text)
+                      const firstSentN = strippedNco.split(/(?<=[.!?。요다])\s/)[0] || strippedNco
+                      const stripped = firstSentN.length <= 300 ? firstSentN : firstSentN.substring(0, 300)
+                      debugBroadcast('success', `[${label}] NCO 폴백 성공: "${stripped.substring(0, 80)}"`)
                       smartSpeak(stripped, { lang: 'ko' }).catch(e => console.error('[TTS]', (e as Error).message))
-                      finalText = ollamaResult.text
-                      aiResult = `[Smart→${label}:Ollama] ${ollamaResult.text.substring(0, 100)}`
+                      finalText = ncoResult.text
+                      aiResult = `[Smart→${label}:NCO] ${ncoResult.text.substring(0, 100)}`
                     }
-                  } catch (ollamaErr) {
-                    debugBroadcast('error', `[${label}] Ollama 폴백도 실패: ${(ollamaErr as Error).message.substring(0, 80)}`)
+                  } catch (ncoErr) {
+                    debugBroadcast('error', `[${label}] NCO 폴백도 실패: ${(ncoErr as Error).message.substring(0, 80)}`)
                   }
                 }
                 if (!finalText) {
@@ -1303,11 +1312,12 @@ JSON만:`
             // - 맥락에 맞지 않는 단어 교정
             // - 맞춤법·띄어쓰기·문장부호 교정
             const correctionPrompt = `${contextHint}다음은 음성 인식(STT)으로 변환된 텍스트입니다. 아래 규칙에 따라 교정하세요:
-1. 발음이 비슷하여 잘못 인식된 단어를 맥락에 맞게 수정하세요 (예: 마이클→마이크, 익스플로러→Explorer, 크롬→Chrome)
-2. 맞춤법·띄어쓰기·문장부호 오류를 수정하세요
-3. 맥락상 어색하거나 의미가 통하지 않는 단어를 자연스럽게 수정하세요
-4. 내용·의미·어투는 절대 바꾸지 마세요
-5. 교정된 텍스트만 출력하세요 (설명 없이):
+1. 발음이 비슷하여 잘못 인식된 단어를 맥락에 맞게 수정 (예: 마이클→마이크, 익스플로러→Explorer, 크롬→Chrome, 노바보이스→Nova Voice)
+2. 프로그래밍·기술 용어는 정확한 표기로 수정 (예: 리액트→React, 타입스크립트→TypeScript, 깃허브→GitHub, 클로드→Claude, 제미나이→Gemini)
+3. 맞춤법·띄어쓰기·문장부호 오류 수정
+4. 맥락상 어색하거나 의미가 통하지 않는 단어를 자연스럽게 수정
+5. 내용·의미·어투는 절대 바꾸지 마세요
+6. 교정된 텍스트만 출력하세요 (설명·따옴표·마크다운 없이):
 
 `
             const corrected = await processWithAI({
@@ -1483,20 +1493,11 @@ JSON만:`
           console.log('[Attachment] Gemini vision failed:', (e as Error).message)
         }
 
-        // 2순위: Ollama vision (llava 등 vision 모델이 설치된 경우)
-        if (!finalText && await isOllamaAvailable()) {
-          try {
-            finalText = await processImageWithOllama(opts.base64, visionPrompt)
-            aiResult = finalText
-            console.log(`[Attachment] Ollama vision done (${finalText.length} chars)`)
-          } catch (e) {
-            console.log('[Attachment] Ollama vision failed:', (e as Error).message)
-          }
-        }
+
 
         if (!finalText) {
           finalText = '이미지 분석에 실패했어요. 에이아이 설정을 확인해주세요.'
-          aiResult = '[Attachment] 이미지 분석 실패 — Gemini API 키 또는 Ollama vision 모델 미설치'
+          aiResult = '[Attachment] 이미지 분석 실패 — Gemini API 키 확인 필요'
         }
 
       } else {
@@ -1613,6 +1614,17 @@ JSON만:`
   ipcMain.handle('tts:say-preview', async (_event, voice: string, text?: string) => {
     const { execFile: ef } = require('child_process')
     ef('say', ['-v', voice, text || '안녕하세요. 저는 노바예요.'])
+  })
+
+  // All-TTS 어댑터 목록 (localhost:7861 프록시)
+  ipcMain.handle('tts:all-tts-adapters', async () => {
+    try {
+      const res = await fetch('http://localhost:7861/api/adapters')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return await res.json()
+    } catch (e: any) {
+      return { error: e.message }
+    }
   })
 
   // ── PTY Claude 직접 통합 IPC ──────────────────────────────────────────────

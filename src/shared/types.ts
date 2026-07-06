@@ -8,7 +8,7 @@ export interface AIMode {
   prompt: string
   description: string
   category: ModeCategory  // text=텍스트입력, agentic=PC제어, voice=음성출력, collab=NCO협업
-  provider?: string       // 'nco' | 'ollama' | 'claude' | 'gemini'
+  provider?: string       // 'nco' | 'claude' | 'gemini'
   ttsOutput?: boolean     // true면 결과를 음성으로도 출력
 }
 
@@ -146,11 +146,16 @@ export interface AppSettings {
   theme: 'light' | 'dark' | 'system'
   overlayPosition: 'top' | 'center' | 'bottom'
   aiMode: string
-  aiProvider: string // 'nco' | 'ollama' | 'claude' | 'gemini'
+  aiProvider: string // 'nco' | 'claude' | 'gemini'
   customModes: AIMode[]
-  ttsModel: 'qwen3' | 'mlx' | 'mlx_ko' | 'mlx_en' | 'mlx_mix' | 'cosyvoice' | 'say' // 기본 TTS 엔진
+  ttsModel: 'qwen3' | 'mlx' | 'mlx_ko' | 'mlx_en' | 'mlx_mix' | 'say' | 'all_tts' // 기본 TTS 엔진
+  ttsChunkMode: boolean  // 텍스트를 청크로 분해할지(true) 통으로 합성할지(false)
+  ttsSpeed: number   // TTS 재생 속도 배율 (기본 1.0) — pipeline과 동기화
+  ttsEnabled: boolean  // TTS 출력 on/off (기본 true) — pipeline과 동기화
   sayVoice: string  // macOS say 화자 (예: 'Yuna', 'Sora')
   mlxVoice: string  // MLX-Audio 화자
+  allTtsAdapter: string  // all-tts 어댑터 (예: 'edge_tts')
+  allTtsVoice: string    // all-tts 음성 (예: 'ko-KR-SunHiNeural')
   autoEnter: boolean // 텍스트 주입 후 자동 엔터 (터미널/채팅 자동 실행)
 }
 
@@ -196,14 +201,20 @@ export const DEFAULT_SETTINGS: AppSettings = {
   modelName: 'large-v3-turbo',
   autoInject: true,
   showOverlay: true,
-  voiceCorrection: false,
   theme: 'dark',
   overlayPosition: 'center',
   aiMode: 'direct',
   aiProvider: 'auto',
   customModes: [],
-  ttsModel: 'qwen3',
+  ttsModel: 'all_tts',
+  ttsChunkMode: true,
+  ttsSpeed: 1.0,
+  ttsEnabled: true,
   sayVoice: 'Yuna',
   mlxVoice: 'Ryan',
+  allTtsAdapter: 'edge_tts',
+  allTtsVoice: 'ko-KR-SunHiNeural',
   autoEnter: false,
+  voiceCorrection: false, // 런타임 실제 기본값과 일치 (기존 true는 미적용 dead value였음)
 }
+// NOTE: 이 객체가 런타임 유일 소스 (main/ipc.ts가 import). 값 변경 시 실제 반영됨.

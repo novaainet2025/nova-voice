@@ -10,6 +10,7 @@ import { setOverlayWindow, rememberFrontApp, captureSelectedText, startFrontAppP
 import { initPipeline } from './pipeline'
 import { checkAccessibilityPermission } from './injector'
 import { initPTY, createPTY, destroyPTY } from './pty'
+import { startSttServer, stopSttServer } from './stt-server'
 import { join as pathJoin } from 'path'
 import os from 'os'
 
@@ -187,6 +188,7 @@ app.whenReady().then(async () => {
   await rememberFrontApp()
 
   initDB()
+  await startSttServer()
   await initWhisper()
   // 백그라운드에서 Whisper 워밍업 (첫 녹음 지연 최소화)
   const _warmupModels = getAvailableModels()
@@ -339,6 +341,7 @@ app.on('will-quit', () => {
   destroyTray()
   closeDB()
   destroyPTY()
+  stopSttServer()
   stopFrontAppPoller()
 })
 

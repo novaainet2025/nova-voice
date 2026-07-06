@@ -17,7 +17,7 @@
  *     → [Hand] 결과를 커서 위치에 텍스트 삽입
  */
 
-import { smartSpeak, isTTSAvailable, isMLXAvailable, ensureTTSServer, synthesizeMLX, playAudio, startMLXInBackground, startTTSServer, getActiveTTSModel, sanitizeTTSText } from './tts-client'
+import { smartSpeak, isTTSAvailable, isMLXAvailable, ensureTTSServer, synthesizeMLX, playAudio, startMLXInBackground, startTTSServer, getActiveTTSModel, sanitizeTTSText, setTTSGate, flushTTSQueue, isTTSGated } from './tts-client'
 import { BrowserWindow } from 'electron'
 
 export interface PipelineConfig {
@@ -173,28 +173,30 @@ export const ProgressMessages = {
 } as const
 
 /**
- * 병렬 태스크 실행 with TTS 진행 알림
- * - 각 태스크 시작/완료 시 TTS 알림
- * - 모든 태스크 완료 시 요약 알림
+/**
+ * 병렬 태스크 실행 with TTS Gate + 완료 요약
+ * - 시작 시 gate ON → 개별 TTS 억제
+ * - 전체 완료 시 gate OFF → 요약 1회만 TTS 출력
  */
 export async function runParallelWithProgress<T>(
   tasks: Array<{
     name: string
     fn: () => Promise<T>
     silent?: boolean  // 이 태스크는 TTS 알림 없음
-  }>
+  }>,
+  summaryFn?: (results: Array<{ name: string; result?: T; error?: Error }>) => string
 ): Promise<Array<{ name: string; result?: T; error?: Error }>> {
   if (tasks.length === 0) return []
 
-  // 시작 알림 (태스크 수가 1개 초과 시만)
+  // 병렬 시작: gate ON + 시작 알림 1회
   if (tasks.length > 1) {
-    speakProgress(`${tasks.length}개 작업을 동시에 시작할게요.`)
+    smartSpeak(`${tasks.length}개 작업을 동시에 시작할게요.`, { lang: config.ttsLang }).catch(() => {})
+    // 시작 알림 큐잉 후 gate 활성화 (시작 알림은 통과시킴)
+    setTimeout(() => setTTSGate(true), 100)
   }
 
   const results = await Promise.allSettled(
     tasks.map(async (task) => {
-      // 태스크별 개별 알림 제거 — 병렬 실행 시 큐 쌓임 방지
-      // 시작/완료 알림은 배치 요약(allDone/failure)에서만 처리
       try {
         const result = await task.fn()
         return { name: task.name, result }
@@ -210,15 +212,20 @@ export async function runParallelWithProgress<T>(
     r.status === 'fulfilled' ? r.value : { name: '?', error: new Error('settled rejected') }
   )
 
-  const failed = mapped.filter(r => r.error)
-  const done = mapped.filter(r => !r.error)
-
+  // Gate OFF + 요약 TTS 1회
   if (tasks.length > 1) {
-    if (failed.length === 0) {
-      speakProgress(ProgressMessages.allDone(done.length))
-    } else {
-      speakProgress(`${done.length}개 완료됐고, ${failed.length}개 실패했어요.`)
-    }
+    setTTSGate(false)
+    const failed = mapped.filter(r => r.error)
+    const done = mapped.filter(r => !r.error)
+
+    // 커스텀 요약 함수가 있으면 사용, 없으면 기본 요약
+    const summary = summaryFn
+      ? summaryFn(mapped)
+      : failed.length === 0
+        ? ProgressMessages.allDone(done.length)
+        : `${done.length}개 완료됐고, ${failed.length}개 실패했어요.`
+
+    smartSpeak(summary, { lang: config.ttsLang }).catch(() => {})
   }
 
   return mapped
@@ -241,10 +248,6 @@ export async function initPipeline(): Promise<{ tts: boolean }> {
       console.log(`[Pipeline] Qwen3-TTS (:7860): ${ok ? "준비됨" : "시작 실패"}`)
     ).catch(() => {})
     console.log("[Pipeline] Qwen3-TTS: 백그라운드 시작 중...")
-  } else if (activeModel === "cosyvoice") {
-    isTTSAvailable().then(ok =>
-      console.log(`[Pipeline] CosyVoice2 (:8900): ${ok ? "준비됨" : "미실행"}`)
-    ).catch(() => {})
   }
 
   return { tts: true }

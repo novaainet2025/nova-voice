@@ -101,6 +101,7 @@ const api = {
   previewTTSVoice: (id: string, voice?: string) => ipcRenderer.invoke('tts:server-preview', id, voice),
   getSayVoices: () => ipcRenderer.invoke('tts:say-voices'),
   previewSayVoice: (voice: string, text?: string) => ipcRenderer.invoke('tts:say-preview', voice, text),
+  getAllTtsAdapters: () => ipcRenderer.invoke('tts:all-tts-adapters'),
 
   // Claude Terminal
   claudeSend: (text: string): Promise<string> => ipcRenderer.invoke('claude:send', text),

@@ -3,7 +3,7 @@ import { useAppStore } from '../../stores/appStore'
 import type { AppSettings } from '../../../shared/types'
 
 interface TTSServerStatus {
-  id: 'cosyvoice' | 'qwen3' | 'mlx' | 'mlx_ko' | 'mlx_en' | 'mlx_mix'
+  id: 'qwen3' | 'mlx' | 'mlx_ko' | 'mlx_en' | 'mlx_mix' | 'all_tts'
   name: string
   port: number
   running: boolean
@@ -91,8 +91,8 @@ const TTS_SERVER_INFO: Record<string, { label: string; badge: string; desc: stri
   mlx_ko:    { label: 'MLX-Qwen3',  badge: 'MPS', desc: '한국어 전용 · Qwen3-TTS 4bit · :8800 · ~0.9초', color: 'blue',    port: 8800 },
   mlx_en:    { label: 'MLX-Kokoro', badge: 'MPS', desc: '영어 전용 · Kokoro-82M 82MB 상주 · :8801 · ~0.9초', color: 'cyan', port: 8801 },
   mlx_mix:   { label: 'MLX-Spark',  badge: 'MPS', desc: '한영 혼용 전용 · Spark-TTS-0.5B · :8802 · ~2초', color: 'indigo',  port: 8802 },
-  cosyvoice: { label: 'CosyVoice2', badge: 'MPS', desc: 'Zero-Shot 음성 클로닝 · 최고 음질 · :8900 · ~6초', color: 'violet', port: 8900 },
   qwen3:     { label: 'Qwen3-TTS',  badge: '9화자', desc: '@@gentop :7860 · CustomVoice 9화자 · ryan/sohee/vivian 등 · ~1.5초', color: 'emerald', port: 7860 },
+  all_tts:   { label: 'all-tts Hub', badge: 'Stream', desc: '16 adapters · edge_tts streaming · :7861 · ~0.5초', color: 'amber', port: 7861 },
 }
 
 export function SettingsPanel() {
@@ -104,6 +104,7 @@ export function SettingsPanel() {
   const [serverBusy, setServerBusy] = useState<Record<string, 'starting' | 'stopping' | 'previewing' | null>>({})
   const [sayVoices, setSayVoices] = useState<{ id: string; name: string; desc: string }[]>([])
   const [sayPreviewBusy, setSayPreviewBusy] = useState(false)
+  const [allTtsAdapters, setAllTtsAdapters] = useState<any[]>([])
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isInitialLoad = useRef(true)
 
@@ -127,6 +128,10 @@ export function SettingsPanel() {
       try {
         const sv = await window.electronAPI.getSayVoices()
         setSayVoices(sv)
+      } catch { /* ignore */ }
+      try {
+        const res = await window.electronAPI.getAllTtsAdapters()
+        if (res?.adapters) setAllTtsAdapters(res.adapters)
       } catch { /* ignore */ }
     }
     loadSettings()
@@ -478,11 +483,11 @@ export function SettingsPanel() {
 
           {/* 나머지 모델 */}
           {[
-            { id: 'cosyvoice', label: 'CosyVoice2', badge: '고품질', desc: 'Zero-Shot 음성 클로닝 · 한영 혼재 네이티브 · ~6초', color: 'violet' },
             { id: 'qwen3',     label: 'Qwen3-TTS',  badge: '9화자',  desc: '@@gentop :7860 · 9화자 한국어 고품질 · ryan/sohee/aiden 등', color: 'emerald' },
             { id: 'say',       label: 'macOS say',  badge: 'System', desc: '즉시 응답 · 오프라인 · 기본 음성', color: 'gray' },
+            { id: 'all_tts',   label: 'all-tts Hub', badge: 'Stream', desc: '16 adapters · edge_tts 실시간 스트리밍 · :7861', color: 'amber' },
           ].map(m => {
-            const qwen3Running = m.id === 'qwen3' ? ttsServers.find(s => s.id === 'qwen3')?.running : undefined
+            const serverRunning = (m.id === 'qwen3' || m.id === 'all_tts') ? ttsServers.find(s => s.id === m.id)?.running : undefined
             return (
             <button
               key={m.id}
@@ -494,12 +499,13 @@ export function SettingsPanel() {
               }`}
             >
               <div className="flex items-center gap-2">
-                {qwen3Running !== undefined && (
-                  <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${qwen3Running ? 'bg-green-400' : 'bg-white/20'}`} />
+                {serverRunning !== undefined && (
+                  <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${serverRunning ? 'bg-green-400' : 'bg-white/20'}`} />
                 )}
                 <span className="font-medium text-sm">{m.label}</span>
                 <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
                   m.color === 'emerald' ? 'bg-emerald-500/20 text-emerald-300' :
+                  m.color === 'amber'   ? 'bg-amber-500/20 text-amber-300' :
                   m.color === 'violet'  ? 'bg-violet-500/20 text-violet-300' :
                   'bg-white/10 text-white/50'
                 }`}>{m.badge}</span>
@@ -508,6 +514,31 @@ export function SettingsPanel() {
             </button>
             )
           })}
+        </div>
+
+        {/* 청크 분해 모드 토글 */}
+        <div className="mt-4 flex items-start justify-between gap-4 cursor-pointer"
+          onClick={() => updateSetting('ttsChunkMode', !localSettings.ttsChunkMode)}
+        >
+          <div className="flex-1">
+            <span className="text-sm block">청크 분해 합성</span>
+            <p className="text-xs text-white/40 mt-0.5">
+              {localSettings.ttsChunkMode
+                ? '문단 단위로 분해 후 병렬 합성 — 첫 소리 빠름, 긴 텍스트에 유리'
+                : '텍스트 전체를 단일 요청으로 합성 — 끊김 없음, 짧은 텍스트에 유리'}
+            </p>
+          </div>
+          <div
+            className={`w-10 h-6 rounded-full transition-colors relative cursor-pointer flex-shrink-0 mt-0.5 ${
+              localSettings.ttsChunkMode ? 'bg-primary-500' : 'bg-white/20'
+            }`}
+          >
+            <div
+              className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-transform ${
+                localSettings.ttsChunkMode ? 'translate-x-5' : 'translate-x-1'
+              }`}
+            />
+          </div>
         </div>
       </section>
 
@@ -642,7 +673,6 @@ export function SettingsPanel() {
         <div className="space-y-2">
           {[
             { id: 'nco', name: 'NCO (Smart Router)', desc: '9개 AI 통합 오케스트레이터 — 자동 최적 AI 선택' },
-            { id: 'ollama', name: 'Ollama (Local)', desc: '로컬 LLM — 오프라인, 무료, 빠른 응답' },
             { id: 'claude', name: 'Claude CLI', desc: 'Claude Code — 최고 정확도' },
             { id: 'gemini', name: 'Gemini CLI', desc: 'Google Gemini — 빠르고 정확' }
           ].map((p) => (
@@ -662,6 +692,92 @@ export function SettingsPanel() {
         </div>
       </section>
 
+
+      {/* all-tts Hub 어댑터/음성 선택 */}
+      {localSettings.ttsModel === 'all_tts' && (
+        <section className="mb-6">
+          <h3 className="text-sm font-medium text-white/60 uppercase tracking-wide mb-3">
+            all-tts Hub 설정 <span className="text-[10px] text-white/30 ml-2">:7861 · {allTtsAdapters.filter(a => a.available).length} adapters</span>
+          </h3>
+          <div className="space-y-3">
+            {/* 어댑터 선택 — API에서 동적 로드 */}
+            <div>
+              <label className="text-xs text-white/40 block mb-1">어댑터</label>
+              <div className="space-y-1.5">
+                {(allTtsAdapters.length > 0 ? allTtsAdapters : [
+                  { name: 'edge_tts', available: true, supports_streaming: true, description: 'edge-tts streaming', serverless: true, speakers: [] }
+                ]).filter(a => a.available).map(a => (
+                  <button
+                    key={a.name}
+                    onClick={() => {
+                      updateSetting('allTtsAdapter', a.name)
+                      // 어댑터 전환 시 첫 번째 스피커 자동 선택
+                      const firstSpeaker = a.speakers?.[0] || ''
+                      updateSetting('allTtsVoice', firstSpeaker)
+                    }}
+                    className={`w-full text-left rounded-lg px-3 py-2 transition-all border text-sm ${
+                      (localSettings.allTtsAdapter || 'edge_tts') === a.name
+                        ? 'border-amber-400/60 bg-amber-400/10'
+                        : 'border-transparent glass-light hover:border-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${a.available ? 'bg-green-400' : 'bg-white/20'}`} />
+                      <span className="font-mono text-xs">{a.name}</span>
+                      {a.supports_streaming && (
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-300">Stream</span>
+                      )}
+                      {a.serverless && (
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-green-500/20 text-green-300">Serverless</span>
+                      )}
+                      {a.supports_clone && (
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-purple-500/20 text-purple-300">Clone</span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-white/30 mt-0.5 truncate">{a.description}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* 음성 선택 — 어댑터별 스피커 목록 */}
+            <div>
+              <label className="text-xs text-white/40 block mb-1">음성</label>
+              {(() => {
+                const currentAdapter = allTtsAdapters.find(a => a.name === (localSettings.allTtsAdapter || 'edge_tts'))
+                const speakers = currentAdapter?.speakers || []
+                if (speakers.length > 0) {
+                  return (
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {speakers.map((s: string) => (
+                        <button
+                          key={s}
+                          onClick={() => updateSetting('allTtsVoice', s)}
+                          className={`text-left rounded-lg px-2.5 py-1.5 text-xs font-mono transition-all border ${
+                            (localSettings.allTtsVoice || '') === s
+                              ? 'border-amber-400/60 bg-amber-400/10 text-amber-200'
+                              : 'border-transparent glass-light hover:border-white/10 text-white/50'
+                          }`}
+                        >
+                          {s.replace(/Neural$/, '').replace(/^ko-KR-|^en-US-|^ja-JP-/, '')}
+                        </button>
+                      ))}
+                    </div>
+                  )
+                }
+                return (
+                  <input
+                    type="text"
+                    value={localSettings.allTtsVoice || ''}
+                    onChange={(e) => updateSetting('allTtsVoice', e.target.value)}
+                    placeholder="음성 ID (비워두면 기본값)"
+                    className="w-full glass-light rounded-lg px-3 py-2 text-sm bg-transparent border border-white/10 focus:border-primary-400 outline-none placeholder-white/20"
+                  />
+                )
+              })()}
+            </div>
+          </div>
+        </section>
+      )}
       {/* TTS Servers */}
       <section className="mb-6">
         <div className="flex items-center justify-between mb-3">
@@ -758,9 +874,9 @@ export function SettingsPanel() {
           </div>
         </div>
 
-        {/* ── 나머지 서버 (CosyVoice2, Qwen3-TTS) ── */}
+        {/* ── 나머지 서버 (Qwen3-TTS + all-tts Hub) ── */}
         <div className="space-y-3">
-          {(['cosyvoice', 'qwen3'] as const).map((id) => {
+          {(['qwen3', 'all_tts'] as const).map((id) => {
             const info = TTS_SERVER_INFO[id]
             const status = ttsServers.find(s => s.id === id)
             const busy = serverBusy[id]
@@ -779,7 +895,6 @@ export function SettingsPanel() {
                     }`} />
                     <span className="font-medium text-sm">{info.label}</span>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
-                      id === 'cosyvoice' ? 'bg-violet-500/20 text-violet-300' :
                       'bg-emerald-500/20 text-emerald-300'
                     }`}>{info.badge}</span>
                     {running && status?.latencyMs && (

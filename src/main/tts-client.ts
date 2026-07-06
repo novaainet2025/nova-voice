@@ -13,8 +13,8 @@ let currentPlayback: ChildProcess | null = null
 // Track server processes for start/stop management
 const serverProcesses: Map<string, ChildProcess> = new Map()
 
-const COSYVOICE_API  = 'http://localhost:8900'
 const TTS_API        = 'http://localhost:7860'
+const ALL_TTS_API    = 'http://localhost:7861'
 
 // ── 3-Server MLX 아키텍처 (모델 교체 제로 = cold start 제거) ──────────────
 // 각 서버는 단일 모델만 상주 → 모델 스왑 없음 → 지연 0.1초 이하
@@ -94,7 +94,174 @@ export function setMLXVoice(voice: string): void {
 export function getMLXVoice(): string {
   return mlxTTSVoice
 }
+
+// ── all-tts Hub 상태 ──────────────────────────────────────────────────────
+let _allTtsAdapter = 'edge_tts'
+let _allTtsVoice = 'ko-KR-SunHiNeural'
+let _allTtsRequest: http.ClientRequest | null = null
+
+export function setAllTtsAdapter(adapter: string) {
+  _allTtsAdapter = adapter
+  console.log(`[all-tts] Adapter set to: ${adapter}`)
+}
+
+export function setAllTtsVoice(voice: string) {
+  _allTtsVoice = voice
+  console.log(`[all-tts] Voice set to: ${voice}`)
+}
 const TTS_PROJECT = '/Users/nova-ai/project/@@gentop/lib/tts'
+
+// ── all-tts Hub health check ──────────────────────────────────────────────
+export async function isAllTTSAvailable(): Promise<boolean> {
+  try {
+    const data = await httpRequest(`${ALL_TTS_API}/health`, { method: 'GET', timeout: 2000 })
+    const info = JSON.parse(data.toString())
+    return info.status === 'ok'
+  } catch {
+    return false
+  }
+}
+
+// ── all-tts SSE 실시간 스트리밍 재생 ──────────────────────────────────────
+// edge_tts 등 supports_streaming=True 어댑터: 청크 도착 즉시 ffplay로 파이프 재생
+// ffplay 없으면 버퍼 모드로 자동 폴백
+async function speakViaAllTTS(text: string, adapter: string, voice: string, speed: number): Promise<void> {
+  const params = new URLSearchParams({ text, adapter, speed: String(speed), format: 'mp3' })
+  if (voice) {
+    params.set('voice', voice)
+    params.set('speaker', voice)
+  }
+  const url = `${ALL_TTS_API}/api/stream?${params.toString()}`
+  console.log(`[TTS-stream] URL: ${url.substring(0, 120)}...`)
+  const streamStart = Date.now()
+
+  return new Promise<void>((resolve, reject) => {
+    let currentEvent = ''
+    let chunkCount = 0
+    let totalBytes = 0
+    let player: ChildProcess | null = null
+    let playerReady = false
+    let playerError = false
+    // 폴백용 버퍼 (ffplay 실패 시)
+    const fallbackBuffers: Buffer[] = []
+
+    const req = http.get(url, { timeout: 30000 }, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`all-tts stream failed: ${res.statusCode}`))
+        return
+      }
+
+      // ffplay 스트리밍 플레이어 시작 — stdin으로 MP3 파이프
+      try {
+        player = spawn('ffplay', ['-nodisp', '-autoexit', '-loglevel', 'error', '-f', 'mp3', '-i', 'pipe:0'])
+        playerReady = true
+        currentPlayback = player
+
+        player.on('error', (e: Error) => {
+          // ffplay 없음 → 폴백 모드
+          console.warn('[all-tts] ffplay 사용 불가, 버퍼 모드 폴백:', e.message)
+          playerReady = false
+          playerError = true
+          player = null
+          currentPlayback = null
+        })
+
+        player.on('close', (code) => {
+          currentPlayback = null
+          _allTtsRequest = null
+          if (!playerError) {
+            if (code === 0 || code === null) {
+              resolve()
+            } else {
+              reject(new Error(`ffplay exited with code ${code}`))
+            }
+          }
+        })
+      } catch {
+        playerReady = false
+        playerError = true
+      }
+
+      let partial = ''
+      res.on('data', (chunk: Buffer) => {
+        partial += chunk.toString()
+        const frames = partial.split('\n\n')
+        partial = frames.pop() || ''
+
+        for (const frame of frames) {
+          const lines = frame.split('\n')
+          for (const line of lines) {
+            if (line.startsWith('event: ')) currentEvent = line.slice(7).trim()
+            else if (line.startsWith('data: ') && currentEvent === 'audio') {
+              const b64 = line.slice(6).trim()
+              if (!b64) continue
+              const audioBuf = Buffer.from(b64, 'base64')
+              chunkCount++
+              totalBytes += audioBuf.length
+              if (chunkCount === 1) console.log(`[TTS-stream] 첫 오디오 청크 수신 (${Date.now() - streamStart}ms)`)
+
+              if (playerReady && player && player.stdin && !player.stdin.destroyed) {
+                // 실시간 파이프: 도착 즉시 ffplay로 전송
+                player.stdin.write(audioBuf)
+              } else {
+                // 폴백: 버퍼에 모음
+                fallbackBuffers.push(audioBuf)
+              }
+            }
+          }
+        }
+      })
+
+      res.on('end', async () => {
+        _allTtsRequest = null
+
+        if (playerReady && player && player.stdin && !player.stdin.destroyed) {
+          // 스트리밍 모드: stdin 닫으면 ffplay가 남은 버퍼 재생 후 종료 → close 이벤트에서 resolve
+          player.stdin.end()
+          console.log(`[TTS-stream] 스트리밍 완료: ${chunkCount}청크, ${(totalBytes/1024).toFixed(1)}KB, ${Date.now() - streamStart}ms`)
+          return  // resolve는 player.on('close')에서 처리
+        }
+
+        // 폴백 모드: 버퍼 모아서 파일로 재생
+        if (fallbackBuffers.length === 0 && chunkCount === 0) {
+          reject(new Error('all-tts: no audio chunks received'))
+          return
+        }
+        try {
+          const audio = Buffer.concat(fallbackBuffers)
+          const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
+          fs.mkdirSync(cacheDir, { recursive: true })
+          const mp3Path = path.join(cacheDir, `alltts_${Date.now()}.mp3`)
+          fs.writeFileSync(mp3Path, audio)
+          console.log(`[TTS-stream] 폴백 모드: ${chunkCount}청크, ${(totalBytes/1024).toFixed(1)}KB → 파일 재생`)
+          await playAudio(mp3Path)
+          resolve()
+        } catch (e) {
+          reject(e)
+        }
+      })
+
+      res.on('error', (e: Error) => {
+        _allTtsRequest = null
+        if (player && !player.killed) player.kill('SIGTERM')
+        reject(e)
+      })
+    })
+
+    req.on('error', (e: Error) => {
+      _allTtsRequest = null
+      if (player && !player.killed) player.kill('SIGTERM')
+      reject(e)
+    })
+    req.on('timeout', () => {
+      req.destroy()
+      _allTtsRequest = null
+      if (player && !player.killed) player.kill('SIGTERM')
+      reject(new Error('all-tts: timeout'))
+    })
+    _allTtsRequest = req
+  })
+}
 
 // HTTP helper
 function httpRequest(url: string, opts: { method: string; body?: string; timeout?: number }): Promise<Buffer> {
@@ -126,41 +293,6 @@ function httpRequest(url: string, opts: { method: string; body?: string; timeout
   })
 }
 
-// Check if CosyVoice2 server is running (best quality, MPS GPU)
-export async function isCosyVoiceAvailable(): Promise<boolean> {
-  try {
-    const data = await httpRequest(`${COSYVOICE_API}/health`, { method: 'GET', timeout: 2000 })
-    const result = JSON.parse(data.toString())
-    return result.status === 'ok'
-  } catch {
-    return false
-  }
-}
-
-// Synthesize via CosyVoice2 (MPS GPU accelerated, best Korean quality)
-export async function synthesizeCosyVoice(text: string): Promise<string> {
-  const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
-  if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
-
-  const id = `cv2-${Date.now()}`
-  const audioPath = path.join(cacheDir, `${id}.wav`)
-
-  console.log(`[CosyVoice2] Synthesizing: "${text.substring(0, 50)}..."`)
-  const start = Date.now()
-
-  const body = JSON.stringify({ text, lang: 'ko' })
-  const audioData = await httpRequest(`${COSYVOICE_API}/api/tts`, {
-    method: 'POST',
-    body,
-    timeout: 60000  // CosyVoice2 warm 합성 ~5-8s
-  })
-
-  fs.writeFileSync(audioPath, audioData)
-  const elapsed = Date.now() - start
-  console.log(`[CosyVoice2] Done in ${elapsed}ms (${(audioData.length / 1024).toFixed(0)}KB)`)
-
-  return audioPath
-}
 
 
 // Check if legacy TTS server is running
@@ -290,6 +422,8 @@ async function _drainPlaylist(): Promise<void> {
 
 // Stop current playback AND clear queued playlist
 export function stopPlayback(): void {
+  // all-tts 요청 취소
+  if (_allTtsRequest) { try { _allTtsRequest.destroy() } catch {} _allTtsRequest = null }
   // 큐 전체 취소 — 남은 항목들 즉시 resolve (무음 처리)
   for (const item of _audioPlaylist) item.resolve()
   _audioPlaylist = []
@@ -373,62 +507,83 @@ export async function speak(text: string, options?: Partial<TTSOptions>): Promis
 // 텍스트를 짧은 청크로 분리 → chunk[i] 재생 중에 chunk[i+1] 동시 합성
 // 효과: 첫 소리 대기 1.5-2s (기존 4-8s), 전체 시간 30-50% 단축
 
-function splitForQwen3Streaming(text: string, maxLen = 250): string[] {
-  // 1단계: 강한 문장 경계에서 분리 (.!?。！？ 및 줄바꿈)
-  // maxLen 250 → 청크 수 대폭 감소 → afplay 재시작 횟수 감소 → 연속 발화 자연스러움
-  const raw = text
-    .split(/(?<=[.!?。！？다요죠])\s+|(?<=\n)/)
-    .map(s => s.trim())
-    .filter(s => s.length > 0)
+function splitForQwen3Streaming(text: string, maxLen = 400): string[] {
+  // 청크 모드 비활성화 시 분해 없이 전체 텍스트를 단일 청크로 반환
+  if (!_ttsChunkEnabled) return [text]
+
+  // 1단계: 문단 우선 분리 (이중 줄바꿈 = 실제 문단 경계)
+  // "다요죠" 기반 분리 제거 — 한국어 조사/어미가 아닌 단어 중간에도 출현해 오분리 발생
+  // maxLen 250→400: 청크 수 감소 → 문단 내 불필요한 경계 제거
+  const paragraphs = text.split(/\n{2,}/).map(s => s.trim()).filter(s => s.length > 0)
 
   const chunks: string[] = []
 
-  for (const sentence of raw) {
-    if (sentence.length <= maxLen) {
-      chunks.push(sentence)
-    } else {
-      // 2단계: 쉼표·한국어 접속부사 앞에서 추가 분리
-      const parts = sentence
-        .split(/(?<=[,，、])\s*|(?=그리고\s|그래서\s|하지만\s|또한\s|따라서\s|그런데\s|즉\s|그러나\s|그렇지만\s|왜냐하면\s|그래도\s|반면\s|더욱이\s)/u)
-        .map(s => s.trim())
-        .filter(s => s.length > 0)
+  for (const para of paragraphs) {
+    if (para.length <= maxLen) {
+      chunks.push(para)
+      continue
+    }
 
-      let current = ''
-      for (const part of parts) {
-        if (current.length + part.length <= maxLen) {
-          current += (current ? ' ' : '') + part
+    // 2단계: 문장 경계 (.!?。！？ + 공백, 또는 단일 줄바꿈)
+    // 한국어 어미(다/요/죠)는 제외 — 단어 내에도 등장해 오분리 위험
+    const sentences = para
+      .split(/(?<=[.!?。！？])\s+|(?<=\n)/)
+      .map(s => s.trim())
+      .filter(s => s.length > 0)
+
+    let current = ''
+    for (const sent of sentences) {
+      if (current.length + (current ? 1 : 0) + sent.length <= maxLen) {
+        current += (current ? ' ' : '') + sent
+      } else {
+        if (current) chunks.push(current)
+        if (sent.length <= maxLen) {
+          current = sent
         } else {
-          if (current) chunks.push(current)
-          // 단일 part가 maxLen 초과 시 어절(공백) 단위 분리
-          if (part.length > maxLen) {
-            const words = part.split(/\s+/)
-            let sub = ''
-            for (const w of words) {
-              if (sub.length + w.length + 1 <= maxLen) {
-                sub += (sub ? ' ' : '') + w
+          // 3단계: 쉼표·접속부사 기준 추가 분리 (문장이 maxLen 초과할 때만)
+          const parts = sent
+            .split(/(?<=[,，、])\s*|(?=그리고\s|그래서\s|하지만\s|또한\s|따라서\s|그런데\s|즉\s|그러나\s|그렇지만\s|왜냐하면\s|그래도\s|반면\s|더욱이\s)/u)
+            .map(s => s.trim())
+            .filter(s => s.length > 0)
+
+          let sub = ''
+          for (const p of parts) {
+            if (sub.length + (sub ? 1 : 0) + p.length <= maxLen) {
+              sub += (sub ? ' ' : '') + p
+            } else {
+              if (sub) chunks.push(sub)
+              // 단일 part가 maxLen 초과 시 어절(공백) 단위 분리 (최후 수단)
+              if (p.length > maxLen) {
+                const words = p.split(/\s+/)
+                let wsub = ''
+                for (const w of words) {
+                  if (wsub.length + (wsub ? 1 : 0) + w.length <= maxLen) {
+                    wsub += (wsub ? ' ' : '') + w
+                  } else {
+                    if (wsub) chunks.push(wsub)
+                    wsub = w.length > maxLen ? w.slice(0, maxLen) : w
+                  }
+                }
+                if (wsub) chunks.push(wsub)
+                sub = ''
               } else {
-                if (sub) chunks.push(sub)
-                sub = w.length > maxLen ? w.slice(0, maxLen) : w
+                sub = p
               }
             }
-            if (sub) chunks.push(sub)
-            current = ''
-          } else {
-            current = part
           }
+          if (sub) chunks.push(sub)
+          current = ''
         }
       }
-      if (current) chunks.push(current)
     }
+    if (current) chunks.push(current)
   }
 
-  // 3단계: 짧은 청크를 앞에 합쳐 afplay 재시작 횟수 최소화 (25자 이하 → 병합)
-  // 이전: 8자 이하만 병합 → 단어 단위 재시작 갭 발생
-  // 수정: 25자 이하 청크는 앞에 병합 → 문장 단위 연속 재생
+  // 4단계: 짧은 청크(30자 이하)는 앞 청크에 병합 → afplay 재시작 횟수 최소화
   const merged: string[] = []
   for (const chunk of chunks) {
     const prev = merged[merged.length - 1]
-    if (prev && chunk.length <= 25 && prev.length + chunk.length <= maxLen + 30) {
+    if (prev && chunk.length <= 30 && prev.length + chunk.length + 1 <= maxLen) {
       merged[merged.length - 1] = prev + ' ' + chunk
     } else {
       merged.push(chunk)
@@ -466,9 +621,9 @@ export async function speakQwen3Chunked(text: string, options?: Partial<TTSOptio
     }
   }
 
-  // enableMerge=true: :7860도 24kHz/16bit/mono 일정 출력 → WAV 병합 → afplay 단 1회
-  // 이전: enableMerge=false → 청크마다 별도 afplay → 단어 단위 끊김 버그
-  await runChunkedPipeline(chunks, cacheDir, synthFn, true)
+  // enableMerge=false: Qwen3 단일 스레드 서버 — 한 번에 1개 요청 (타임아웃 방지)
+  // 1-ahead: 합성 완료 즉시 다음 합성 시작 + 현재 재생 병렬
+  await runChunkedPipeline(chunks, cacheDir, synthFn, false)
 }
 
 // ─── MLX-KO 청크 스트리밍 (:8800 Qwen3-TTS 전용) ─────────────────────────────
@@ -741,8 +896,12 @@ function toNativeKorean(n: number): string {
  * 한국어 컨텍스트의 숫자/날짜를 한국어 발음으로 정규화
  * "2026년 5월 50%" → "이천이십육년 오월 오십 퍼센트"
  */
+const TECH_UNIT_WORDS = /(tokens?|bytes?|chars?|lines?|files?|items?|steps?|tasks?|errors?|warnings?|requests?|responses?|chunks?|layers?|epochs?|samples?|batches?|threads?|workers?|cores?|nodes?|pods?|replicas?|instances?|records?|rows?|columns?|fields?|entries?|events?|messages?|packets?|frames?|blocks?|pages?|segments?|seconds?|minutes?|hours?|days?|weeks?|months?|years?)/i
+
 export function normalizeKoreanNumbers(text: string): string {
-  if (!/[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(text)) return text  // 한국어 없으면 패스
+  const hasKorean = /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(text)
+  const hasTechUnit = TECH_UNIT_WORDS.test(text)
+  if (!hasKorean && !hasTechUnit) return text
 
   // 고유어(순우리말) 시 단위 — 시간에는 한국 고유어 사용 (열두시, 두시, 아홉시)
   const NATIVE_HOUR = ['열두', '한', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열', '열한', '열두']
@@ -1224,8 +1383,46 @@ const TTS_BRAND_KO: [RegExp, string][] = [
   [/\bPerplexity\b/g, '퍼플렉시티'],
   [/\bHugging\s*Face\b/gi, '허깅페이스'],
   [/\bKokoro\b/g, '코코로'],
-  [/\bCosyVoice\b/gi, '코지보이스'],
 ]
+
+// 영문 알파벳 낱자 → 한국어 발음 (미등록 약어 폴백용)
+const LETTER_KO: Record<string, string> = {
+  A:'에이',B:'비',C:'씨',D:'디',E:'이',F:'에프',G:'지',H:'에이치',I:'아이',J:'제이',
+  K:'케이',L:'엘',M:'엠',N:'엔',O:'오',P:'피',Q:'큐',R:'알',S:'에스',T:'티',
+  U:'유',V:'브이',W:'더블유',X:'엑스',Y:'와이',Z:'지',
+}
+
+// 소문자 기술 영단어 → 한국어 (한국어 컨텍스트에서 자연스러운 발음)
+const TTS_COMMON_WORDS: Record<string, string> = {
+  // 서버/네트워크
+  server:'서버', client:'클라이언트', proxy:'프록시', gateway:'게이트웨이', router:'라우터', broker:'브로커', cluster:'클러스터', cache:'캐시', queue:'큐', buffer:'버퍼', socket:'소켓', endpoint:'엔드포인트', middleware:'미들웨어', firewall:'방화벽', upstream:'업스트림', downstream:'다운스트림',
+  // 에러/상태
+  timeout:'타임아웃', error:'에러', warning:'경고', exception:'예외', failure:'실패', crash:'크래시', panic:'패닉', retry:'재시도', fallback:'폴백', recovery:'복구', rollback:'롤백',
+  // 데이터/처리
+  token:'토큰', tokens:'토큰', chunk:'청크', chunks:'청크', batch:'배치', stream:'스트림', pipeline:'파이프라인', payload:'페이로드', schema:'스키마', query:'쿼리', index:'인덱스', cursor:'커서', migration:'마이그레이션', transaction:'트랜잭션', checkpoint:'체크포인트', snapshot:'스냅샷', shard:'샤드', partition:'파티션',
+  // 코드/빌드
+  config:'설정', configuration:'설정', dependency:'의존성', package:'패키지', module:'모듈', plugin:'플러그인', library:'라이브러리', framework:'프레임워크', runtime:'런타임', compiler:'컴파일러', bundler:'번들러', template:'템플릿',
+  // AI/ML
+  model:'모델', inference:'인퍼런스', embedding:'임베딩', vector:'벡터', attention:'어텐션', layer:'레이어', epoch:'에폭', gradient:'그래디언트', tokenizer:'토크나이저', prompt:'프롬프트', context:'컨텍스트', completion:'컴플리션',
+  // 프로세스/시스템
+  process:'프로세스', thread:'스레드', worker:'워커', daemon:'데몬', signal:'시그널', hook:'훅', event:'이벤트', listener:'리스너', handler:'핸들러', scheduler:'스케줄러',
+  // 인증/보안
+  session:'세션', credential:'자격증명', permission:'권한', scope:'스코프', policy:'정책', role:'역할', claim:'클레임',
+  // 테스트/QA
+  coverage:'커버리지', fixture:'픽스처', mock:'목', stub:'스텁', assertion:'단언',
+  // 버전/배포
+  release:'릴리즈', hotfix:'핫픽스', canary:'카나리', staging:'스테이징', production:'운영환경',
+  // 코드 개념
+  feature:'기능', option:'옵션', parameter:'파라미터', argument:'인자', variable:'변수', constant:'상수', method:'메서드', interface:'인터페이스', instance:'인스턴스', singleton:'싱글턴', factory:'팩토리', state:'상태', store:'스토어', action:'액션', reducer:'리듀서',
+  // UI/컴포넌트
+  component:'컴포넌트', props:'프롭스', render:'렌더', layout:'레이아웃',
+  // 상태 표현
+  loading:'로딩', pending:'대기중', success:'성공', done:'완료', ready:'준비됨',
+  // 시스템 자원
+  memory:'메모리', storage:'스토리지', disk:'디스크', network:'네트워크', port:'포트', host:'호스트', domain:'도메인',
+  // 포맷/보안
+  format:'포맷', encoding:'인코딩', compression:'압축', encryption:'암호화', hash:'해시', signature:'서명', backup:'백업',
+}
 
 export function sanitizeTTSText(raw: string): string {
   let t = raw
@@ -1393,8 +1590,13 @@ export function sanitizeTTSText(raw: string): string {
     t = t.replace(pattern, ko)
   }
 
-  // 18b. 영문 대문자 약어 → 한국어 발음 (문장 중 자연스럽게 읽히도록)
-  t = t.replace(/\b([A-Z]{2,6})\b/g, (m) => TTS_ABBR_MAP[m] || m)
+  // 18b. 영문 대문자 약어 → 한국어 발음 + 미등록 약어 폴백 (글자별 발음)
+  t = t.replace(/\b([A-Z]{2,6})\b/g, (m) => TTS_ABBR_MAP[m] || m.split('').map(c => LETTER_KO[c] || c).join(''))
+
+  // 18c-ext. 소문자 기술 영단어 → 한국어 (한국어 컨텍스트에서만)
+  if (/[가-힣]/.test(t)) {
+    t = t.replace(/\b([a-z][a-z0-9]{2,})\b/g, (m) => TTS_COMMON_WORDS[m.toLowerCase()] || m)
+  }
 
   // 18c. 6-15자 전대문자 기술 식별자 제거 (Node.js 오류 코드: ENOENT/EACCES/ECONNREFUSED 등)
   // ABBR_MAP에 없는 6자+ 전대문자는 이미 Rule 18b에서 처리됐거나 제거 대상
@@ -1551,55 +1753,158 @@ async function runChunkedPipeline(
     return
   }
 
-  // 모든 청크 합성 즉시 시작
-  const synthPromises = chunks.map(c => synthFn(c).catch(() => null))
-
   if (enableMerge) {
-    // enableMerge=true: 전체 합성 완료 후 단일 WAV 병합 → afplay 1회 → 갭 없음
-    // (1-ahead + isReady 체크 방식은 단일 스레드 서버에서 합성>재생 시 갭 발생)
-    const paths = await Promise.all(synthPromises)
+    // enableMerge=true (MLX 병렬 서버): 모든 청크 동시 합성 → 전체 완료 → WAV 병합 → afplay 1회
+    // MLX는 병렬 처리 가능 → 총 합성 시간 ≈ max(청크별 합성 시간) ≈ ~5s → 갭 완전 없음
+    // ⚠️ Qwen3(단일 스레드)에는 사용 금지 — 병렬 요청 시 큐 대기 N×20s → 90s 타임아웃
+    const paths = await Promise.all(chunks.map(c => synthFn(c).catch(() => null)))
     const validPaths = paths.filter((p): p is string => p !== null)
     if (validPaths.length === 0) return
     if (validPaths.length === 1) {
       await playAudio(validPaths[0])
+      try { fs.unlinkSync(validPaths[0]) } catch {}
       return
     }
     try {
       const merged = mergeWAVBuffers(validPaths.map(p => fs.readFileSync(p)))
       const mergedPath = path.join(cacheDir, `merged-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
       fs.writeFileSync(mergedPath, merged)
+      // 청크 파일 정리 (병합 완료 후)
+      for (const p of validPaths) { try { fs.unlinkSync(p) } catch {} }
       await playAudio(mergedPath)
+      try { fs.unlinkSync(mergedPath) } catch {}
       return
     } catch (e) {
       console.warn('[TTS-pipeline] WAV 병합 실패, 순차 재생 폴백:', (e as Error).message)
       for (const p of validPaths) {
-        try { await playAudio(p) } catch (err) {
+        try {
+          await playAudio(p)
+          try { fs.unlinkSync(p) } catch {}
+        } catch (err) {
           console.warn('[TTS-pipeline] 재생 실패 건너뜀:', (err as Error).message)
         }
       }
     }
   } else {
-    // enableMerge=false: 1-ahead 파이프라인 — chunk[i] 재생 중 chunk[i+1] 합성 병행
-    // _audioPlaylist 직렬화로 순서 보장, 합성 < 재생이면 갭 없음
-    const peekables = synthPromises.map(p => createPeekable(p))
-    const playPromises: Promise<void>[] = []
-    for (const pk of peekables) {
-      const wavPath = await pk.promise
-      if (!wavPath) continue
-      playPromises.push(
-        playAudio(wavPath).catch((e) => {
-          console.warn('[TTS-pipeline] 재생 실패 건너뜀:', (e as Error).message)
-        })
-      )
+    // enableMerge=false (Qwen3 단일 스레드): 순차 합성 → WAV 병합 → afplay 1회
+    //
+    // 기존 1-ahead 방식의 문제:
+    //   합성(~20s) > 재생(~8s) → chunk 사이 12s+ 갭 발생 (unrecoverable by design)
+    //
+    // 새 전략:
+    //   ≤3 청크 → 전체 순차 합성 후 병합 → 단일 afplay (갭 완전 제거)
+    //   >3 청크 → 1-ahead 유지 (지연 증가 vs 갭 트레이드오프)
+    //
+    // 왜 총 시간이 줄어드는가?
+    //   기존: 20s(synth0) + 8s(play0) + 12s(wait) + 20s(synth1) + ...
+    //   신규: 20s(synth0) + 20s(synth1) + play_merged → 합성 시간 겹침 없지만 afplay 1회
+    //   순차 합성이어서 synth1은 어차피 synth0 끝나야 시작 → 총 합성 시간 동일, play 1회
+    if (chunks.length <= 5) {
+      // 소규모 청크(≤5): 전체 합성 → 병합 → 단일 재생 (갭 완전 제거)
+      const allPaths: (string | null)[] = []
+      for (const chunk of chunks) {
+        allPaths.push(await synthFn(chunk))
+      }
+      const validPaths = allPaths.filter((p): p is string => p !== null)
+      if (validPaths.length === 0) return
+      if (validPaths.length === 1) {
+        await playAudio(validPaths[0])
+        try { fs.unlinkSync(validPaths[0]) } catch {}
+        return
+      }
+      try {
+        const merged = mergeWAVBuffers(validPaths.map(p => fs.readFileSync(p)))
+        const mergedPath = path.join(cacheDir, `merged-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
+        fs.writeFileSync(mergedPath, merged)
+        // 청크 파일 정리 (병합 완료 후)
+        for (const p of validPaths) { try { fs.unlinkSync(p) } catch {} }
+        await playAudio(mergedPath)
+        try { fs.unlinkSync(mergedPath) } catch {}
+      } catch (e) {
+        console.warn('[TTS-pipeline] Qwen3 WAV 병합 실패, 순차 재생 폴백:', (e as Error).message)
+        for (const p of validPaths) {
+          try {
+            await playAudio(p)
+            try { fs.unlinkSync(p) } catch {}
+          } catch (err) {
+            console.warn('[TTS-pipeline] 재생 실패 건너뜀:', (err as Error).message)
+          }
+        }
+      }
+    } else {
+      // 대규모 청크(>5): 1-ahead 유지 (첫 소리 지연 최소화 우선)
+      // 합성(~20s) > 재생(~8s)이라 갭이 생기지만 전체 대기 시간보다 낫다
+      // 순차 await으로 재생 순서 보장 (Promise.all은 순서 미보장)
+      let nextSynth: Promise<string | null> = synthFn(chunks[0]).catch(() => null)
+
+      for (let i = 0; i < chunks.length; i++) {
+        const wavPath = await nextSynth
+        if (i + 1 < chunks.length) {
+          nextSynth = synthFn(chunks[i + 1]).catch(() => null)
+        }
+        if (wavPath) {
+          try {
+            await playAudio(wavPath)
+            try { fs.unlinkSync(wavPath) } catch {}
+          } catch (e) {
+            console.warn('[TTS-pipeline] 재생 실패 건너뜀:', (e as Error).message)
+          }
+        }
+      }
     }
-    if (playPromises.length > 0) await Promise.all(playPromises)
   }
 }
 
 // WAV 병합 (24000Hz / Mono / 16-bit 고정 — 두 모델 모두 동일)
-function mergeWAVBuffers(buffers: Buffer[]): Buffer {
+// crossfadeMs: 청크 경계에서 선형 크로스페이드 (클릭/팝 아티팩트 방지)
+//   fade-out: 이전 청크 마지막 N 샘플 1→0 감쇠
+//   fade-in:  다음 청크 첫 N 샘플 0→1 증폭
+//   (오버랩 없음 — PCM 길이 유지, 경계 클릭만 제거)
+function mergeWAVBuffers(buffers: Buffer[], crossfadeMs = 12): Buffer {
   const PCM_HEADER_SIZE = 44
-  const totalPcm = buffers.reduce((acc, b) => acc + b.length - PCM_HEADER_SIZE, 0)
+  const SAMPLE_RATE = 24000
+  const BPS = 2  // 16-bit LE
+
+  // 샘플레이트 불일치 감지 (바이트 24-27)
+  const firstRate = buffers[0].readUInt32LE(24)
+  for (let i = 1; i < buffers.length; i++) {
+    const rate = buffers[i].readUInt32LE(24)
+    if (rate !== firstRate) {
+      console.warn(`[TTS-merge] 샘플레이트 불일치: buf[0]=${firstRate}Hz vs buf[${i}]=${rate}Hz — 병합 결과가 왜곡될 수 있음`)
+    }
+  }
+
+  const crossSamples = Math.floor(SAMPLE_RATE * crossfadeMs / 1000)  // 5ms = 120 samples
+
+  // PCM 데이터를 청크별로 추출하고 경계에 크로스페이드 적용
+  const pcmChunks: Buffer[] = buffers.map((buf, idx) => {
+    const pcm = Buffer.from(buf.slice(PCM_HEADER_SIZE))  // copy for mutation
+
+    if (idx > 0 && crossSamples > 0) {
+      // fade-in: 첫 N 샘플 0→1 (이전 청크의 클릭 아티팩트 방지)
+      const fadeIn = Math.min(crossSamples, Math.floor(pcm.length / BPS))
+      for (let s = 0; s < fadeIn; s++) {
+        const gain = s / fadeIn
+        const sample = pcm.readInt16LE(s * BPS)
+        pcm.writeInt16LE(Math.round(sample * gain), s * BPS)
+      }
+    }
+
+    if (idx < buffers.length - 1 && crossSamples > 0) {
+      // fade-out: 마지막 N 샘플 1→0 (다음 청크 시작과의 클릭 방지)
+      const totalSamples = Math.floor(pcm.length / BPS)
+      const fadeStart = Math.max(0, totalSamples - crossSamples)
+      for (let s = fadeStart; s < totalSamples; s++) {
+        const gain = (totalSamples - s) / crossSamples
+        const sample = pcm.readInt16LE(s * BPS)
+        pcm.writeInt16LE(Math.round(sample * gain), s * BPS)
+      }
+    }
+
+    return pcm
+  })
+
+  const totalPcm = pcmChunks.reduce((acc, c) => acc + c.length, 0)
   const result = Buffer.alloc(PCM_HEADER_SIZE + totalPcm)
 
   // Copy header from first buffer
@@ -1610,11 +1915,11 @@ function mergeWAVBuffers(buffers: Buffer[]): Buffer {
   // Fix data chunk size (bytes 40-43)
   result.writeUInt32LE(totalPcm, 40)
 
-  // Append PCM data from all buffers
+  // Append crossfaded PCM data
   let offset = PCM_HEADER_SIZE
-  for (const buf of buffers) {
-    buf.copy(result, offset, PCM_HEADER_SIZE)
-    offset += buf.length - PCM_HEADER_SIZE
+  for (const pcm of pcmChunks) {
+    pcm.copy(result, offset)
+    offset += pcm.length
   }
 
   return result
@@ -1707,9 +2012,9 @@ export async function synthesizeMLX(text: string): Promise<string> {
 }
 
 // 현재 선택된 TTS 모델 (설정에서 ipc.ts가 주입)
-let _ttsModel: string = 'qwen3'
+let _ttsModel: string = 'all_tts'
+let _ttsChunkEnabled: boolean = true  // 청크 분해 활성화 여부 (false = 전체 텍스트 단일 합성)
 let _sayVoice: string = 'Yuna'
-
 // 동일 서버 중복 시작 방지 락
 const _serverAutoStarting = new Set<string>()
 function autoStartServer(modelId: string): void {
@@ -1720,9 +2025,14 @@ function autoStartServer(modelId: string): void {
     .finally(() => _serverAutoStarting.delete(modelId))
 }
 
-export function setActiveTTSModel(model: string): void { _ttsModel = model }
+export function setActiveTTSModel(model: string): void { _ttsModel = model; console.log('[TTS] Active model:', model) }
 export function setActiveSayVoice(voice: string): void { _sayVoice = voice }
 export function getActiveTTSModel(): string { return _ttsModel }
+export function setChunkMode(enabled: boolean): void {
+  _ttsChunkEnabled = enabled
+  console.log(`[TTS] 청크 모드: ${enabled ? '활성화 (문단 분해)' : '비활성화 (단일 합성)'}`)
+}
+export function getChunkMode(): boolean { return _ttsChunkEnabled }
 
 // macOS say 사용 가능한 한국어 화자 목록
 export const SAY_VOICES = [
@@ -1739,11 +2049,39 @@ export const SAY_VOICES = [
 let _ttsQueue: Promise<void> = Promise.resolve()
 let _ttsQueueDepth = 0
 const TTS_QUEUE_MAX = 3  // 큐 최대 깊이 — 초과 시 새 메시지 드롭
+let _ttsCancelled = false  // flush 시 큐 내 대기 항목 즉시 skip
+
+// ─── TTS Gate — 병렬 작업 중 개별 TTS 억제 ─────────────────────────────────
+let _ttsGated = false
+
+/** 병렬 모드 진입/해제 시 TTS gate 제어. gated=true면 smartSpeak 호출 무시됨 */
+export function setTTSGate(gated: boolean): void {
+  _ttsGated = gated
+  if (gated) console.log('[TTS] Gate ON — 개별 TTS 억제 중')
+  else console.log('[TTS] Gate OFF — TTS 정상 출력')
+}
+
+export function isTTSGated(): boolean { return _ttsGated }
+
+/** TTS 큐 즉시 비우기 — 대기 중인 모든 항목 skip + 현재 재생 중단 */
+export function flushTTSQueue(): void {
+  _ttsCancelled = true
+  _ttsQueueDepth = 0
+  stopPlayback()
+  // 다음 틱에서 cancelled 플래그 리셋 (새 메시지는 정상 큐잉)
+  setTimeout(() => { _ttsCancelled = false }, 50)
+  console.log('[TTS] 큐 flush — 모든 대기 TTS 취소')
+}
 
 // Smart speak: 설정된 ttsModel 우선 — MLX 계열은 say로만 폴백 (다른 엔진으로 폴백 금지)
 export async function smartSpeak(text: string, options?: Partial<TTSOptions>): Promise<void> {
   const clean = sanitizeTTSText(text)
   if (!clean.trim()) return  // 정제 후 내용 없으면 스킵
+  // Gate 활성 시 드롭 (병렬 모드 → 요약만 출력)
+  if (_ttsGated) {
+    console.log('[TTS] Gate 활성 — 드롭:', clean.substring(0, 40))
+    return
+  }
   // 큐 포화 시 드롭 — 너무 많은 진행 알림이 쌓이는 것 방지
   if (_ttsQueueDepth >= TTS_QUEUE_MAX) {
     console.warn('[TTS] 큐 포화 — 메시지 드롭:', clean.substring(0, 40))
@@ -1753,6 +2091,8 @@ export async function smartSpeak(text: string, options?: Partial<TTSOptions>): P
   // 직렬화: 이전 TTS 완료 후 다음 시작
   return new Promise<void>((resolve, reject) => {
     _ttsQueue = _ttsQueue.then(async () => {
+      // flush 됐으면 즉시 skip
+      if (_ttsCancelled) { _ttsQueueDepth = Math.max(0, _ttsQueueDepth - 1); resolve(); return }
       try {
         await _doSmartSpeak(clean, options)
         resolve()
@@ -1769,6 +2109,12 @@ export async function smartSpeak(text: string, options?: Partial<TTSOptions>): P
 
 async function _doSmartSpeak(text: string, options?: Partial<TTSOptions>): Promise<void> {
   const model = _ttsModel
+  const ttsStart = Date.now()
+  console.log(`[TTS] ━━━ smartSpeak 시작 ━━━`)
+  console.log(`[TTS]   모델: ${model}`)
+  console.log(`[TTS]   어댑터: ${_allTtsAdapter} | 음성: ${_allTtsVoice}`)
+  console.log(`[TTS]   텍스트(${text.length}자): "${text.substring(0, 80)}"`)
+  console.log(`[TTS]   옵션: ${JSON.stringify(options || {})}`)
 
   // 선택된 모델 먼저 시도
   if (model === 'say') {
@@ -1834,23 +2180,27 @@ async function _doSmartSpeak(text: string, options?: Partial<TTSOptions>): Promi
     return
   }
 
-  if (model === 'cosyvoice') {
+  // all-tts Hub — 16 adapters, edge_tts real-time streaming
+  if (model === 'all_tts') {
     try {
-      if (await isCosyVoiceAvailable()) {
-        const audioPath = await synthesizeCosyVoice(text)
-        await playAudio(audioPath)
+      const available = await isAllTTSAvailable()
+      console.log(`[TTS] all-tts 서버 상태: ${available ? '✓ 온라인' : '✗ 오프라인'} (:7861)`)
+      if (available) {
+        console.log(`[TTS] → edge-tts 스트리밍 시작: adapter=${_allTtsAdapter} voice=${_allTtsVoice} speed=${options?.speed || 1.0}`)
+        await speakViaAllTTS(text, _allTtsAdapter, _allTtsVoice, options?.speed || 1.0)
+        console.log(`[TTS] ━━━ 완료 (${Date.now() - ttsStart}ms) ━━━`)
         return
       }
     } catch (e) {
-      console.log('[CosyVoice2] Failed:', (e as Error).message)
+      console.log(`[TTS] all-tts 실패 (${Date.now() - ttsStart}ms):`, (e as Error).message)
     }
-    console.warn('[CosyVoice2] 서버 다운 — 자동 시작 중')
-    autoStartServer('cosyvoice')
+    // all-tts 실패 시 TTS 건너뜀 (say 폴백 제거)
+    console.warn('[TTS] all-tts 서버 다운 — TTS 건너뜀')
     return
   }
 
   // qwen3 — @@gentop :7860, 9화자 CustomVoice, 화자 매핑 후 청크 파이프라인
-  if (model === 'qwen3' || !['say','mlx','mlx_ko','mlx_en','mlx_mix','cosyvoice'].includes(model)) {
+  if (model === 'qwen3' || !['say','mlx','mlx_ko','mlx_en','mlx_mix','all_tts'].includes(model)) {
     try {
       if (await isTTSAvailable()) {
         const qwen3Speaker = getQwen3Voice(mlxTTSVoice)
@@ -1888,7 +2238,7 @@ export async function getSpeakers(lang = 'ko'): Promise<string[]> {
 // ─── TTS Server Management ─────────────────────────────────────────────────
 
 export interface TTSServerStatus {
-  id: 'cosyvoice' | 'qwen3' | 'mlx' | 'mlx_ko' | 'mlx_en' | 'mlx_mix'
+  id: 'qwen3' | 'mlx' | 'mlx_ko' | 'mlx_en' | 'mlx_mix' | 'all_tts'
   name: string
   port: number
   running: boolean
@@ -1900,14 +2250,6 @@ export interface TTSServerStatus {
 const VENV = '/Users/nova-ai/project/nova-voice/.venv-tts/bin/python3'
 
 const SERVER_CONFIGS = {
-  cosyvoice: {
-    name: 'CosyVoice2',
-    port: 8900,
-    cwd: '/Users/nova-ai/project/cosyvoice2-official',
-    bin: '/Users/nova-ai/miniconda3/envs/cosyvoice/bin/python3',
-    args: ['server.py'],
-    env: { PYTORCH_ENABLE_MPS_FALLBACK: '1' },
-  },
   // ── 3-Server MLX (모델 교체 없음) ──
   mlx_ko: {
     name: 'MLX-Qwen3 (Korean)',
@@ -1950,26 +2292,18 @@ const SERVER_CONFIGS = {
     args: ['start.sh', '--no-open'],
     env: {},
   },
+  all_tts: {
+    name: 'all-tts Hub',
+    port: 7861,
+    cwd: '/Users/nova-ai/project/@@gentop/lib/all-tts',
+    bin: 'bash',
+    args: ['start.sh'],
+    env: {},
+  },
 } as const
 
 export async function getTTSServerStatuses(): Promise<TTSServerStatus[]> {
   const results: TTSServerStatus[] = []
-
-  // CosyVoice2
-  try {
-    const t0 = Date.now()
-    const data = await httpRequest(`${COSYVOICE_API}/health`, { method: 'GET', timeout: 2000 })
-    const info = JSON.parse(data.toString())
-    results.push({
-      id: 'cosyvoice', name: 'CosyVoice2', port: 8900,
-      running: info.status === 'ok',
-      device: info.device,
-      model: info.model,
-      latencyMs: Date.now() - t0,
-    })
-  } catch {
-    results.push({ id: 'cosyvoice', name: 'CosyVoice2', port: 8900, running: false })
-  }
 
   // MLX 3-server (병렬 체크)
   await Promise.all([
@@ -2026,6 +2360,22 @@ export async function getTTSServerStatuses(): Promise<TTSServerStatus[]> {
     results.push({ id: 'qwen3', name: 'Qwen3-TTS', port: 7860, running: false })
   }
 
+  // all-tts Hub
+  try {
+    const t0 = Date.now()
+    const data = await httpRequest(`${ALL_TTS_API}/health`, { method: 'GET', timeout: 2000 })
+    const info = JSON.parse(data.toString())
+    const adapterCount = info.adapters?.length || 0
+    results.push({
+      id: 'all_tts', name: 'all-tts Hub', port: 7861,
+      running: info.status === 'ok',
+      model: `${adapterCount} adapters`,
+      latencyMs: Date.now() - t0,
+    })
+  } catch {
+    results.push({ id: 'all_tts', name: 'all-tts Hub', port: 7861, running: false })
+  }
+
   return results
 }
 
@@ -2035,7 +2385,16 @@ export async function startTTSServer(id: keyof typeof SERVER_CONFIGS): Promise<b
   const cfg = SERVER_CONFIGS[id]
   if (!cfg) return false
 
-  // Check if already running externally
+  // Check if port is already bound (catches servers started by other CLI instances)
+  try {
+    const { stdout } = await execFile('bash', ['-c', `lsof -ti:${cfg.port}`])
+    if (stdout.trim()) {
+      console.log(`[TTS] ${id} port ${cfg.port} already in use (pid: ${stdout.trim().split('\n')[0]}) — skipping start`)
+      return true
+    }
+  } catch { /* port free — proceed */ }
+
+  // Check if already running externally (health endpoint)
   try {
     const statuses = await getTTSServerStatuses()
     if (statuses.find(s => s.id === id)?.running) return true
@@ -2085,7 +2444,7 @@ export async function stopTTSServer(id: string): Promise<boolean> {
 
   // Also pkill by port as fallback
   const portMap: Record<string, number> = {
-    cosyvoice: 8900, mlx: 8800, mlx_ko: 8800, mlx_en: 8801, mlx_mix: 8802, qwen3: 7860
+    mlx: 8800, mlx_ko: 8800, mlx_en: 8801, mlx_mix: 8802, qwen3: 7860, all_tts: 7861
   }
   const port = portMap[id]
   if (port) {
@@ -2105,10 +2464,7 @@ export async function previewTTSVoice(id: string, voice?: string): Promise<void>
   const PREVIEW_EN  = 'Hello! I am Nova AI. This is how I sound in English.'
   const PREVIEW_MIX = '안녕하세요! I am Nova AI. 한영 혼용 테스트입니다.'
 
-  if (id === 'cosyvoice') {
-    const audioPath = await synthesizeCosyVoice(PREVIEW_KO)
-    await playAudio(audioPath)
-  } else if (id === 'mlx_ko' || id === 'mlx_en' || id === 'mlx_mix' || id === 'mlx') {
+  if (id === 'mlx_ko' || id === 'mlx_en' || id === 'mlx_mix' || id === 'mlx') {
     // 모델별 실제 사용 서버로 프리뷰 라우팅 (언어 일치 필수)
     const cacheDir = path.join(app.getPath('userData'), 'tts-cache')
     if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
@@ -2152,5 +2508,22 @@ export async function previewTTSVoice(id: string, voice?: string): Promise<void>
       const result = await synthesize({ text: PREVIEW_KO, voice: 'qwen3-tts', speaker: qwen3Speaker })
       await playAudio(result.wavPath)
     }
+  } else if (id === 'all_tts') {
+    try {
+      await speakViaAllTTS(PREVIEW_KO, _allTtsAdapter, _allTtsVoice, 1.0)
+    } catch (e) {
+      console.warn('[TTS-AllTTS] Preview failed:', (e as Error).message)
+    }
+  }
+}
+
+// ── all-tts 어댑터 목록 ──────────────────────────────────────────────────
+export async function getAllTtsAdapters(): Promise<{ name: string; speakers: string[]; available: boolean }[]> {
+  try {
+    const data = await httpRequest(`${ALL_TTS_API}/api/adapters`, { method: 'GET', timeout: 5000 })
+    const result = JSON.parse(data.toString())
+    return (result.adapters || []).map((a: any) => ({ name: a.name, speakers: a.speakers || [], available: a.available !== false }))
+  } catch {
+    return []
   }
 }

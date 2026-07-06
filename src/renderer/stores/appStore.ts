@@ -24,7 +24,7 @@ interface AppState {
   // AI
   aiModes: AIMode[]
   currentMode: string
-  aiProviderStatus: { nco: boolean; ollama: boolean; claude: boolean; gemini: boolean }
+  aiProviderStatus: { nco: boolean; claude: boolean; gemini: boolean }
 
   // Attachments
   pendingAttachments: Attachment[]
@@ -47,7 +47,7 @@ interface AppState {
   setCurrentView: (view: View) => void
   setAIModes: (modes: AIMode[]) => void
   setCurrentMode: (mode: string) => void
-  setAIProviderStatus: (status: { nco: boolean; ollama: boolean; claude: boolean; gemini: boolean }) => void
+  setAIProviderStatus: (status: { nco: boolean; claude: boolean; gemini: boolean }) => void
   addAttachment: (attachment: Attachment) => void
   removeAttachment: (id: string) => void
   clearAttachments: () => void
@@ -66,7 +66,7 @@ export const useAppStore = create<AppState>((set) => ({
   settings: null,
   aiModes: [],
   currentMode: 'direct',
-  aiProviderStatus: { nco: false, ollama: false, claude: false, gemini: false },
+  aiProviderStatus: { nco: false, claude: false, gemini: false },
   pendingAttachments: [],
   isProcessingAttachment: false,
   currentView: 'home',

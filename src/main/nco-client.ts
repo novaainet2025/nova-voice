@@ -10,7 +10,7 @@ import { sanitizeTTSText } from './tts-client'
 const execFile = promisify(execFileCb)
 
 const NCO_URL = 'http://localhost:6200'
-const OLLAMA_URL = 'http://localhost:11434'
+// Ollama 제거됨 — NCO 프로바이더로 통합
 const REQUEST_TIMEOUT = 60000
 
 // Gemini API key rotation — reads from nco/.env
@@ -113,27 +113,13 @@ export async function isNCOAvailable(): Promise<boolean> {
   }
 }
 
-// Check if Ollama is running
-export async function isOllamaAvailable(): Promise<boolean> {
-  try {
-    await httpRequest(`${OLLAMA_URL}/api/tags`, { method: 'GET', timeout: 3000 })
-    return true
-  } catch {
-    return false
-  }
-}
-
 // Get available providers status
 export async function getProviderStatus(): Promise<{
   nco: boolean
-  ollama: boolean
   claude: boolean
   gemini: boolean
 }> {
-  const [nco, ollama] = await Promise.all([
-    isNCOAvailable(),
-    isOllamaAvailable()
-  ])
+  const nco = await isNCOAvailable()
 
   // Check CLI tools existence (non-blocking)
   let claude = false
@@ -147,7 +133,7 @@ export async function getProviderStatus(): Promise<{
     gemini = true
   } catch { /* not installed */ }
 
-  return { nco, ollama, claude, gemini }
+  return { nco, claude, gemini }
 }
 
 // ============================================================
@@ -157,7 +143,7 @@ export async function getProviderStatus(): Promise<{
 export interface AIProcessOptions {
   text: string
   prompt: string
-  provider?: string  // 'nco' | 'ollama' | 'claude' | 'gemini' | 'auto'
+  provider?: string  // 'nco' | 'claude' | 'gemini' | 'auto'
   model?: string
   voiceFastPath?: boolean  // true = skip NCO, prioritize Claude CLI for quality + speed
 }
@@ -174,9 +160,9 @@ export async function processWithAI(options: AIProcessOptions): Promise<AIProces
   const provider = options.provider || 'auto'
   const fullPrompt = options.prompt + options.text
 
-  // Voice fast-path: skip NCO (30s timeout), go Claude CLI → Ollama for speed + quality
+  // Voice fast-path: skip NCO (30s timeout), go Claude CLI → Gemini for speed + quality
   if (options.voiceFastPath && (provider === 'auto')) {
-    console.log('[AI] Voice fast-path: Claude CLI → Ollama')
+    console.log('[AI] Voice fast-path: Claude CLI → Gemini')
 
     // Try Claude CLI first (best quality)
     try {
@@ -186,20 +172,18 @@ export async function processWithAI(options: AIProcessOptions): Promise<AIProces
       console.log('[AI] Claude CLI failed:', (e as Error).message)
     }
 
-    // Fallback to Ollama
+    // Fallback to Gemini
     try {
-      if (await isOllamaAvailable()) {
-        const result = await processWithOllama(fullPrompt, options.model)
-        return { ...result, duration: (Date.now() - start) / 1000 }
-      }
+      const result = await processWithGemini(fullPrompt)
+      return { ...result, duration: (Date.now() - start) / 1000 }
     } catch (e) {
-      console.log('[AI] Ollama failed:', (e as Error).message)
+      console.log('[AI] Gemini failed:', (e as Error).message)
     }
 
     throw new Error('No AI provider available for voice fast-path')
   }
 
-  // Standard auto: try NCO → Ollama → Claude CLI → Gemini CLI
+  // Standard auto: try NCO → Claude CLI → Gemini CLI
   if (provider === 'auto' || provider === 'nco') {
     if (isProviderHealthy('nco')) {
       try {
@@ -216,24 +200,6 @@ export async function processWithAI(options: AIProcessOptions): Promise<AIProces
       console.log('[self-heal] NCO in cooldown, skipping')
     }
     if (provider === 'nco') throw new Error('NCO is not available')
-  }
-
-  if (provider === 'auto' || provider === 'ollama') {
-    if (isProviderHealthy('ollama')) {
-      try {
-        if (await isOllamaAvailable()) {
-          const result = await processWithOllama(fullPrompt, options.model)
-          recordProviderSuccess('ollama')
-          return { ...result, duration: (Date.now() - start) / 1000 }
-        }
-      } catch (e) {
-        recordProviderFailure('ollama', (e as Error).message)
-        console.log('Ollama failed, falling back:', (e as Error).message)
-      }
-    } else {
-      console.log('[self-heal] Ollama in cooldown, skipping')
-    }
-    if (provider === 'ollama') throw new Error('Ollama is not available')
   }
 
   if (provider === 'auto' || provider === 'claude') {
@@ -268,7 +234,7 @@ export async function processWithAI(options: AIProcessOptions): Promise<AIProces
     if (provider === 'gemini') throw new Error('Gemini CLI is not available')
   }
 
-  throw new Error('No AI provider available. Please start NCO or Ollama.')
+  throw new Error('No AI provider available. Please start NCO.')
 }
 
 // ============================================================
@@ -367,45 +333,7 @@ async function pollNCOTask(
   throw new Error('NCO task timeout')
 }
 
-async function processWithOllama(prompt: string, model?: string): Promise<Omit<AIProcessResult, 'duration'>> {
-  const ollamaModel = model || 'llama3.2:3b'
-  console.log(`[Ollama] Processing with ${ollamaModel}...`)
 
-  const body = JSON.stringify({
-    model: ollamaModel,
-    prompt,
-    stream: false
-  })
-
-  const data = await httpRequest(`${OLLAMA_URL}/api/generate`, { method: 'POST', body, timeout: 60000 })
-  const result = JSON.parse(data)
-  return { text: result.response || '', provider: 'ollama', model: ollamaModel }
-}
-
-// Vision model priority list for Ollama
-const VISION_MODELS = ['llama3.2-vision', 'llava', 'llava-phi3', 'moondream', 'bakllava']
-
-export async function processImageWithOllama(base64: string, prompt: string): Promise<string> {
-  // Find an available vision model
-  const tagsData = await httpRequest(`${OLLAMA_URL}/api/tags`, { method: 'GET', timeout: 5000 })
-  const tags = JSON.parse(tagsData)
-  const available: string[] = (tags.models || []).map((m: any) => m.name as string)
-
-  const visionModel = VISION_MODELS.find(vm => available.some(a => a.startsWith(vm)))
-  if (!visionModel) throw new Error(`No vision model found. Available: ${available.join(', ')}`)
-
-  console.log(`[Ollama Vision] Using ${visionModel}`)
-  const body = JSON.stringify({
-    model: visionModel,
-    prompt,
-    images: [base64],
-    stream: false
-  })
-
-  const data = await httpRequest(`${OLLAMA_URL}/api/generate`, { method: 'POST', body, timeout: 120000 })
-  const result = JSON.parse(data)
-  return result.response || ''
-}
 
 // Gemini 텍스트 요약 — PTY 캡처 응답을 2-3문장 음성용으로 요약
 export async function summarizeWithGemini(text: string): Promise<string> {
@@ -985,7 +913,7 @@ export async function checkAllProviders(): Promise<ProviderHealthResult[]> {
   return results
 }
 
-// Smart Conductor (voice fast-path: local Claude CLI → Ollama fallback)
+// Smart Conductor (voice fast-path: local Claude CLI → Gemini fallback)
 // NCO agents run in the nco/ directory sandbox — unusable for nova-voice code questions.
 // Local Claude CLI runs in the actual nova-voice project context.
 export async function startConductor(prompt: string, signal?: AbortSignal): Promise<NCOCollabResult> {
@@ -1002,11 +930,11 @@ export async function startConductor(prompt: string, signal?: AbortSignal): Prom
     }
   } catch (e) {
     if ((e as Error).message.includes('cancelled')) throw e
-    console.warn('[Conductor] Claude CLI failed, falling back to Ollama:', (e as Error).message)
-    // Fallback to Ollama
+    console.warn('[Conductor] Claude CLI failed, falling back to Gemini:', (e as Error).message)
+    // Fallback to Gemini
     try {
-      const ollamaResult = await processWithOllama(prompt)
-      return { text: ollamaResult.text, participants: ['ollama'], mode: 'conductor-voice-fallback' }
+      const geminiResult = await processWithGemini(prompt)
+      return { text: geminiResult.text, participants: ['gemini'], mode: 'conductor-voice-fallback' }
     } catch (e2) {
       if ((e2 as Error).message.includes('cancelled')) throw e2
       // Final fallback: NCO gemini if available

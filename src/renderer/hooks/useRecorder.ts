@@ -35,6 +35,7 @@ declare global {
       stopTTSServer: (id: string) => Promise<boolean>
       previewTTSVoice: (id: string, voice?: string) => Promise<void>
       getSayVoices: () => Promise<any[]>
+      getAllTtsAdapters: () => Promise<any>
       previewSayVoice: (voice: string, text?: string) => Promise<void>
       getPipelineStatus: () => Promise<any>
       getPipelineConfig: () => Promise<any>
@@ -81,6 +82,11 @@ export function useRecorder() {
   const analyserRef = useRef<AnalyserNode | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const animFrameRef = useRef<number>(0)
+  // 2초 무음 자동 종료
+  const silenceStartRef = useRef<number>(0)
+  const hadSpeechRef = useRef<boolean>(false)
+  const SILENCE_THRESHOLD = 0.02  // RMS 기준 무음 임계값
+  const SILENCE_TIMEOUT_MS = 2000 // 2초 무음 시 자동 종료
 
   const {
     isRecording,
@@ -151,6 +157,23 @@ export function useRecorder() {
 
         setAudioLevel(level)
 
+        // 2초 무음 자동 종료 — 말을 한 적 있고, 이후 2초 동안 무음이면 자동 중지
+        if (rms > 0.03) {
+          // 음성 감지됨
+          hadSpeechRef.current = true
+          silenceStartRef.current = 0
+        } else if (hadSpeechRef.current) {
+          // 말한 후 무음 시작
+          if (silenceStartRef.current === 0) {
+            silenceStartRef.current = Date.now()
+          } else if (Date.now() - silenceStartRef.current >= SILENCE_TIMEOUT_MS) {
+            console.log('[Recorder] 2초 무음 감지 — 자동 종료')
+            // stopRecording을 직접 호출하면 의존성 문제 → IPC로 트리거
+            window.electronAPI?.stopRecording?.()
+            return // 더 이상 animation frame 불필요
+          }
+        }
+
         // Forward audio level to overlay via IPC (throttle to ~20fps to reduce overhead)
         logCounter++
         if (logCounter % 3 === 0 && window.electronAPI?.sendAudioLevel) {
@@ -201,6 +224,8 @@ export function useRecorder() {
 
       mediaRecorder.start(100)
       mediaRecorderRef.current = mediaRecorder
+      silenceStartRef.current = 0
+      hadSpeechRef.current = false
 
       setRecording(true)
       const now = Date.now()

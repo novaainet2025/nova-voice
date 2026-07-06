@@ -3,6 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { execFile as execFileCb } from 'child_process'
 import { promisify } from 'util'
+import WebSocket from 'ws'
 
 const execFile = promisify(execFileCb)
 
@@ -10,7 +11,7 @@ export interface WhisperOptions {
   modelPath: string
   language?: string
   translate?: boolean
-  signal?: AbortSignal   // 취소 시 Whisper 프로세스 즉시 kill
+  signal?: AbortSignal
 }
 
 export interface WhisperResult {
@@ -19,37 +20,29 @@ export interface WhisperResult {
   duration: number
 }
 
+const STT_WS_URL = 'ws://localhost:8765/ws/stt'
+const CHUNK_SAMPLES = 4096   // 4096 samples per chunk
+const CHUNK_BYTES = CHUNK_SAMPLES * 2  // 16-bit = 2 bytes/sample
+const SILENCE_CHUNKS = 6    // ~1.5s silence (6 * 4096/16000 ≈ 1.54s) > VAD silence_limit 0.7s
+
 let whisperReady = false
-let whisperBinaryPath = ''
 
-// Search for models in both project-local and userData directories
+// ─── Model discovery (유지: 설정 UI에서 사용) ────────────────────────────────
+
 function getModelSearchDirs(): string[] {
-  const dirs = [
-    path.join(app.getPath('userData'), 'models')
-  ]
-
-  // Also look in the app's own models/ directory (for dev mode)
+  const dirs = [path.join(app.getPath('userData'), 'models')]
   const appModelsDir = path.join(app.getAppPath(), 'models')
-  if (fs.existsSync(appModelsDir)) {
-    dirs.unshift(appModelsDir)
-  }
-
-  // Look relative to CWD (for dev mode: project root/models)
+  if (fs.existsSync(appModelsDir)) dirs.unshift(appModelsDir)
   const cwdModels = path.join(process.cwd(), 'models')
-  if (fs.existsSync(cwdModels) && !dirs.includes(cwdModels)) {
-    dirs.unshift(cwdModels)
-  }
-
+  if (fs.existsSync(cwdModels) && !dirs.includes(cwdModels)) dirs.unshift(cwdModels)
   return dirs
 }
 
 export function getModelsDir(): string {
-  // Prefer project-local models dir in dev, userData in production
   const dirs = getModelSearchDirs()
   for (const dir of dirs) {
     if (fs.existsSync(dir)) return dir
   }
-  // Fallback: create userData models dir
   const userDataModels = path.join(app.getPath('userData'), 'models')
   fs.mkdirSync(userDataModels, { recursive: true })
   return userDataModels
@@ -58,7 +51,6 @@ export function getModelsDir(): string {
 export function getAvailableModels(): { name: string; path: string; size: string }[] {
   const models: { name: string; path: string; size: string }[] = []
   const seen = new Set<string>()
-
   for (const dir of getModelSearchDirs()) {
     if (!fs.existsSync(dir)) continue
     const files = fs.readdirSync(dir)
@@ -67,69 +59,42 @@ export function getAvailableModels(): { name: string; path: string; size: string
       const name = file.replace(/^ggml-/, '').replace(/\.(bin|ggml)$/, '')
       if (seen.has(name)) continue
       seen.add(name)
-
       const filePath = path.join(dir, file)
       const stats = fs.statSync(filePath)
       const sizeMB = (stats.size / (1024 * 1024)).toFixed(0)
       models.push({ name, path: filePath, size: `${sizeMB}MB` })
     }
   }
-
   return models
 }
 
-function findWhisperBinary(): string {
-  const names = process.platform === 'win32'
-    ? ['whisper-cli.exe', 'whisper.exe', 'main.exe']
-    : ['whisper-cli', 'whisper', 'main']
-
-  const searchPaths = [
-    '/opt/homebrew/bin',
-    '/usr/local/bin',
-    '/usr/bin',
-    path.join(app.getAppPath(), 'resources', 'bin'),
-    path.join(app.getPath('userData'), 'bin')
-  ]
-
-  for (const dir of searchPaths) {
-    for (const name of names) {
-      const candidate = path.join(dir, name)
-      if (fs.existsSync(candidate)) {
-        console.log(`Found whisper binary: ${candidate}`)
-        return candidate
-      }
-    }
-  }
-  return ''
-}
+// ─── Init: STT 서버 연결 확인 ────────────────────────────────────────────────
 
 export async function initWhisper(): Promise<boolean> {
   try {
-    whisperBinaryPath = findWhisperBinary()
-    const models = getAvailableModels()
-
-    if (whisperBinaryPath) {
-      // Quick version check
-      try {
-        const { stdout } = await execFile(whisperBinaryPath, ['--help'], { timeout: 5000 })
-        console.log(`Whisper binary OK: ${whisperBinaryPath}`)
-      } catch {
-        // --help may return non-zero, that's fine
-        console.log(`Whisper binary found: ${whisperBinaryPath}`)
-      }
-    }
-
-    whisperReady = !!whisperBinaryPath && models.length > 0
-    console.log(`Whisper init: binary=${!!whisperBinaryPath}, models=${models.length}, ready=${whisperReady}`)
-    for (const m of models) {
-      console.log(`  Model: ${m.name} (${m.size}) @ ${m.path}`)
+    // STT 서버 헬스 체크
+    const http = await import('http')
+    const ok = await new Promise<boolean>((resolve) => {
+      const req = http.get('http://localhost:8765/', { timeout: 3000 }, (res) => {
+        res.resume()
+        resolve(res.statusCode === 200)
+      })
+      req.on('error', () => resolve(false))
+      req.on('timeout', () => { req.destroy(); resolve(false) })
+    })
+    whisperReady = ok
+    console.log(`[Whisper] STT Server health: ${ok ? 'OK' : 'NOT READY'} (ws://localhost:8765)`)
+    if (!ok) {
+      console.warn('[Whisper] STT Server not responding — transcription will fail until server is up')
     }
     return whisperReady
   } catch (error) {
-    console.error('Failed to initialize Whisper:', error)
+    console.error('[Whisper] Init failed:', error)
     return false
   }
 }
+
+// ─── Transcribe via WebSocket ────────────────────────────────────────────────
 
 export async function transcribe(
   audioBuffer: Buffer,
@@ -139,17 +104,17 @@ export async function transcribe(
   const tempDir = app.getPath('temp')
   const timestamp = Date.now()
   const tempWebmPath = path.join(tempDir, `nova-voice-${timestamp}.webm`)
-  const tempWavPath = path.join(tempDir, `nova-voice-${timestamp}.wav`)
+  const tempPcmPath = path.join(tempDir, `nova-voice-${timestamp}.pcm`)
 
   try {
-    // Save the raw audio (webm from MediaRecorder)
+    // webm → raw PCM (16kHz mono s16le)
     fs.writeFileSync(tempWebmPath, audioBuffer)
+    await convertToPcm(tempWebmPath, tempPcmPath)
 
-    // Convert webm to 16kHz mono WAV using ffmpeg (required by whisper.cpp)
-    await convertToWav(tempWebmPath, tempWavPath)
+    const pcmData = fs.readFileSync(tempPcmPath)
 
-    // Transcribe with whisper-cli (AbortSignal 전달 → 취소 시 즉시 kill)
-    const result = await transcribeWithCLI(tempWavPath, options)
+    // WebSocket으로 STT 서버에 전송
+    const result = await transcribeViaWs(pcmData, options)
 
     const duration = (Date.now() - startTime) / 1000
     return {
@@ -158,8 +123,7 @@ export async function transcribe(
       duration
     }
   } finally {
-    // Clean up temp files
-    for (const f of [tempWebmPath, tempWavPath]) {
+    for (const f of [tempWebmPath, tempPcmPath]) {
       if (fs.existsSync(f)) {
         try { fs.unlinkSync(f) } catch { /* ignore */ }
       }
@@ -167,16 +131,13 @@ export async function transcribe(
   }
 }
 
-async function convertToWav(inputPath: string, outputPath: string): Promise<void> {
-  // Find ffmpeg
+async function convertToPcm(inputPath: string, outputPath: string): Promise<void> {
   const ffmpegPaths = ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg']
   let ffmpeg = ''
   for (const p of ffmpegPaths) {
     if (fs.existsSync(p)) { ffmpeg = p; break }
   }
-
   if (!ffmpeg) {
-    // Try PATH
     try {
       const { stdout } = await execFile('which', ['ffmpeg'])
       ffmpeg = stdout.trim()
@@ -188,149 +149,125 @@ async function convertToWav(inputPath: string, outputPath: string): Promise<void
   await execFile(ffmpeg, [
     '-i', inputPath,
     '-af', [
-      'highpass=f=80',      // 80Hz 이하 저주파(방진/에어컨 소음) 제거
-      // lowpass 제거: 16kHz 출력의 Nyquist(8kHz)이므로 자동 처리됨
-      // anlmdn 완화: s=7은 영어 자음·한국어 자음의 고주파를 노이즈로 판단해 제거 → 인식률 급락
-      // s=0.5 이하: 배경 소음만 제거, 음성 성분 보존
-      'anlmdn=s=0.5',       // 가벼운 노이즈 리덕션 (음성 성분 보존)
-      'volume=1.2',         // 음량 부스트 최소화 (클리핑 방지)
+      'highpass=f=80',
+      'anlmdn=s=0.5',
+      'volume=1.2',
     ].join(','),
-    '-ar', '16000',       // 16kHz sample rate (whisper requirement)
-    '-ac', '1',           // mono
-    '-c:a', 'pcm_s16le',  // 16-bit PCM
-    '-y',                  // overwrite
+    '-ar', '16000',
+    '-ac', '1',
+    '-f', 's16le',        // raw PCM (no WAV header)
+    '-c:a', 'pcm_s16le',
+    '-y',
     outputPath
   ], { timeout: 30000 })
 }
 
-async function transcribeWithCLI(
-  audioPath: string,
+async function transcribeViaWs(
+  pcmData: Buffer,
   options: WhisperOptions
 ): Promise<{ text: string; language: string }> {
-  if (!whisperBinaryPath) {
-    throw new Error('Whisper binary not found. Install via: brew install whisper-cpp')
-  }
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const ws = new WebSocket(STT_WS_URL)
 
-  // 초기 프롬프트: 한영 혼용 발화 품질 향상
-  // - 영어 고유명사는 영어 원문으로 직접 기재 → Whisper가 그대로 출력
-  // - 한국어 명령 키워드 병행 → 한국어 인식률 유지
-  const initialPrompt = [
-    // ── 영어 고유명사 (이 단어들은 영어 그대로 출력됨) ──
-    // AI / NCO 용어
-    'NCO', 'AI', 'API', 'Claude', 'Gemini', 'GPT', 'LLM',
-    'Whisper', 'Codex', 'Aider', 'Cursor', 'Copilot',
-    // 개발 도구
-    'terminal', 'git', 'GitHub', 'VS Code', 'npm', 'node', 'Python',
-    'TypeScript', 'JavaScript', 'React', 'Electron',
-    'SSH', 'URL', 'JSON', 'UI', 'UX', 'PR', 'commit', 'push', 'pull',
-    // 앱 이름
-    'Chrome', 'Safari', 'Finder', 'Slack', 'Discord', 'Notion', 'Zoom',
-    'Spotify', 'Teams', 'Figma', 'Docker',
-    // NOVA Voice 전용
-    'Nova', 'Nova Voice', 'TTS', 'STT', 'MLX', 'PTY',
-    // ── 한국어 명령 키워드 (한국어 인식률 유지) ──
-    '열어', '닫아', '실행', '종료', '볼륨', '올려', '내려', '음소거',
-    '스크린샷', '캡처', '최소화', '최대화', '검색', '새로고침',
-    '복사', '붙여넣기', '실행 취소', '저장', '전체 선택',
-    '카카오톡', '파인더', '계산기',
-    // NCO 한국어 키워드
-    '토론', '팀', '병렬', '에이전트', '하이브', '분석',
-    // 일반 질문
-    '알려줘', '설명해', '뭐야', '어때', '추천', '번역',
-  ].join(', ')
+    const timeout = setTimeout(() => {
+      if (!settled) {
+        settled = true
+        ws.close()
+        reject(new Error('STT WebSocket timeout (30s)'))
+      }
+    }, 30000)
 
-  const args = [
-    '-m', options.modelPath,
-    '-f', audioPath,
-    '--no-timestamps',
-    // 초기 프롬프트로 고유명사 인식률 향상
-    '--prompt', initialPrompt,
-    // 정확도 향상 파라미터
-    '-bs', '5',                   // beam-size 5 (후보 탐색 넓힘)
-    '-bo', '5',                   // best-of 5 (5개 후보 중 최선 선택)
-    '-tp', '0',                   // temperature 0 (결정론적 디코딩)
-    '--no-fallback',              // temperature fallback 비활성화
-    // Anti-hallucination — 완화된 값 (너무 엄격하면 실제 음성도 차단)
-    '--no-speech-thold', '0.3',   // 0.6→0.3: 짧은 발화·작은 목소리 살림 (기본 0.6)
-    '--entropy-thold', '2.8',     // 2.4→2.8: 약간 완화 (한국어 발화 다양성 허용)
-    '--logprob-thold', '-1.0',    // 로그 확률 임계값
-    '--max-len', '0'              // 세그먼트 최대 길이 제한 없음
-  ]
-
-  // 한영 혼용: auto 모드로 Whisper가 세그먼트별 언어 자동 감지
-  // - 'ko'로 고정하면 영어 단어가 한글로 음사(音寫)됨
-  // - 'auto'에서 large-v3-turbo는 한/영 코드스위칭을 잘 처리함
-  if (options.language && options.language !== 'auto') {
-    args.push('-l', options.language)
-  }
-  // else: 언어 플래그 없음 = Whisper 내부 auto-detect (SuperWhisper 동일 방식)
-
-  console.log(`Transcribing: ${whisperBinaryPath} ${args.join(' ')}`)
-
-  // spawn으로 실행 — AbortSignal 연결 시 프로세스를 즉시 kill 가능
-  const { spawn: spawnProc } = require('child_process')
-  const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    let stdoutBuf = ''
-    let stderrBuf = ''
-    const proc = spawnProc(whisperBinaryPath, args, { stdio: ['ignore', 'pipe', 'pipe'] })
-
-    // AbortSignal 연결 — 취소 시 Whisper 프로세스 즉시 kill
+    // AbortSignal 연결
     if (options.signal) {
       if (options.signal.aborted) {
-        proc.kill('SIGKILL')
-        return reject(new Error('Whisper cancelled'))
+        clearTimeout(timeout)
+        reject(new Error('STT cancelled'))
+        return
       }
       options.signal.addEventListener('abort', () => {
-        proc.kill('SIGKILL')
-        reject(new Error('Whisper cancelled'))
+        if (!settled) {
+          settled = true
+          clearTimeout(timeout)
+          ws.close()
+          reject(new Error('STT cancelled'))
+        }
       }, { once: true })
     }
 
-    const timeout = setTimeout(() => {
-      proc.kill('SIGKILL')
-      reject(new Error('Whisper timeout (60s)'))
-    }, 60000)
-
-    proc.stdout?.on('data', (d: Buffer) => { stdoutBuf += d.toString() })
-    proc.stderr?.on('data', (d: Buffer) => { stderrBuf += d.toString() })
-    proc.on('close', (code: number) => {
-      clearTimeout(timeout)
-      resolve({ stdout: stdoutBuf, stderr: stderrBuf })
+    ws.on('error', (err) => {
+      if (!settled) {
+        settled = true
+        clearTimeout(timeout)
+        reject(new Error(`STT WebSocket error: ${err.message}`))
+      }
     })
-    proc.on('error', (err: Error) => { clearTimeout(timeout); reject(err) })
+
+    ws.on('open', () => {
+      console.log(`[Whisper/WS] Connected, sending ${pcmData.length} bytes PCM`)
+
+      // partial 전사 비활성화 — 이 클라이언트는 final만 사용.
+      // 서버가 발화 중 누적 버퍼를 반복 재전사(폐기됨)하던 낭비를 제거 → 지연 대폭 감소
+      ws.send(JSON.stringify({ partials: false }))
+
+      // PCM을 청크 단위로 전송
+      for (let offset = 0; offset < pcmData.length; offset += CHUNK_BYTES) {
+        const end = Math.min(offset + CHUNK_BYTES, pcmData.length)
+        ws.send(pcmData.subarray(offset, end))
+      }
+
+      // silence padding 전송 — VAD가 final을 발행하도록 트리거
+      const silenceChunk = Buffer.alloc(CHUNK_BYTES, 0)
+      for (let i = 0; i < SILENCE_CHUNKS; i++) {
+        ws.send(silenceChunk)
+      }
+    })
+
+    ws.on('message', (data) => {
+      try {
+        const msg = JSON.parse(data.toString())
+
+        if (msg.type === 'final') {
+          if (!settled) {
+            settled = true
+            clearTimeout(timeout)
+            ws.close()
+
+            let text = msg.text || ''
+            text = filterHallucinations(text)
+            text = restoreEnglishTerms(text)
+
+            console.log(`[Whisper/WS] Final: "${text}" (latency=${msg.latency_ms}ms, rtf=${msg.rtf})`)
+            resolve({ text, language: 'ko' })
+          }
+        } else if (msg.type === 'partial') {
+          console.log(`[Whisper/WS] Partial: "${msg.text}"`)
+        } else if (msg.type === 'error') {
+          console.error(`[Whisper/WS] Server error: ${msg.text}`)
+          if (!settled) {
+            settled = true
+            clearTimeout(timeout)
+            ws.close()
+            reject(new Error(`STT server error: ${msg.text}`))
+          }
+        }
+      } catch { /* ignore parse errors */ }
+    })
+
+    ws.on('close', () => {
+      if (!settled) {
+        settled = true
+        clearTimeout(timeout)
+        // 서버가 final 없이 닫힌 경우 — 빈 결과 반환
+        resolve({ text: '', language: 'ko' })
+      }
+    })
   })
-
-  // whisper-cli outputs text to stdout, with possible metadata lines
-  // Filter out non-text lines (timestamps, progress, etc.)
-  const lines = stdout.split('\n')
-    .map(l => l.trim())
-    .filter(l => l.length > 0)
-    .filter(l => !l.startsWith('[') && !l.startsWith('whisper_'))
-
-  let text = lines.join(' ').trim()
-
-  // Filter out Whisper hallucinations
-  // Common hallucination patterns: repeated text, non-Korean gibberish, known phantom phrases
-  text = filterHallucinations(text)
-
-  // 한글 음사 → 영어 원문 복원 (auto 모드에서 간혹 음사되는 경우 안전망)
-  text = restoreEnglishTerms(text)
-
-  // Try to detect language from stderr output
-  let detectedLang = 'ko'
-  const langMatch = stderr.match(/auto-detected language: (\w+)/)
-  if (langMatch) {
-    detectedLang = langMatch[1]
-  }
-
-  return { text, language: detectedLang }
 }
 
-// 한글 음사(音寫) → 영어 원문 복원
-// auto 모드에서도 가끔 음사로 출력되는 기술 용어를 교정하는 안전망
-// SuperWhisper와 동일한 방식 (고유명사 사전 교정)
+// ─── 한글 음사 → 영어 원문 복원 ──────────────────────────────────────────────
+
 const ENGLISH_RESTORE_MAP: [RegExp, string][] = [
-  // AI / NCO
   [/\bNCO\b|엔씨오\b/g,                    'NCO'],
   [/\bAI\b|에이아이\b|에이 아이\b/g,         'AI'],
   [/\bAPI\b|에이피아이\b|에이 피 아이\b/g,   'API'],
@@ -342,7 +279,6 @@ const ENGLISH_RESTORE_MAP: [RegExp, string][] = [
   [/코덱스\b/g,                             'Codex'],
   [/에이더\b|아이더\b/g,                    'Aider'],
   [/코파일럿\b/g,                           'Copilot'],
-  // 개발 도구
   [/깃허브\b/g,                             'GitHub'],
   [/\b깃\b(?!허브)/g,                       'git'],
   [/비에스코드\b|브이에스코드\b/g,            'VS Code'],
@@ -353,7 +289,6 @@ const ENGLISH_RESTORE_MAP: [RegExp, string][] = [
   [/\bUI\b|유아이\b/g,                      'UI'],
   [/\bUX\b|유엑스\b/g,                      'UX'],
   [/\bPR\b|피알\b/g,                        'PR'],
-  // 앱 이름
   [/크롬\b/g,                               'Chrome'],
   [/사파리\b(?!공원)/g,                      'Safari'],
   [/슬랙\b/g,                               'Slack'],
@@ -361,7 +296,6 @@ const ENGLISH_RESTORE_MAP: [RegExp, string][] = [
   [/노션\b/g,                               'Notion'],
   [/피그마\b/g,                              'Figma'],
   [/도커\b/g,                               'Docker'],
-  // NOVA Voice
   [/\bTTS\b|티티에스\b/g,                   'TTS'],
   [/\bSTT\b|에스티티\b/g,                   'STT'],
   [/\bMLX\b|엠엘엑스\b/g,                   'MLX'],
@@ -377,11 +311,9 @@ function restoreEnglishTerms(text: string): string {
   return result
 }
 
-// Filter out common Whisper hallucination patterns
 function filterHallucinations(text: string): string {
   if (!text) return text
 
-  // Known phantom phrases that Whisper generates from silence/noise
   const phantomPhrases = [
     /^(MBC 뉴스|KBS 뉴스|SBS 뉴스).*$/i,
     /^시청해 ?주셔서 ?감사합니다\.?$/,
@@ -394,7 +326,6 @@ function filterHallucinations(text: string): string {
     /^\.+$/,
     /^\[.*\]$/,
     /^♪.*$/,
-    // large-v3 모델에서 자주 발생하는 할루시네이션
     /자막.*제공/,
     /광고.*포함/,
     /한글\s*자막/,
@@ -413,7 +344,6 @@ function filterHallucinations(text: string): string {
     }
   }
 
-  // Detect repetition: same phrase repeated 3+ times
   const words = text.split(/\s+/)
   if (words.length >= 6) {
     const half = Math.floor(words.length / 2)
@@ -428,36 +358,20 @@ function filterHallucinations(text: string): string {
   return text
 }
 
-// 첫 실제 녹음 전에 모델을 warm up — cold start 1.5s → warm ~0.8s
-export async function warmupWhisper(modelPath: string): Promise<void> {
-  try {
-    // 최소한의 유효 WAV 헤더 (44바이트) + 0.5초 무음 (16kHz mono 16bit)
-    const sampleRate = 16000
-    const duration = 0.5
-    const numSamples = Math.floor(sampleRate * duration)
-    const dataSize = numSamples * 2 // 16-bit
-    const wavBuf = Buffer.alloc(44 + dataSize, 0)
-    // WAV header
-    wavBuf.write('RIFF', 0); wavBuf.writeUInt32LE(36 + dataSize, 4)
-    wavBuf.write('WAVE', 8); wavBuf.write('fmt ', 12)
-    wavBuf.writeUInt32LE(16, 16); wavBuf.writeUInt16LE(1, 20)
-    wavBuf.writeUInt16LE(1, 22); wavBuf.writeUInt32LE(sampleRate, 24)
-    wavBuf.writeUInt32LE(sampleRate * 2, 28); wavBuf.writeUInt16LE(2, 32)
-    wavBuf.writeUInt16LE(16, 34); wavBuf.write('data', 36)
-    wavBuf.writeUInt32LE(dataSize, 40)
+// ─── Warmup: STT 서버에 테스트 요청 ──────────────────────────────────────────
 
-    console.log('[Whisper] Warming up model...')
-    const tempDir = app.getPath('temp')
-    const tmpWav = path.join(tempDir, `nova-warmup-${Date.now()}.wav`)
-    fs.writeFileSync(tmpWav, wavBuf)
-    try {
-      await transcribeWithCLI(tmpWav, { modelPath, language: 'ko' })
-    } finally {
-      try { fs.unlinkSync(tmpWav) } catch { /* ignore */ }
-    }
-    console.log('[Whisper] Warmup complete')
+export async function warmupWhisper(_modelPath: string): Promise<void> {
+  try {
+    console.log('[Whisper] Warming up STT server...')
+    // 0.5초 무음 PCM → 서버로 전송하여 MLX 모델 로드 트리거
+    const numSamples = 8000  // 0.5s at 16kHz
+    const silencePcm = Buffer.alloc(numSamples * 2, 0)
+
+    await transcribeViaWs(silencePcm, { modelPath: '' })
+    console.log('[Whisper] Warmup complete (STT server MLX model loaded)')
   } catch {
-    // warmup 실패는 무시 (기능에 영향 없음)
+    // warmup 실패는 무시
+    console.log('[Whisper] Warmup skipped (server may not be ready yet)')
   }
 }
 
@@ -466,5 +380,5 @@ export function isReady(): boolean {
 }
 
 export function getWhisperBinaryPath(): string {
-  return whisperBinaryPath
+  return '' // CLI 바이너리 더 이상 사용하지 않음
 }

@@ -21,6 +21,7 @@
     "better-sqlite3": "^11.0.0",
     "electron-store": "^10.0.0",
     "node-pty": "^1.1.0",
+    "ws": "^8.21.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
@@ -29,6 +30,7 @@
     "@types/better-sqlite3": "^7.6.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.0.0",
     "autoprefixer": "^10.4.0",
     "electron": "^33.0.0",
