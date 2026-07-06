@@ -4,6 +4,7 @@ let registeredShortcuts: string[] = []
 let lastMainWindow: BrowserWindow | null = null
 let lastOnToggleRecording: (() => void) | null = null
 let lastOnCancelProcessing: (() => void) | undefined
+let lastShortcut: string | null = null
 
 export function registerShortcuts(
   mainWindow: BrowserWindow,
@@ -23,6 +24,7 @@ export function registerShortcuts(
     })
     if (success) {
       registeredShortcuts.push(shortcut)
+      lastShortcut = shortcut
       console.log(`Global shortcut registered: ${shortcut}`)
     } else {
       console.error(`Failed to register shortcut: ${shortcut}`)
@@ -64,8 +66,20 @@ export function reregisterShortcuts(shortcut: string): boolean {
   if (!lastMainWindow || !lastOnToggleRecording) {
     return false
   }
+
+  const previousShortcut = lastShortcut
   registerShortcuts(lastMainWindow, shortcut, lastOnToggleRecording, lastOnCancelProcessing)
-  return isShortcutRegistered(shortcut)
+  if (isShortcutRegistered(shortcut)) {
+    return true
+  }
+
+  if (previousShortcut && previousShortcut !== shortcut) {
+    console.warn(`[Shortcuts] Re-register failed for ${shortcut}; restoring ${previousShortcut}`)
+    registerShortcuts(lastMainWindow, previousShortcut, lastOnToggleRecording, lastOnCancelProcessing)
+    return isShortcutRegistered(previousShortcut)
+  }
+
+  return false
 }
 
 export function unregisterAll(): void {

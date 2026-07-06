@@ -74,14 +74,26 @@ export async function injectText(text: string, targetApp?: string, bundleId?: st
 
         const result = await execFile('osascript', ['-e', `
           tell application "System Events"
-            set frontName to name of first application process whose frontmost is true
+            set frontProcess to first application process whose frontmost is true
+            set frontName to name of frontProcess
+            try
+              set frontBundleId to bundle identifier of frontProcess
+            on error
+              set frontBundleId to ""
+            end try
             key code 9 using {command down}
             ${autoEnter ? 'key code 36' : ''}
           end tell
-          return frontName
+          return frontName & linefeed & frontBundleId
         `])
-        const actualTarget = result.stdout.trim()
-        console.log(`[Inject] Keystroke sent → frontmost: "${actualTarget}" (wanted: "${processName || bundleId}")${autoEnter ? ' + Enter' : ''}`)
+        const [actualTarget = '', actualBundleId = ''] = result.stdout.trim().split('\n')
+        console.log(`[Inject] Keystroke sent → frontmost: "${actualTarget}" / bundle: "${actualBundleId}" (wanted: "${processName || bundleId}")${autoEnter ? ' + Enter' : ''}`)
+        const frontmostMatches = (processName && actualTarget === processName)
+          || (bundleId && actualBundleId === bundleId)
+        if (!frontmostMatches) {
+          console.warn(`[Inject] Target mismatch — frontmost: "${actualTarget}" / "${actualBundleId}", wanted: "${processName}" / "${bundleId}"`)
+          return false
+        }
 
       } else {
         // ── No target: paste to current frontmost ─────────────────────────────

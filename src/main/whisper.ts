@@ -4,6 +4,7 @@ import fs from 'fs'
 import { execFile as execFileCb } from 'child_process'
 import { promisify } from 'util'
 import WebSocket from 'ws'
+import { ensureSttServerReady } from './stt-server'
 
 const execFile = promisify(execFileCb)
 
@@ -94,6 +95,17 @@ export async function initWhisper(): Promise<boolean> {
   }
 }
 
+export async function ensureSttReady(maxWaitMs = 10000): Promise<boolean> {
+  if (whisperReady) return true
+
+  const ready = await ensureSttServerReady(maxWaitMs)
+  whisperReady = ready
+  if (!ready) {
+    console.warn(`[Whisper] STT Server not ready after ${maxWaitMs}ms`)
+  }
+  return ready
+}
+
 // ─── Transcribe via WebSocket ────────────────────────────────────────────────
 
 export async function transcribe(
@@ -107,6 +119,11 @@ export async function transcribe(
   const tempPcmPath = path.join(tempDir, `nova-voice-${timestamp}.pcm`)
 
   try {
+    const ready = await ensureSttReady(10000)
+    if (!ready) {
+      throw new Error('STT server not ready after 10000ms')
+    }
+
     // webm → raw PCM (16kHz mono s16le)
     fs.writeFileSync(tempWebmPath, audioBuffer)
     await convertToPcm(tempWebmPath, tempPcmPath)

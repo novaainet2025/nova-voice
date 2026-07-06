@@ -34,14 +34,18 @@ export function HistoryPanel() {
     const seq = ++searchSeqRef.current
     searchDebounceRef.current = setTimeout(() => {
       void (async () => {
-        if (searchQuery.trim()) {
-          const results = await window.electronAPI.searchHistory(searchQuery)
-          if (seq !== searchSeqRef.current) return
-          setHistory(results)
-          return
-        }
+        try {
+          if (searchQuery.trim()) {
+            const results = await window.electronAPI.searchHistory(searchQuery)
+            if (seq !== searchSeqRef.current) return
+            setHistory(results)
+            return
+          }
 
-        await loadHistory(seq)
+          await loadHistory(seq)
+        } catch (error) {
+          console.warn('[HistoryPanel] Search refresh failed; keeping current results', error)
+        }
       })()
     }, 300)
 

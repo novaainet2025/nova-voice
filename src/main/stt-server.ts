@@ -19,6 +19,7 @@ function getSttServerDir(): string {
 }
 
 let serverProcess: ChildProcess | null = null
+let startPromise: Promise<boolean> | null = null
 
 function canConnectToPort(): Promise<boolean> {
   return new Promise((resolve) => {
@@ -69,6 +70,11 @@ async function waitForReady(maxWaitMs = 30000): Promise<boolean> {
 }
 
 export async function startSttServer(): Promise<boolean> {
+  if (startPromise) {
+    return startPromise
+  }
+
+  startPromise = (async () => {
   if (await isPortInUse()) {
     console.log(`[STT Server] Already running on :${STT_PORT}`)
     return true
@@ -114,6 +120,27 @@ export async function startSttServer(): Promise<boolean> {
     serverProcess = null
   }
   return ready
+  })()
+
+  try {
+    return await startPromise
+  } finally {
+    startPromise = null
+  }
+}
+
+export async function ensureSttServerReady(maxWaitMs = 10000): Promise<boolean> {
+  if (await isPortInUse()) {
+    return true
+  }
+
+  if (!startPromise) {
+    void startSttServer().catch((error: Error) => {
+      console.error('[STT Server] Background start failed:', error)
+    })
+  }
+
+  return waitForReady(maxWaitMs)
 }
 
 export function stopSttServer(): void {

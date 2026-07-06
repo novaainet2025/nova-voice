@@ -159,11 +159,7 @@ export function useRecorder() {
       console.log('[Recorder] Starting...')
 
       if (streamRef.current || mediaRecorderRef.current) {
-        console.warn('[Recorder] Duplicate start prevented')
-        await cleanupRecordingResources({
-          resetState: true,
-          discardRecorderHandlers: true,
-        })
+        console.warn('[Recorder] Duplicate start ignored; keeping active recording')
         return
       }
 
