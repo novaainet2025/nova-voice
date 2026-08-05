@@ -1,92 +1,82 @@
 import { create } from 'zustand'
-import type { AppSettings, TranscriptionResult, AIMode, Attachment } from '../../shared/types'
+import { SPECTRUM_BANDS } from '../../shared/types'
+import type { AppSettings, MetaPromptStatus, SttStatus, TranscriptionResult, TranscriptionStage, VoiceInputMode } from '../../shared/types'
 
-type View = 'home' | 'settings' | 'history' | 'terminal' | 'overlay'
+type View = 'home' | 'settings' | 'history'
 
 interface AppState {
-  // Recording
   isRecording: boolean
   recordingDuration: number
   audioLevel: number
-
-  // Transcription
+  /**
+   * Live frequency bands, updated ~30×/s. Deliberately a stable buffer that is
+   * mutated in place: the canvas visualiser samples it from its own animation
+   * frame, so pushing it through React state would only add re-renders.
+   */
+  spectrum: Uint8Array
+  /** Mode the in-flight capture was started in (hotkey overrides the default). */
+  activeInputMode: VoiceInputMode | null
   currentTranscription: string
   transcriptionProgress: number
   isTranscribing: boolean
-  aiStage: string // 'idle' | 'transcribing' | 'ai_processing' | 'done'
-
-  // History
   history: TranscriptionResult[]
-
-  // Settings
   settings: AppSettings | null
-
-  // AI
-  aiModes: AIMode[]
-  currentMode: string
-  aiProviderStatus: { nco: boolean; claude: boolean; gemini: boolean }
-
-  // Attachments
-  pendingAttachments: Attachment[]
-  isProcessingAttachment: boolean
-
-  // UI
+  sttStatus: SttStatus | null
+  metaPromptStatus: MetaPromptStatus | null
+  transcriptionStage: TranscriptionStage
   currentView: View
-
-  // Actions
-  setRecording: (isRecording: boolean) => void
-  setRecordingDuration: (duration: number) => void
-  setAudioLevel: (level: number) => void
-  setCurrentTranscription: (text: string) => void
-  setTranscriptionProgress: (progress: number) => void
-  setIsTranscribing: (isTranscribing: boolean) => void
-  setAIStage: (stage: string) => void
-  setHistory: (history: TranscriptionResult[]) => void
-  addToHistory: (result: TranscriptionResult) => void
-  setSettings: (settings: AppSettings) => void
-  setCurrentView: (view: View) => void
-  setAIModes: (modes: AIMode[]) => void
-  setCurrentMode: (mode: string) => void
-  setAIProviderStatus: (status: { nco: boolean; claude: boolean; gemini: boolean }) => void
-  addAttachment: (attachment: Attachment) => void
-  removeAttachment: (id: string) => void
-  clearAttachments: () => void
-  setProcessingAttachment: (v: boolean) => void
+  setRecording: (value: boolean) => void
+  setRecordingDuration: (value: number) => void
+  setAudioLevel: (value: number) => void
+  setSpectrum: (value: Uint8Array) => void
+  resetSpectrum: () => void
+  setActiveInputMode: (value: VoiceInputMode | null) => void
+  setCurrentTranscription: (value: string) => void
+  setTranscriptionProgress: (value: number) => void
+  setIsTranscribing: (value: boolean) => void
+  setHistory: (value: TranscriptionResult[]) => void
+  addToHistory: (value: TranscriptionResult) => void
+  setSettings: (value: AppSettings) => void
+  setSttStatus: (value: SttStatus) => void
+  setMetaPromptStatus: (value: MetaPromptStatus) => void
+  setTranscriptionStage: (value: TranscriptionStage) => void
+  setCurrentView: (value: View) => void
 }
 
-export const useAppStore = create<AppState>((set) => ({
+const spectrumBuffer = new Uint8Array(SPECTRUM_BANDS)
+
+export const useAppStore = create<AppState>((set, get) => ({
   isRecording: false,
   recordingDuration: 0,
   audioLevel: 0,
+  spectrum: spectrumBuffer,
+  activeInputMode: null,
   currentTranscription: '',
   transcriptionProgress: 0,
   isTranscribing: false,
-  aiStage: 'idle',
   history: [],
   settings: null,
-  aiModes: [],
-  currentMode: 'direct',
-  aiProviderStatus: { nco: false, claude: false, gemini: false },
-  pendingAttachments: [],
-  isProcessingAttachment: false,
+  sttStatus: null,
+  metaPromptStatus: null,
+  transcriptionStage: 'idle',
   currentView: 'home',
-
   setRecording: (isRecording) => set({ isRecording }),
   setRecordingDuration: (recordingDuration) => set({ recordingDuration }),
   setAudioLevel: (audioLevel) => set({ audioLevel }),
+  setSpectrum: (value) => {
+    const target = get().spectrum
+    if (value !== target) target.set(value.subarray(0, target.length))
+  },
+  resetSpectrum: () => get().spectrum.fill(0),
+  setActiveInputMode: (activeInputMode) => set({ activeInputMode }),
   setCurrentTranscription: (currentTranscription) => set({ currentTranscription }),
   setTranscriptionProgress: (transcriptionProgress) => set({ transcriptionProgress }),
   setIsTranscribing: (isTranscribing) => set({ isTranscribing }),
-  setAIStage: (aiStage) => set({ aiStage }),
   setHistory: (history) => set({ history }),
   addToHistory: (result) => set((state) => ({ history: [result, ...state.history] })),
-  setSettings: (settings) => set({ settings, currentMode: settings.aiMode }),
+  setSettings: (settings) => set({ settings }),
+  setSttStatus: (sttStatus) => set({ sttStatus }),
+  setMetaPromptStatus: (metaPromptStatus) => set({ metaPromptStatus }),
+  setTranscriptionStage: (transcriptionStage) => set({ transcriptionStage }),
   setCurrentView: (currentView) => set({ currentView }),
-  setAIModes: (aiModes) => set({ aiModes }),
-  setCurrentMode: (currentMode) => set({ currentMode }),
-  setAIProviderStatus: (aiProviderStatus) => set({ aiProviderStatus }),
-  addAttachment: (attachment) => set((state) => ({ pendingAttachments: [...state.pendingAttachments, attachment] })),
-  removeAttachment: (id) => set((state) => ({ pendingAttachments: state.pendingAttachments.filter(a => a.id !== id) })),
-  clearAttachments: () => set({ pendingAttachments: [] }),
-  setProcessingAttachment: (isProcessingAttachment) => set({ isProcessingAttachment }),
 }))

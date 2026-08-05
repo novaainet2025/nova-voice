@@ -1,84 +1,105 @@
 import { globalShortcut, BrowserWindow } from 'electron'
+import { logError, logInfo, logWarn } from './logger'
+import type { VoiceInputMode } from '../shared/types'
+
+export interface ShortcutBindings {
+  /** Plain dictation: the transcript is injected as-is. */
+  shortcut: string
+  /** Meta prompt: the same capture is answered by an AI provider. */
+  metaShortcut: string
+}
 
 let registeredShortcuts: string[] = []
 let lastMainWindow: BrowserWindow | null = null
-let lastOnToggleRecording: (() => void) | null = null
-let lastOnCancelProcessing: (() => void) | undefined
-let lastShortcut: string | null = null
+let lastOnToggleRecording: ((mode: VoiceInputMode) => void) | null = null
+let lastOnCancel: (() => void) | undefined
+let lastBindings: ShortcutBindings | null = null
+
+function registerToggle(accelerator: string, mode: VoiceInputMode, onToggle: (mode: VoiceInputMode) => void): boolean {
+  if (!accelerator.trim()) {
+    logInfo('[Shortcuts] Hotkey disabled', { mode })
+    return false
+  }
+  try {
+    const success = globalShortcut.register(accelerator, () => onToggle(mode))
+    if (success) {
+      registeredShortcuts.push(accelerator)
+      // Written to the log file, not just stdout: a packaged build has nowhere
+      // to print, and a hotkey another app already owns fails silently.
+      logInfo('[Shortcuts] Global hotkey registered', { accelerator, mode })
+      return true
+    }
+    logError('[Shortcuts] Global hotkey rejected by the system', { accelerator, mode })
+    return false
+  } catch (error) {
+    logError('[Shortcuts] Global hotkey registration threw', { accelerator, mode, error })
+    return false
+  }
+}
 
 export function registerShortcuts(
   mainWindow: BrowserWindow,
-  shortcut: string,
-  onToggleRecording: () => void,
-  onCancelProcessing?: () => void
+  bindings: ShortcutBindings,
+  onToggleRecording: (mode: VoiceInputMode) => void,
+  onCancel?: () => void
 ): void {
   lastMainWindow = mainWindow
   lastOnToggleRecording = onToggleRecording
-  lastOnCancelProcessing = onCancelProcessing
+  lastOnCancel = onCancel
   unregisterAll()
 
-  // Recording toggle shortcut (e.g. Ctrl+Shift+Space)
-  try {
-    const success = globalShortcut.register(shortcut, () => {
-      onToggleRecording()
-    })
-    if (success) {
-      registeredShortcuts.push(shortcut)
-      lastShortcut = shortcut
-      console.log(`Global shortcut registered: ${shortcut}`)
-    } else {
-      console.error(`Failed to register shortcut: ${shortcut}`)
-    }
-  } catch (error) {
-    console.error(`Error registering shortcut ${shortcut}:`, error)
+  // Ctrl+Shift+Space dictates. Ctrl+Shift+Alt+Space records the same way but
+  // routes that one utterance through the meta-prompt AI, so the saved default
+  // mode never has to be toggled in the UI first.
+  registerToggle(bindings.shortcut, 'normal', onToggleRecording)
+  if (bindings.metaShortcut && bindings.metaShortcut !== bindings.shortcut) {
+    registerToggle(bindings.metaShortcut, 'meta', onToggleRecording)
   }
+  lastBindings = { ...bindings }
 
   // Cancel shortcut: Ctrl+Escape — 처리 중 작업 취소 (글로벌, 다른 앱 포커스 중에도 동작)
   // macOS에서 Ctrl+Shift+Escape는 일부 환경에서 캡처 실패
   // Ctrl+Escape로 변경 (더 신뢰성 높음)
   // 앱 포커스 시 ESC 단독 취소는 렌더러(keydown 이벤트)에서 처리
-  if (onCancelProcessing) {
+  if (onCancel) {
     // 두 가지 단축키 모두 등록 시도 (여러 환경 대응)
     const cancelKeys = ['Ctrl+Escape', 'Ctrl+Shift+Escape']
     for (const cancelShortcut of cancelKeys) {
       try {
         const ok = globalShortcut.register(cancelShortcut, () => {
-          console.log(`[Cancel] ★ 단축키 감지: ${cancelShortcut}`)  // 진단 로그
-          onCancelProcessing()
-          for (const win of BrowserWindow.getAllWindows()) {
-            if (!win.isDestroyed()) win.webContents.send('ai:cancelled')
-          }
+          logInfo('[Shortcuts] Cancel hotkey pressed', { accelerator: cancelShortcut })
+          onCancel()
         })
         if (ok) {
           registeredShortcuts.push(cancelShortcut)
-          console.log(`Cancel shortcut registered: ${cancelShortcut} (global)`)
+          logInfo('[Shortcuts] Cancel hotkey registered', { accelerator: cancelShortcut })
         } else {
-          console.warn(`Cancel shortcut FAILED to register: ${cancelShortcut} (다른 앱이 점유 중일 수 있음)`)
+          logWarn('[Shortcuts] Cancel hotkey unavailable — another app may own it', { accelerator: cancelShortcut })
         }
       } catch (error) {
-        console.error(`Error registering cancel shortcut ${cancelShortcut}:`, error)
+        logError('[Shortcuts] Cancel hotkey registration threw', { accelerator: cancelShortcut, error })
       }
     }
   }
 }
 
-export function reregisterShortcuts(shortcut: string): boolean {
+export function reregisterShortcuts(bindings: ShortcutBindings): boolean {
   if (!lastMainWindow || !lastOnToggleRecording) {
     return false
   }
 
-  const previousShortcut = lastShortcut
-  registerShortcuts(lastMainWindow, shortcut, lastOnToggleRecording, lastOnCancelProcessing)
-  if (isShortcutRegistered(shortcut)) {
-    return true
-  }
+  const previousBindings = lastBindings
+  registerShortcuts(lastMainWindow, bindings, lastOnToggleRecording, lastOnCancel)
+  const applied = isShortcutRegistered(bindings.shortcut)
+    && (!bindings.metaShortcut
+      || bindings.metaShortcut === bindings.shortcut
+      || isShortcutRegistered(bindings.metaShortcut))
+  if (applied) return true
 
-  if (previousShortcut && previousShortcut !== shortcut) {
-    console.warn(`[Shortcuts] Re-register failed for ${shortcut}; restoring ${previousShortcut}`)
-    registerShortcuts(lastMainWindow, previousShortcut, lastOnToggleRecording, lastOnCancelProcessing)
-    return isShortcutRegistered(previousShortcut)
+  if (previousBindings) {
+    logWarn('[Shortcuts] Re-register failed; restoring previous bindings', { bindings, previousBindings })
+    registerShortcuts(lastMainWindow, previousBindings, lastOnToggleRecording, lastOnCancel)
   }
-
   return false
 }
 

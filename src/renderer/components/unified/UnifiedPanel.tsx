@@ -1,965 +1,266 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react'
+import React, { useMemo, useState } from 'react'
+import { STT_ENGINE_NAME } from '../../../shared/types'
+import { AudioVisualizer } from '../visualizer/AudioVisualizer'
 import { useAppStore } from '../../stores/appStore'
-import type { Attachment } from '../../../shared/types'
-import { TerminalPanel } from '../terminal/TerminalPanel'
-
-// ─── NCO Provider Health Types ───────────────────────────────────────────────
-
-interface ProviderHealth {
-  id: string
-  name: string
-  role: string
-  type: string
-  status: 'online' | 'offline' | 'degraded'
-  latencyMs: number
-  version?: string
-  model?: string
-  error?: string
-  checkedAt: number
-}
-
-// ─── Message Types ───────────────────────────────────────────────────────────
-
-type MsgType =
-  | 'system'      // dim italic — status/mode changes
-  | 'voice'       // cyan — voice transcription
-  | 'typed'       // white — typed user input
-  | 'ai'          // primary — AI text answer
-  | 'cmd'         // green mono — $ command
-  | 'stdout'      // white/65 mono — command output
-  | 'stderr'      // yellow mono — stderr
-  | 'inject'      // dim — "injected to cursor"
-  | 'attachment'  // file info
-  | 'error'       // red
-
-interface Msg {
-  id: number
-  type: MsgType
-  text: string
-  ts: number
-  label?: string
-}
-
-let msgId = 0
-
-// ─── Attachment helpers ───────────────────────────────────────────────────────
-
-const TEXT_MIMES = new Set([
-  'text/plain', 'text/html', 'text/css', 'text/javascript', 'text/typescript',
-  'text/csv', 'text/markdown', 'text/xml', 'application/json', 'application/xml',
-])
-const isTextMime = (m: string) => TEXT_MIMES.has(m) || m.startsWith('text/')
-const fileIcon = (m: string) =>
-  m.startsWith('image/') ? '🖼️' : m === 'application/pdf' ? '📄' : m.includes('json') ? '📋' : '📎'
-
-async function readFileAsAttachment(file: File): Promise<Attachment | null> {
-  const id = crypto.randomUUID()
-  const mimeType = file.type || 'application/octet-stream'
-  return new Promise((resolve) => {
-    const reader = new FileReader()
-    if (file.type.startsWith('image/')) {
-      reader.onload = (e) => {
-        const b64 = (e.target?.result as string).split(',')[1] || ''
-        resolve({ id, name: file.name, mimeType, size: file.size, base64: b64 })
-      }
-      reader.onerror = () => resolve(null)
-      reader.readAsDataURL(file)
-    } else if (isTextMime(mimeType)) {
-      reader.onload = (e) => resolve({ id, name: file.name, mimeType, size: file.size, content: e.target?.result as string })
-      reader.onerror = () => resolve(null)
-      reader.readAsText(file)
-    } else {
-      reader.onload = (e) => resolve({ id, name: file.name, mimeType: 'text/plain', size: file.size, content: e.target?.result as string })
-      reader.onerror = () => resolve(null)
-      reader.readAsText(file)
-    }
-  })
-}
-
-// ─── Component ───────────────────────────────────────────────────────────────
-
-// ─── Debug Log Types ──────────────────────────────────────────────────────────
-interface DebugEntry { ts: number; level: string; msg: string }
 
 export function UnifiedPanel() {
   const {
-    isRecording, audioLevel, recordingDuration,
-    aiStage, currentMode, setCurrentMode, setAIModes,
-    pendingAttachments, isProcessingAttachment,
-    addAttachment, removeAttachment, clearAttachments,
-    setProcessingAttachment, setAIStage,
+    isRecording,
+    recordingDuration,
+    currentTranscription,
+    transcriptionProgress,
+    isTranscribing,
+    history,
+    sttStatus,
+    settings,
+    metaPromptStatus,
+    transcriptionStage,
+    activeInputMode,
+    setSettings,
   } = useAppStore()
+  const [copied, setCopied] = useState(false)
+  const [modeSaveError, setModeSaveError] = useState('')
+  const [modeChanging, setModeChanging] = useState(false)
 
-  const [messages, setMessages] = useState<Msg[]>([{
-    id: msgId++, type: 'system', ts: Date.now(),
-    text: 'NOVA-VOICE  ·  AI Terminal ready\n⌃ Shift Space 녹음 · Smart Mode 자동 라우팅 · Claude 명령 실행',
-  }])
-  const [input, setInput] = useState('')
-  const [claudeRunning, setClaudeRunning] = useState(false)
-  const [isDragOver, setIsDragOver] = useState(false)
-  const [showDebug, setShowDebug] = useState(false)
-  const [debugLogs, setDebugLogs] = useState<DebugEntry[]>([])
-  const [showHealth, setShowHealth] = useState(false)
-  const [healthResults, setHealthResults] = useState<ProviderHealth[]>([])
-  const [healthChecking, setHealthChecking] = useState(false)
-  const dragCounter = useRef(0)
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const debugBottomRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const processingAttachmentRef = useRef(false)
+  const duration = useMemo(() => {
+    const minutes = Math.floor(recordingDuration / 60)
+    const seconds = Math.floor(recordingDuration % 60)
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`
+  }, [recordingDuration])
 
-  // V2T mode = direct (transcription + inject only), Terminal mode = everything else
-  const isV2T = currentMode === 'direct'
+  const inputMode = activeInputMode ?? settings?.inputMode ?? 'normal'
+  const latestLatency = history[0]?.processingDuration ?? history[0]?.duration
+  const statusLabel = transcriptionStage === 'meta-prompting'
+    ? 'AI가 요청을 분석해 최종 답변을 작성하는 중입니다'
+    : transcriptionStage === 'injecting'
+      ? '포커스 위치에 입력하는 중입니다'
+      : isRecording
+    ? '듣고 있습니다'
+    : isTranscribing
+      ? 'Whisper가 변환 중입니다'
+      : sttStatus?.ready === false
+        ? 'Whisper를 준비하고 있습니다'
+        : inputMode === 'meta'
+          ? '메타 모드 · AI가 직접 답변할 준비가 됐습니다'
+          : '일반 모드 · 바로 받아쓸 준비가 됐습니다'
+  const latestResult = history[0]
 
-  const addMsg = useCallback((type: MsgType, text: string, label?: string) => {
-    setMessages(prev => [...prev, { id: msgId++, type, text, ts: Date.now(), label }])
-  }, [])
-
-  const runHealthCheck = useCallback(async () => {
-    if (healthChecking) return
-    setHealthChecking(true)
-    setShowHealth(true)
-    setShowDebug(false)
-    try {
-      const results = await window.electronAPI.checkNCOHealth()
-      setHealthResults(results)
-    } catch (e) {
-      console.error('[Health] check failed:', e)
-    } finally {
-      setHealthChecking(false)
-    }
-  }, [healthChecking])
-
-  // ── IPC listeners ─────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    if (!window.electronAPI) return
-
-    window.electronAPI.getAIModes?.().then((modes: any[]) => setAIModes(modes)).catch(() => {})
-    // Sync mode from main process settings (main loads from disk, renderer defaults to 'direct')
-    window.electronAPI.getSettings?.().then((s: any) => {
-      if (s?.aiMode) setCurrentMode(s.aiMode)
-    }).catch(() => {})
-
-    // Transcription + AI result
-    const cleanupResult = window.electronAPI.onTranscriptionResult((result) => {
-      // isUpdate=true: 백그라운드 완료 결과 — 음성 버블 중복 방지
-      if (!result.isUpdate && result.text) addMsg('voice', result.text)
-      if (result.aiResult && result.aiResult !== result.text) {
-        addMsg('ai', result.aiResult)
-      } else if (!result.aiResult && isV2T) {
-        addMsg('inject', result.text || '')
-      } else if (!result.aiResult && !isV2T && result.text) {
-        addMsg('error', '⚠️ AI 응답을 받지 못했어요 — 우상단 Health 버튼으로 프로바이더 상태를 확인해주세요')
-      }
-      setAIStage('done')
-      setClaudeRunning(false)
-    })
-
-    // Claude terminal streaming output
-    const cleanupClaude = window.electronAPI.onClaudeOutput?.((data) => {
-      if (data.type === 'input') {
-        addMsg('cmd', data.text)
-        setClaudeRunning(true)
-      } else if (data.type === 'stdout') {
-        addMsg('stdout', data.text)
-      } else if (data.type === 'stderr') {
-        addMsg('stderr', data.text)
-      } else if (data.type === 'system') {
-        if (data.text && !data.text.includes('──')) addMsg('system', data.text)
-        setClaudeRunning(false)
-      } else if (data.type === 'error') {
-        addMsg('error', data.text)
-        setClaudeRunning(false)
-      }
-    })
-
-    // AI processing stage → 대화 스레드에 과정(CTS) 단계 메시지 표시
-    const STAGE_CTS: Record<string, string> = {
-      transcribing:    '🎙️ 음성 인식 중...',
-      ai_processing:   '🤖 AI 처리 중...',
-      nco_processing:  '🌐 NCO 멀티AI 처리 중...',
-      command_parsing: '🎮 명령 파싱 중...',
-    }
-    const cleanupStage = window.electronAPI.onAIStage?.((stage) => {
-      setAIStage(stage)
-      if (STAGE_CTS[stage]) addMsg('system', STAGE_CTS[stage])
-    })
-
-    // Debug log streaming
-    window.electronAPI.getDebugLogs?.().then((logs) => {
-      if (logs?.length) setDebugLogs(logs)
-    }).catch(() => {})
-    const cleanupDebug = window.electronAPI.onDebugLog?.((entry) => {
-      setDebugLogs(prev => {
-        const next = [...prev, entry]
-        return next.length > 300 ? next.slice(next.length - 300) : next
-      })
-    })
-
-    // AI 취소 이벤트 (Ctrl+Escape 글로벌 단축키 or main에서 전송)
-    const cleanupCancel = window.electronAPI.onAICancelled?.(() => {
-      setAIStage('idle')
-      addMsg('system', '⏹ AI 작업이 취소됐습니다 (ESC / Ctrl+Escape)')
-    })
-
-    // ESC 키 — 녹음 중이면 녹음 취소, 아니면 AI 처리 취소
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-        if (useAppStore.getState().isRecording) {
-          window.electronAPI.cancelRecording?.()
-        } else {
-          window.electronAPI.cancelAI?.()
-        }
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-
-    return () => {
-      cleanupResult()
-      cleanupClaude?.()
-      cleanupStage?.()
-      cleanupDebug?.()
-      cleanupCancel?.()
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [addMsg, setAIModes, setAIStage, isV2T])
-
-  // Auto-scroll on new messages
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, claudeRunning, aiStage])
-
-  // Auto-scroll debug panel
-  useEffect(() => {
-    if (showDebug) debugBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [debugLogs, showDebug])
-
-  useEffect(() => {
-    processingAttachmentRef.current = isProcessingAttachment
-  }, [isProcessingAttachment])
-
-  // ── Paste ─────────────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    const handle = async (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items
-      if (!items) return
-      for (const item of Array.from(items)) {
-        if (item.kind === 'file') {
-          const file = item.getAsFile()
-          if (!file) continue
-          const att = await readFileAsAttachment(file)
-          if (att) addAttachment(att)
-        }
-      }
-    }
-    window.addEventListener('paste', handle)
-    return () => window.removeEventListener('paste', handle)
-  }, [addAttachment])
-
-  // ── Drag & drop ───────────────────────────────────────────────────────────
-
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    dragCounter.current++
-    if (e.dataTransfer.types.includes('Files')) setIsDragOver(true)
-  }, [])
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    dragCounter.current--
-    if (dragCounter.current === 0) setIsDragOver(false)
-  }, [])
-
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault()
-    dragCounter.current = 0
-    setIsDragOver(false)
-
-    const files = Array.from(e.dataTransfer.files)
-
-    for (const file of files) {
-      const filePath = window.electronAPI.getPathForFile(file) || undefined
-      const isImage = file.type.startsWith('image/')
-
-      // 이미지: 첨부 대기열에 추가 (PTY/Claude-p는 텍스트 전용)
-      if (isImage && !filePath) {
-        const att = await readFileAsAttachment(file)
-        if (att) addAttachment(att)
-        continue
-      }
-
-      // 메시지 포맷 구성 — Claude가 파일을 실제로 읽고 처리할 수 있도록
-      let msg = ''
-      if (filePath) {
-        msg = `이 파일을 읽고 분석해줘: ${filePath}`
-      } else {
-        const att = await readFileAsAttachment(file)
-        if (att?.content) {
-          msg = `파일 내용 (${file.name}):\n\`\`\`\n${att.content.slice(0, 8000)}\n\`\`\``
-        }
-      }
-      if (!msg) continue
-
-      // AI Terminal 탭으로 전환 (Claude 응답 확인)
-      if (isV2T) {
-        switchMode('terminal')
-      }
-
-      addMsg('typed', `📎 ${file.name}`)
-
-      // PTY Claude Code 감지 → PTY로 직접 전달 (@file 참조 형식)
-      try {
-        const ptyStatus = await window.electronAPI?.ptyClaudeRunning?.()
-        if (ptyStatus?.claudeDetected) {
-          setClaudeRunning(true)
-          const ptyMsg = filePath ? `@${filePath} 분석해줘` : msg
-          await window.electronAPI!.ptyType(ptyMsg)
-          continue
-        }
-      } catch { /* PTY Claude 감지 실패 → claudeSend 폴백 */ }
-
-      // PTY Claude 없음 → 채팅 뷰 전환 후 claude -p 실행 (출력이 채팅에 보임)
-      if (!isV2T) setCurrentMode('direct')
-      if (window.electronAPI?.claudeSend) {
-        setClaudeRunning(true)
-        try { await window.electronAPI.claudeSend(msg) }
-        catch { setClaudeRunning(false) }
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addAttachment, addMsg, isV2T])
-
-  // ── Mode switch ───────────────────────────────────────────────────────────
-
-  const switchMode = async (mode: 'v2t' | 'terminal') => {
-    const aiMode = mode === 'v2t' ? 'direct' : 'smart'
-    setCurrentMode(aiMode)
-    await window.electronAPI?.setSettings?.({ aiMode })
-    addMsg('system',
-      mode === 'v2t'
-        ? '─ Voice to Text 모드: 음성 → 커서 위치 직접 입력'
-        : '─ AI Terminal 모드: 질문 → 답변, 명령 → Claude 실행')
+  const toggleRecording = () => {
+    if (modeChanging) return
+    void (isRecording ? window.electronAPI.stopRecording() : window.electronAPI.startRecording())
   }
 
-  // ── Recording toggle ──────────────────────────────────────────────────────
-
-  const toggleRecording = async () => {
-    if (isRecording) {
-      await window.electronAPI?.stopRecording()
-    } else {
-      await window.electronAPI?.startRecording()
-    }
+  const copyResult = async () => {
+    if (!currentTranscription) return
+    await navigator.clipboard.writeText(currentTranscription)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1200)
   }
 
-  // ── Send text to Claude ───────────────────────────────────────────────────
-
-  const handleSend = async () => {
-    const text = input.trim()
-    if (!text || claudeRunning) return
-    setInput('')
-    addMsg('typed', text)
-    setClaudeRunning(true)
+  const selectInputMode = async (mode: 'normal' | 'meta') => {
+    if (!settings || settings.inputMode === mode || isRecording || isTranscribing) return
+    setModeSaveError('')
+    setModeChanging(true)
     try {
-      await window.electronAPI?.claudeSend?.(text)
+      const confirmed = await window.electronAPI.setSettings({ inputMode: mode })
+      setSettings(confirmed)
     } catch {
-      setClaudeRunning(false)
-      addMsg('error', '⚠️ Claude Terminal 전송에 실패했어요 — claude CLI가 설치되어 있는지 확인해주세요')
-    }
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
-  }
-
-  // ── Process attachments ───────────────────────────────────────────────────
-
-  const handleProcessAttachments = useCallback(async () => {
-    if (!window.electronAPI || pendingAttachments.length === 0 || processingAttachmentRef.current) return
-    processingAttachmentRef.current = true
-    setProcessingAttachment(true)
-    setAIStage('ai_processing')
-    addMsg('system', `📎 파일 ${pendingAttachments.length}개 AI 분석 중...`)
-    try {
-      for (const att of pendingAttachments) {
-        try {
-          addMsg('attachment', att.name, `${fileIcon(att.mimeType)} ${(att.size / 1024).toFixed(0)}KB`)
-          await (window.electronAPI as any).processAttachment({
-            name: att.name, mimeType: att.mimeType,
-            content: att.content, base64: att.base64, modeId: currentMode,
-          })
-        } catch {
-          addMsg('error', `처리 실패: ${att.name}`)
-        }
-      }
-      clearAttachments()
+      setModeSaveError('모드 저장에 실패했습니다. 다시 선택해주세요.')
+      setSettings(await window.electronAPI.getSettings())
     } finally {
-      processingAttachmentRef.current = false
-      setProcessingAttachment(false)
+      setModeChanging(false)
     }
-  }, [pendingAttachments, currentMode, addMsg, setProcessingAttachment, setAIStage, clearAttachments])
-
-  // ── Derived ───────────────────────────────────────────────────────────────
-
-  const duration = `${Math.floor(recordingDuration / 60)}:${String(Math.floor(recordingDuration % 60)).padStart(2, '0')}`
-  const isProcessing = aiStage === 'transcribing' || aiStage === 'ai_processing' || isProcessingAttachment
-  const isBusy = claudeRunning || isProcessing
-
-  // ── Render ────────────────────────────────────────────────────────────────
+  }
 
   return (
-    <div
-      className="flex flex-col h-full bg-[#0d1117] relative"
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={handleDrop}
-    >
-      {/* Drag overlay — 오버레이 숨김, 드롭 감지 레이어만 유지 */}
-      {isDragOver && (
-        <div
-          className="absolute inset-0 z-50"
-          onDragOver={(e) => e.preventDefault()}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-        />
-      )}
+    <div className="h-full overflow-y-auto px-6 py-6 sm:px-8 sm:py-7">
+      <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col">
+        <header className="flex items-end justify-between gap-5">
+          <div>
+            <p className="nova-eyebrow">WHISPER DICTATION</p>
+            <h1 className="nova-page-title">빠른 받아쓰기</h1>
+            <p className="nova-page-copy">말하는 순간부터 텍스트가 되는 순간까지만 집중합니다.</p>
+          </div>
+          <div className="hidden sm:flex items-center gap-2 rounded-full border border-emerald-300/10 bg-emerald-300/[0.045] px-3 py-1.5 text-[9px] font-mono tracking-[0.12em] text-emerald-200/70">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(87,217,183,.65)]" />
+            PCM · 16 KHZ · MLX
+          </div>
+        </header>
 
-      {/* ── Top bar: mode toggle + status ─────────────────────────────────── */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 flex-shrink-0">
-        {/* Left: status indicators */}
-        <div className="flex items-center gap-3 min-w-[120px]">
-          {isRecording && (
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse flex-shrink-0" />
-              <span className="text-red-400 text-xs font-mono">{duration}</span>
-              {/* Mini audio bars */}
-              <div className="flex items-center gap-[1.5px] h-3">
-                {Array.from({ length: 12 }, (_, i) => {
-                  const h = 2 + audioLevel * (Math.sin(i * 0.8) * 0.4 + 0.6) * 9
-                  return <div key={i} className="rounded-full bg-red-400/60 flex-shrink-0"
-                    style={{ width: 2, height: Math.max(2, h), transition: 'height 80ms ease-out' }} />
-                })}
-              </div>
-              {/* 녹음 취소 버튼 (ESC) */}
-              <button
-                onClick={() => window.electronAPI.cancelRecording?.()}
-                className="ml-0.5 text-red-400/50 hover:text-red-300 text-[10px] px-1 py-0.5 rounded border border-red-400/20 hover:border-red-300/50 transition-colors"
-                title="녹음 취소 (ESC)">
-                ✕
-              </button>
-            </div>
-          )}
-          {isBusy && !isRecording && (
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 border border-primary-400/60 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-              <span className="text-primary-400/70 text-xs">
-                {aiStage === 'transcribing' ? 'Whisper...' :
-                 aiStage === 'ai_processing' ? 'AI 처리...' :
-                 claudeRunning ? 'Claude...' : '처리 중...'}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Center: title */}
-        <span className="text-xs text-white/20 font-medium tracking-widest absolute left-1/2 -translate-x-1/2">
-          NOVA
-        </span>
-
-        {/* Right: mode toggle + debug */}
-        <div className="flex items-center gap-1.5">
+        <div className="mt-5 grid gap-2 rounded-[20px] border border-white/[0.075] bg-black/15 p-1.5 sm:grid-cols-2" role="group" aria-label="받아쓰기 출력 모드">
           <button
-            onClick={runHealthCheck}
-            title="NCO AI 프로바이더 헬스 체크"
-            className={`px-2 py-1 rounded-md text-xs font-mono transition-all ${
-              showHealth
-                ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40'
-                : 'text-white/25 hover:text-white/50 hover:bg-white/5'
+            type="button"
+            onClick={() => void selectInputMode('normal')}
+            disabled={!settings || isRecording || isTranscribing || modeChanging}
+            aria-pressed={inputMode === 'normal'}
+            className={`flex min-h-14 items-center gap-3 rounded-[15px] px-4 text-left transition-all disabled:cursor-not-allowed disabled:opacity-55 ${
+              inputMode === 'normal'
+                ? 'border border-white/[0.1] bg-white/[0.075] shadow-[0_10px_28px_rgba(0,0,0,.16)]'
+                : 'border border-transparent hover:bg-white/[0.035]'
             }`}
           >
-            {healthChecking ? (
-              <span className="inline-flex items-center gap-1">
-                <span className="w-2 h-2 border border-emerald-400/60 border-t-transparent rounded-full animate-spin" />
-                NCO
+            <span className={`flex h-8 w-8 items-center justify-center rounded-xl border font-mono text-[10px] ${inputMode === 'normal' ? 'border-white/15 bg-white/10 text-white/80' : 'border-white/[0.07] text-white/28'}`}>TXT</span>
+            <span>
+              <span className="block text-xs font-medium text-white/75">일반</span>
+              <span className="mt-0.5 block text-[10px] text-white/30">받아쓴 문장을 바로 입력</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void selectInputMode('meta')}
+            disabled={!settings || isRecording || isTranscribing || modeChanging}
+            aria-pressed={inputMode === 'meta'}
+            className={`relative flex min-h-14 items-center gap-3 overflow-hidden rounded-[15px] px-4 text-left transition-all disabled:cursor-not-allowed disabled:opacity-55 ${
+              inputMode === 'meta'
+                ? 'border border-violet-300/20 bg-[linear-gradient(110deg,rgba(108,92,231,.16),rgba(91,141,239,.1))] shadow-[0_12px_34px_rgba(69,64,170,.17)]'
+                : 'border border-transparent hover:bg-white/[0.035]'
+            }`}
+          >
+            {inputMode === 'meta' && <span className="pointer-events-none absolute inset-y-0 left-0 w-px bg-gradient-to-b from-transparent via-violet-300/80 to-transparent" />}
+            <span className={`flex h-8 w-8 items-center justify-center rounded-xl border ${inputMode === 'meta' ? 'border-violet-300/25 bg-violet-300/10 text-violet-100' : 'border-white/[0.07] text-white/28'}`} aria-hidden="true">
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m12 3 1.4 4.2L18 9l-4.6 1.8L12 15l-1.4-4.2L6 9l4.6-1.8L12 3Z"/><path d="m18.5 15 .7 2.1 2.3.9-2.3.9-.7 2.1-.7-2.1-2.3-.9 2.3-.9.7-2.1Z"/></svg>
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2 text-xs font-medium text-white/78">
+                메타 프롬프트
+                <span className={`h-1.5 w-1.5 rounded-full ${metaPromptStatus?.available || metaPromptStatus?.localAvailable ? 'bg-emerald-300 shadow-[0_0_7px_rgba(87,217,183,.7)]' : 'bg-amber-300/70'}`} />
               </span>
-            ) : (
-              <>
-                NCO
-                {healthResults.length > 0 && (
-                  <span className={`ml-1 ${healthResults.filter(r => r.status === 'offline').length > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
-                    {healthResults.filter(r => r.status === 'online').length}/{healthResults.length}
-                  </span>
+              <span className="mt-0.5 block truncate text-[10px] text-white/30">
+                {!settings?.ncoEnabled
+                  ? '로컬 AI · qwen3:14b 전용'
+                  : metaPromptStatus?.available
+                  ? `AI 병렬 연결 · ${metaPromptStatus.readyProviders?.join(' · ') || 'NCO'} · qwen3:14b`
+                  : metaPromptStatus?.localAvailable
+                    ? '로컬 AI · qwen3:14b 활성 · NCO 자동 재연결'
+                    : 'AI 연결 필요 · 메타 프롬프트 일시 중지'}
+              </span>
+            </span>
+          </button>
+        </div>
+        {modeSaveError && <p role="alert" className="mt-2 text-[10px] text-red-200/70">{modeSaveError}</p>}
+        {!modeSaveError && (
+          <p role="status" data-input-mode={inputMode} className={`mt-2 text-[10px] ${inputMode === 'meta' ? 'text-violet-200/65' : 'text-white/32'}`}>
+            {modeChanging
+              ? '출력 모드를 적용하는 중입니다…'
+              : inputMode === 'meta'
+                ? '메타 모드 적용됨 · 요청을 내부에서 재구성한 뒤 AI 최종 답변만 출력합니다.'
+                : '일반 모드 적용됨 · 다음 녹음은 Whisper 원문을 바로 입력합니다.'}
+          </p>
+        )}
+
+        <section className="mt-4 grid flex-1 gap-4 lg:grid-cols-[1.05fr_.95fr]">
+          <div className="glass-light relative flex min-h-[330px] flex-col items-center justify-center overflow-hidden rounded-[28px] border border-white/[0.075] p-7 text-center">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(109,139,255,.13),transparent_42%)]" />
+            <div className="relative z-10">
+              <p className={`text-xs font-medium tracking-wide ${isRecording ? 'text-red-200' : isTranscribing ? 'text-primary-200' : 'text-white/48'}`}>
+                {statusLabel}
+              </p>
+
+              <button
+                type="button"
+                onClick={toggleRecording}
+                disabled={isTranscribing || sttStatus?.ready === false || modeChanging}
+                className={`group relative mx-auto mt-7 flex h-28 w-28 items-center justify-center rounded-full border transition-all duration-300 active:scale-95 disabled:cursor-wait disabled:opacity-55 ${
+                  isRecording
+                    ? 'border-red-300/30 bg-red-400/18 shadow-[0_0_0_10px_rgba(255,107,116,.035),0_24px_70px_rgba(255,107,116,.19)]'
+                    : 'border-primary-300/25 bg-primary-400/12 shadow-[0_0_0_10px_rgba(109,139,255,.03),0_24px_70px_rgba(76,96,210,.2)] hover:bg-primary-400/18'
+                }`}
+                aria-label={isRecording ? '녹음 중지' : '녹음 시작'}
+              >
+                {isRecording && <span className="absolute inset-[-10px] rounded-full border border-red-300/10 animate-ping" />}
+                {isRecording ? (
+                  <span className="h-7 w-7 rounded-lg bg-red-200 shadow-[0_0_18px_rgba(255,160,166,.55)]" />
+                ) : (
+                  <svg className="h-10 w-10 text-primary-100 transition-transform group-hover:scale-105" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.45" d="M12 3.5A3.5 3.5 0 0 0 8.5 7v5a3.5 3.5 0 0 0 7 0V7A3.5 3.5 0 0 0 12 3.5Z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.45" d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3m-4 0h8" />
+                  </svg>
                 )}
-              </>
-            )}
-          </button>
-          <button
-            onClick={() => { setShowDebug(v => !v); setShowHealth(false) }}
-            title="디버그 로그 패널"
-            className={`px-2 py-1 rounded-md text-xs font-mono transition-all ${
-              showDebug
-                ? 'bg-orange-500/30 text-orange-300 border border-orange-500/40'
-                : 'text-white/25 hover:text-white/50 hover:bg-white/5'
-            }`}
-          >
-            DBG {debugLogs.filter(l => l.level === 'error').length > 0 && (
-              <span className="ml-0.5 text-red-400">
-                ×{debugLogs.filter(l => l.level === 'error').length}
-              </span>
-            )}
-          </button>
-          <div className="flex items-center gap-0.5 bg-white/5 rounded-lg p-0.5">
-            <button
-              onClick={() => switchMode('v2t')}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
-                isV2T
-                  ? 'bg-white/15 text-white shadow-sm'
-                  : 'text-white/35 hover:text-white/55'
-              }`}
-            >
-              V2T
-            </button>
-            <button
-              onClick={() => switchMode('terminal')}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
-                !isV2T
-                  ? 'bg-primary-600/80 text-white shadow-sm'
-                  : 'text-white/35 hover:text-white/55'
-              }`}
-            >
-              AI Terminal
-            </button>
-          </div>
-        </div>
-      </div>
+              </button>
 
-      {/* ── Debug Log Panel (오버레이) ──────────────────────────────────────── */}
-      {showDebug && (
-        <div className="absolute inset-0 z-40 flex flex-col bg-[#0a0c10] border border-orange-500/20 overflow-hidden"
-          style={{ top: 36 }}
-        >
-          <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/8 bg-[#0d1117] flex-shrink-0">
-            <span className="text-xs text-orange-400/80 font-mono font-semibold">NOVA DEBUG LOG</span>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-white/25 font-mono">{debugLogs.length} entries</span>
-              <button
-                onClick={() => {
-                  const text = debugLogs.map(e => {
-                    const time = new Date(e.ts).toLocaleTimeString('ko-KR', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-                    return `[${time}] [${e.level.toUpperCase()}] ${e.msg}`
-                  }).join('\n')
-                  navigator.clipboard.writeText(text).catch(() => {})
-                }}
-                className="text-xs text-white/25 hover:text-white/50 px-2 py-0.5 rounded hover:bg-white/5 transition-colors"
-                title="로그 복사">
-                copy
-              </button>
-              <button onClick={() => setDebugLogs([])}
-                className="text-xs text-white/25 hover:text-white/50 px-2 py-0.5 rounded hover:bg-white/5 transition-colors">
-                clear
-              </button>
-              <button onClick={() => setShowDebug(false)}
-                className="text-xs text-white/30 hover:text-white/60 px-1.5 py-0.5 rounded hover:bg-white/5 transition-colors">
-                ✕
-              </button>
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto min-h-0 py-2 px-3 space-y-0.5 font-mono text-[11px] select-text">
-            {debugLogs.length === 0 && (
-              <div className="text-white/20 py-4 text-center">로그 없음 — 음성 명령을 실행하면 여기에 표시됩니다</div>
-            )}
-            {debugLogs.map((entry, i) => {
-              const time = new Date(entry.ts).toLocaleTimeString('ko-KR', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-              const color =
-                entry.level === 'error'   ? 'text-red-400/90' :
-                entry.level === 'warn'    ? 'text-yellow-400/80' :
-                entry.level === 'success' ? 'text-green-400/80' :
-                'text-white/45'
-              const bg =
-                entry.level === 'error'   ? 'bg-red-500/5 border-l border-red-500/30' :
-                entry.level === 'success' ? 'bg-green-500/5 border-l border-green-500/20' :
-                ''
-              return (
-                <div key={i} className={`flex gap-2 items-start py-0.5 px-1 rounded ${bg}`}>
-                  <span className="text-white/20 flex-shrink-0 w-[56px]">{time}</span>
-                  <span className={`flex-shrink-0 w-[6px] ${
-                    entry.level === 'error' ? 'text-red-400' :
-                    entry.level === 'warn' ? 'text-yellow-400' :
-                    entry.level === 'success' ? 'text-green-400' : 'text-white/20'
-                  }`}>■</span>
-                  <span className={`${color} whitespace-pre-wrap leading-relaxed break-words min-w-0`}>
-                    {entry.msg}
-                  </span>
-                </div>
-              )
-            })}
-            <div ref={debugBottomRef} />
-          </div>
-        </div>
-      )}
-
-      {/* ── NCO Health Panel ───────────────────────────────────────────────── */}
-      {showHealth && (
-        <div className="absolute inset-0 z-40 flex flex-col bg-[#0a0c10] border border-emerald-500/20 overflow-hidden"
-          style={{ top: 36 }}
-        >
-          <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/8 bg-[#0d1117] flex-shrink-0">
-            <span className="text-xs text-emerald-400/80 font-mono font-semibold">NCO AI PROVIDER HEALTH</span>
-            <div className="flex items-center gap-2">
-              {healthResults.length > 0 && (
-                <span className="text-xs font-mono">
-                  <span className="text-emerald-400">{healthResults.filter(r => r.status === 'online').length} online</span>
-                  {healthResults.filter(r => r.status === 'offline').length > 0 && (
-                    <span className="text-red-400 ml-2">{healthResults.filter(r => r.status === 'offline').length} offline</span>
-                  )}
-                </span>
-              )}
-              <button onClick={runHealthCheck} disabled={healthChecking}
-                className="text-xs text-white/40 hover:text-white/70 px-2 py-0.5 rounded hover:bg-white/5 transition-colors disabled:opacity-40">
-                {healthChecking ? '체크 중...' : '새로고침'}
-              </button>
-              <button onClick={() => setShowHealth(false)}
-                className="text-xs text-white/30 hover:text-white/60 px-1.5 py-0.5 rounded hover:bg-white/5 transition-colors">
-                ✕
-              </button>
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto min-h-0 py-2 px-2 select-text">
-            {healthChecking && healthResults.length === 0 && (
-              <div className="flex items-center gap-2 text-white/30 text-xs py-6 justify-center">
-                <span className="w-3 h-3 border border-white/30 border-t-transparent rounded-full animate-spin" />
-                프로바이더 헬스 체크 중...
-              </div>
-            )}
-            {healthResults.length > 0 && (
-              <div className="grid grid-cols-1 gap-1.5">
-                {healthResults.map(p => {
-                  const isOnline = p.status === 'online'
-                  const isDegraded = p.status === 'degraded'
-                  const dotColor = isOnline ? 'bg-emerald-400' : isDegraded ? 'bg-yellow-400' : 'bg-red-500'
-                  const borderColor = isOnline ? 'border-emerald-500/15' : isDegraded ? 'border-yellow-500/20' : 'border-red-500/20'
-                  const bgColor = isOnline ? 'bg-emerald-500/5' : isDegraded ? 'bg-yellow-500/5' : 'bg-red-500/5'
-                  return (
-                    <div key={p.id} className={`flex items-start gap-2 px-3 py-2 rounded-lg border ${borderColor} ${bgColor}`}>
-                      {/* Status dot */}
-                      <div className="flex items-center pt-0.5 flex-shrink-0">
-                        <span className={`w-2 h-2 rounded-full ${dotColor} ${isOnline ? 'shadow-sm shadow-emerald-500/50' : ''}`} />
-                      </div>
-                      {/* Info */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-semibold text-white/80">{p.name}</span>
-                          <span className="text-[10px] text-white/25 font-mono bg-white/5 px-1.5 py-0.5 rounded">{p.role}</span>
-                          <span className="text-[10px] text-white/20 font-mono">{p.type}</span>
-                        </div>
-                        {(p.version || p.model) && (
-                          <div className="text-[10px] text-white/35 font-mono mt-0.5 truncate">
-                            {p.version || p.model}
-                          </div>
-                        )}
-                        {p.error && (
-                          <div className="text-[10px] text-red-400/70 font-mono mt-0.5 truncate">{p.error}</div>
-                        )}
-                      </div>
-                      {/* Latency + status */}
-                      <div className="flex-shrink-0 text-right">
-                        <div className={`text-[10px] font-mono font-semibold ${isOnline ? 'text-emerald-400/80' : isDegraded ? 'text-yellow-400/80' : 'text-red-400/70'}`}>
-                          {p.status === 'online' ? 'ONLINE' : p.status === 'degraded' ? 'DEGRADED' : 'OFFLINE'}
-                        </div>
-                        {p.latencyMs > 0 && (
-                          <div className={`text-[10px] font-mono ${p.latencyMs > 2000 ? 'text-yellow-400/60' : 'text-white/25'}`}>
-                            {p.latencyMs}ms
-                          </div>
-                        )}
-                      </div>
+              <div className="mt-6 h-14 w-[260px] max-w-full">
+                {isRecording ? (
+                  <AudioVisualizer active variant="panel" mode={inputMode} label="마이크 입력 스펙트럼" />
+                ) : isTranscribing ? (
+                  <div className="flex h-full flex-col items-center justify-center gap-3">
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/[0.06]">
+                      <div className="h-full rounded-full bg-gradient-to-r from-primary-400 to-purple-400 transition-all" style={{ width: `${Math.max(12, transcriptionProgress * 100)}%` }} />
                     </div>
-                  )
-                })}
+                    <span className="text-[10px] font-mono text-white/30">ZERO-COPY PCM TRANSFER</span>
+                  </div>
+                ) : (
+                  <div className="flex h-full flex-col items-center justify-center gap-1.5 text-[11px] text-white/28">
+                    <span className="flex items-center gap-2">
+                      <kbd className="rounded-md border border-white/[0.08] bg-white/[0.035] px-2 py-1 font-mono text-white/48">⌃ ⇧ Space</kbd>
+                      일반 받아쓰기
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <kbd className="rounded-md border border-violet-300/15 bg-violet-300/[0.05] px-2 py-1 font-mono text-violet-100/60">⌃ ⇧ ⌥ Space</kbd>
+                      메타 프롬프트
+                    </span>
+                  </div>
+                )}
               </div>
-            )}
-            {healthResults.length > 0 && (
-              <div className="text-[10px] text-white/20 font-mono px-1 pt-2">
-                마지막 체크: {new Date(healthResults[0]?.checkedAt || 0).toLocaleTimeString('ko-KR', { hour12: false })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
-      {/* ── V2T: message stream (hidden when terminal mode, but stays mounted) */}
-      <div className={`flex-col flex-1 min-h-0 overflow-hidden ${isV2T ? 'flex' : 'hidden'}`}>
-        <div className="flex-1 overflow-y-auto min-h-0 py-3 px-4 space-y-1.5 font-mono text-sm select-text">
-          {messages.map((msg) => <MessageRow key={msg.id} msg={msg} />)}
-          {isProcessing && (
-            <div className="flex items-center gap-2 text-white/30 text-xs py-1">
-              <span className="w-3 h-3 border border-white/25 border-t-transparent rounded-full animate-spin inline-block flex-shrink-0" />
-              <span>
-                {aiStage === 'transcribing' ? 'Whisper 변환 중...' :
-                 aiStage === 'ai_processing' || aiStage === 'nco_processing' || aiStage === 'nco_discussion' ? 'AI 처리 중...' : 'AI 분석 중...'}
-              </span>
-              <button
-                onClick={() => window.electronAPI.cancelAI?.()}
-                className="ml-2 text-red-400/60 hover:text-red-400 text-xs px-1.5 py-0.5 rounded border border-red-400/20 hover:border-red-400/50 transition-colors"
-                title="작업 취소 (Ctrl+Shift+Escape)">
-                ✕ 취소
-              </button>
+              {isRecording && <p className="mt-1 font-mono text-sm tabular-nums text-white/45">{duration}</p>}
             </div>
-          )}
-          <div ref={bottomRef} />
-        </div>
+          </div>
 
-        {/* V2T: full input bar */}
-        <div className="border-t border-white/8 px-3 py-2 flex items-center gap-2 flex-shrink-0">
-          <label className="cursor-pointer p-1 rounded text-white/25 hover:text-white/50 transition-colors flex-shrink-0" title="파일 첨부">
-            <input type="file" multiple className="hidden"
-              onChange={async (e) => {
-                for (const file of Array.from(e.target.files || [])) {
-                  const att = await readFileAsAttachment(file)
-                  if (att) addAttachment(att)
-                }
-                e.target.value = ''
-              }}
-            />
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-            </svg>
-          </label>
-          <button
-            onClick={toggleRecording}
-            title={isRecording ? '녹음 중지' : '녹음 시작'}
-            className={`relative w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${
-              isRecording ? 'bg-red-500 shadow-[0_0_14px_rgba(239,68,68,0.45)]' : 'bg-white/10 hover:bg-white/18'
-            }`}
-          >
-            {isRecording && <span className="absolute inset-0 rounded-full bg-red-400/20 animate-ping pointer-events-none" />}
-            {isRecording ? (
-              <svg className="w-3.5 h-3.5 text-white relative" fill="currentColor" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2" /></svg>
-            ) : (
-              <svg className="w-4 h-4 text-white relative" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m-4-4h8m-4-8a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            )}
-          </button>
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={isRecording ? '🎙 녹음 중...' : '음성 입력 대기 중 (⌃ Shift Space)'}
-            disabled={isRecording}
-            className="flex-1 bg-transparent text-white/85 placeholder-white/20 outline-none text-sm disabled:opacity-30 font-sans"
-            autoFocus
-          />
-        </div>
+          <div className="flex min-h-[330px] flex-col gap-4">
+            <article className="glass-light flex min-h-[215px] flex-1 flex-col rounded-[24px] border border-white/[0.075] p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[9px] font-mono tracking-[0.16em] text-white/25">LATEST TRANSCRIPT</p>
+                  <p className="mt-1 text-xs text-white/45">가장 최근에 인식한 문장</p>
+                </div>
+                <button type="button" onClick={() => void copyResult()} disabled={!currentTranscription} className="rounded-lg border border-white/[0.07] bg-white/[0.025] px-2.5 py-1.5 text-[10px] text-white/40 transition-colors hover:bg-white/[0.06] hover:text-white/75 disabled:opacity-25">
+                  {copied ? '복사됨' : '복사'}
+                </button>
+              </div>
+              <div className="mt-5 flex flex-1 items-center">
+                {currentTranscription ? (
+                  <div>
+                    {latestResult?.inputMode === 'meta' && (
+                      <div className="mb-3 flex items-center gap-2">
+                        <span className="rounded-full border border-violet-300/15 bg-violet-300/[0.06] px-2 py-1 text-[8px] font-mono tracking-[0.12em] text-violet-200/75">
+                          {latestResult.metaPromptOutcome === 'local-ai'
+                            ? `META · ${(latestResult.metaPromptProvider || 'Local AI · qwen3:14b').replace(/^Local AI\s*·\s*/i, '').toUpperCase()}`
+                            : latestResult.metaPromptOutcome === 'local'
+                              ? 'META · SAFE'
+                              : latestResult.metaPromptOutcome === 'fallback'
+                                ? 'META · LEGACY'
+                                : `META · ${(latestResult.metaPromptProvider || 'NCO').replace(/^NCO\s*·\s*/i, '').toUpperCase()}`}
+                        </span>
+                        {latestResult.metaPromptOutcome === 'local-ai' && <span className="text-[9px] text-violet-200/55">실제 로컬 AI 답변 완료</span>}
+                        {latestResult.metaPromptOutcome === 'local' && <span className="text-[9px] text-amber-200/55">AI 불가 · 안전 가공 완료</span>}
+                        {latestResult.metaPromptOutcome === 'fallback' && <span className="text-[9px] text-amber-200/55">이전 기록 · 원문 사용</span>}
+                      </div>
+                    )}
+                    <p className="select-text whitespace-pre-wrap text-[15px] leading-7 text-white/82">{currentTranscription}</p>
+                    {latestResult?.inputMode === 'meta' && latestResult.sourceText && latestResult.sourceText !== currentTranscription && (
+                      <p className="mt-4 border-t border-white/[0.055] pt-3 text-[10px] leading-5 text-white/28">원문 · {latestResult.sourceText}</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm leading-6 text-white/24">마이크 버튼을 누르고 자연스럽게 말해보세요.<br />인식된 텍스트가 여기에 표시됩니다.</p>
+                )}
+              </div>
+            </article>
 
-        <div className="px-4 py-1 flex justify-between text-[10px] text-white/15 border-t border-white/5 flex-shrink-0 font-sans">
-          <span>⌃ Shift Space · 전역 녹음 단축키</span>
-          <span>직접 입력 모드 · autoInject</span>
-        </div>
-      </div>
-
-      {/* ── AI Terminal: always mounted, hidden in V2T mode (keeps PTY session) */}
-      <div className={`flex-col flex-1 min-h-0 overflow-hidden ${isV2T ? 'hidden' : 'flex'}`}>
-        {/* xterm.js PTY terminal — never unmounts, session persists across tab switches */}
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <TerminalPanel />
-        </div>
-
-        {/* minimal mic bar */}
-        <div className="border-t border-white/8 px-3 py-1.5 flex items-center gap-3 flex-shrink-0 bg-[#0d1117]">
-          <button
-            onClick={toggleRecording}
-            title={isRecording ? '녹음 중지' : '녹음 시작 (음성 → 터미널)'}
-            className={`relative w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${
-              isRecording ? 'bg-red-500 shadow-[0_0_14px_rgba(239,68,68,0.45)]' : 'bg-white/10 hover:bg-white/18'
-            }`}
-          >
-            {isRecording && <span className="absolute inset-0 rounded-full bg-red-400/20 animate-ping pointer-events-none" />}
-            {isRecording ? (
-              <svg className="w-3 h-3 text-white relative" fill="currentColor" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2" /></svg>
-            ) : (
-              <svg className="w-3.5 h-3.5 text-white relative" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m-4-4h8m-4-8a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            )}
-          </button>
-          {isRecording ? (
-            <div className="flex items-center gap-1.5 flex-1">
-              <span className="text-red-400 text-xs font-mono">{duration}</span>
-              <div className="flex items-center gap-[1.5px] h-3">
-                {Array.from({ length: 12 }, (_, i) => {
-                  const h = 2 + audioLevel * (Math.sin(i * 0.8) * 0.4 + 0.6) * 9
-                  return <div key={i} className="rounded-full bg-red-400/60 flex-shrink-0"
-                    style={{ width: 2, height: Math.max(2, h), transition: 'height 80ms ease-out' }} />
-                })}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-2xl border border-white/[0.065] bg-white/[0.022] px-4 py-3.5">
+                <p className="text-[9px] font-mono tracking-[0.12em] text-white/24">ENGINE</p>
+                <p className="mt-2 truncate text-xs text-white/65" title={STT_ENGINE_NAME}>large-v3-turbo</p>
+              </div>
+              <div className="rounded-2xl border border-white/[0.065] bg-white/[0.022] px-4 py-3.5">
+                <p className="text-[9px] font-mono tracking-[0.12em] text-white/24">PROCESS LATENCY</p>
+                <p className="mt-2 text-xs text-white/65">{latestLatency ? `${latestLatency.toFixed(2)} sec` : '—'}</p>
+                {latestResult?.metaPromptDuration != null && <p className="mt-1 text-[9px] text-violet-200/40">AI {latestResult.metaPromptDuration.toFixed(2)} sec</p>}
               </div>
             </div>
-          ) : (
-            <span className="text-white/20 text-[10px] font-sans">⌃ Shift Space · 음성 → 터미널 자동 실행</span>
-          )}
-        </div>
-      </div>
-
-      {/* ── Attachment strip (always visible when files pending) ──────────── */}
-      {pendingAttachments.length > 0 && (
-        <div className="px-3 py-2 border-t border-white/5 bg-white/2 flex items-center gap-2 flex-shrink-0">
-          <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
-            {pendingAttachments.map(att => (
-              <span key={att.id}
-                className="flex items-center gap-1 text-xs bg-white/8 border border-white/10 rounded-md px-2 py-0.5 font-sans">
-                <span>{fileIcon(att.mimeType)}</span>
-                <span className="text-white/60 max-w-[90px] truncate">{att.name}</span>
-                <button onClick={() => removeAttachment(att.id)}
-                  className="text-white/25 hover:text-white/60 ml-0.5 transition-colors">×</button>
-              </span>
-            ))}
           </div>
-          <button
-            onClick={handleProcessAttachments}
-            disabled={isProcessingAttachment}
-            className="text-xs px-2.5 py-1 bg-primary-600/80 hover:bg-primary-500 text-white rounded-md
-              transition-all disabled:opacity-40 flex-shrink-0 font-sans"
-          >
-            AI 분석
-          </button>
-          <button onClick={clearAttachments} className="text-white/25 hover:text-white/50 text-xs font-sans flex-shrink-0">취소</button>
-        </div>
-      )}
+        </section>
+      </div>
     </div>
   )
-}
-
-// ─── CopyBtn ─────────────────────────────────────────────────────────────────
-
-function CopyBtn({ text, className = '' }: { text: string; className?: string }) {
-  const [copied, setCopied] = React.useState(false)
-  const handleCopy = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    })
-  }
-  return (
-    <button
-      onClick={handleCopy}
-      title="복사"
-      className={`opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 p-1 rounded hover:bg-white/10 ${className}`}
-    >
-      {copied ? (
-        <svg className="w-3 h-3 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-        </svg>
-      ) : (
-        <svg className="w-3 h-3 text-white/35 hover:text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-        </svg>
-      )}
-    </button>
-  )
-}
-
-// ─── MessageRow ───────────────────────────────────────────────────────────────
-
-function MessageRow({ msg }: { msg: Msg }) {
-  switch (msg.type) {
-    case 'system':
-      return (
-        <div className="text-white/22 text-xs italic whitespace-pre-wrap leading-relaxed py-0.5">
-          {msg.text}
-        </div>
-      )
-
-    case 'voice':
-      return (
-        <div className="group flex items-start gap-2 py-0.5">
-          <span className="text-cyan-400/50 flex-shrink-0 text-xs mt-0.5">🎤</span>
-          <span className="text-cyan-200/85 leading-relaxed flex-1">{msg.text}</span>
-          <CopyBtn text={msg.text} className="mt-0.5" />
-        </div>
-      )
-
-    case 'typed':
-      return (
-        <div className="group flex items-start gap-2 py-0.5">
-          <span className="text-white/25 flex-shrink-0 text-xs mt-0.5 font-mono">▶</span>
-          <span className="text-white/80 leading-relaxed flex-1">{msg.text}</span>
-          <CopyBtn text={msg.text} className="mt-0.5" />
-        </div>
-      )
-
-    case 'ai':
-      return (
-        <div className="group my-1 pl-3 border-l-2 border-primary-500/35 py-1">
-          <div className="flex items-center justify-between mb-1">
-            <div className="text-[10px] text-primary-400/50 font-sans font-medium tracking-wide">NOVA</div>
-            <CopyBtn text={msg.text} />
-          </div>
-          <p className="text-white/80 leading-relaxed whitespace-pre-wrap text-sm font-sans">{msg.text}</p>
-        </div>
-      )
-
-    case 'cmd':
-      return (
-        <div className="group flex items-start gap-2 bg-green-400/5 border border-green-400/10 rounded-lg px-2.5 py-1.5 my-0.5">
-          <span className="text-green-400/60 flex-shrink-0 text-xs mt-0.5">$</span>
-          <span className="text-green-300/90 whitespace-pre-wrap break-words flex-1">{msg.text}</span>
-          <CopyBtn text={msg.text} className="mt-0.5" />
-        </div>
-      )
-
-    case 'stdout':
-      return (
-        <div className="group relative">
-          <pre className="text-white/55 whitespace-pre-wrap break-words pl-5 leading-relaxed text-xs py-0 pr-6">
-            {msg.text}
-          </pre>
-          <CopyBtn text={msg.text} className="absolute top-0 right-0" />
-        </div>
-      )
-
-    case 'stderr':
-      return (
-        <div className="group relative">
-          <pre className="text-yellow-300/65 whitespace-pre-wrap break-words pl-5 leading-relaxed text-xs py-0 pr-6">
-            {msg.text}
-          </pre>
-          <CopyBtn text={msg.text} className="absolute top-0 right-0" />
-        </div>
-      )
-
-    case 'error':
-      return (
-        <div className="group flex items-start gap-2 text-red-400/80 text-xs pl-2 py-0.5 border-l-2 border-red-500/30">
-          <span className="flex-1">{msg.text}</span>
-          <CopyBtn text={msg.text} />
-        </div>
-      )
-
-    case 'inject':
-      return (
-        <div className="text-white/22 text-xs py-0.5">
-          ✓ 입력됨 — {msg.text.substring(0, 60)}{msg.text.length > 60 ? '…' : ''}
-        </div>
-      )
-
-    case 'attachment':
-      return (
-        <div className="flex items-center gap-2 text-xs text-white/40 py-0.5 font-sans">
-          <span>{msg.label}</span>
-          <span className="text-white/25">{msg.text}</span>
-        </div>
-      )
-
-    default:
-      return null
-  }
 }

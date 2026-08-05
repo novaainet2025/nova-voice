@@ -1,1061 +1,345 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react'
+import React, { useEffect, useState } from 'react'
+import { DEFAULT_SETTINGS, STT_ENGINE_NAME } from '../../../shared/types'
+import type { AppSettings, MetaPromptStatus, SttStatus } from '../../../shared/types'
 import { useAppStore } from '../../stores/appStore'
-import type { AppSettings } from '../../../shared/types'
 
-interface TTSServerStatus {
-  id: 'qwen3' | 'mlx' | 'mlx_ko' | 'mlx_en' | 'mlx_mix' | 'all_tts'
-  name: string
-  port: number
-  running: boolean
-  device?: string
-  model?: string
-  latencyMs?: number
-}
-
-const LANGUAGES = [
-  { code: 'auto', name: 'Auto Detect' },
-  { code: 'en', name: 'English' },
-  { code: 'ko', name: '한국어' },
-  { code: 'ja', name: '日本語' },
-  { code: 'zh', name: '中文' },
-  { code: 'es', name: 'Español' },
-  { code: 'fr', name: 'Français' },
-  { code: 'de', name: 'Deutsch' },
-  { code: 'pt', name: 'Português' },
-  { code: 'ru', name: 'Русский' },
-  { code: 'it', name: 'Italiano' },
-  { code: 'nl', name: 'Nederlands' },
-  { code: 'ar', name: 'العربية' },
-  { code: 'hi', name: 'हिन्दी' },
-  { code: 'vi', name: 'Tiếng Việt' },
-  { code: 'th', name: 'ไทย' }
-]
-
-const MODELS = [
-  { name: 'tiny', desc: 'Fastest, lower accuracy (~75MB)', size: '75MB' },
-  { name: 'base', desc: 'Good balance of speed and accuracy (~142MB)', size: '142MB' },
-  { name: 'small', desc: 'Better accuracy, moderate speed (~466MB)', size: '466MB' },
-  { name: 'medium', desc: 'High accuracy, slower (~1.5GB)', size: '1.5GB' },
-  { name: 'large', desc: 'Best accuracy, slowest (~3GB)', size: '3GB' }
-]
-
-const MLX_VOICE_LABELS: Record<string, string> = {
-  'Chelsie': 'Chelsie (여성, 밝고 활기찬)',
-  'Ethan': 'Ethan (남성, 차분하고 안정적)',
-  'Serena': 'Serena (여성, 부드럽고 따뜻한)',
-  'Vivian': 'Vivian (여성, 프로페셔널)',
-  'Ryan': 'Ryan (남성, 명확하고 전문적)',
-  'Aiden': 'Aiden (남성, 젊고 에너지틱)',
-  'Eric': 'Eric (남성, 깊고 차분한)',
-  'Dylan': 'Dylan (남성, 친근하고 캐주얼)'
-}
-
-// KOKORO_VOICE_LABELS 키는 KOKORO_VOICE_MAP 키와 동일한 nova 카드명으로 통일
-// → mlxVoice에 Kokoro ID가 아닌 nova 카드명이 저장되어 모델 전환 시 매핑 일관성 유지
-const KOKORO_VOICE_LABELS: Record<string, string> = {
-  'Ryan':    'Ryan (am_adam · 남성)',
-  'Chelsie': 'Chelsie (af_bella · 여성)',
-  'Vivian':  'Vivian (af_heart · 여성, 활기찬)',
-  'Aiden':   'Aiden (am_adam · 남성)',
-  'Ethan':   'Ethan (bm_george · 남성, 영국)',
-  'Serena':  'Serena (bf_emma · 여성)',
-  'Eric':    'Eric (am_adam · 남성)',
-  'Dylan':   'Dylan (bm_george · 남성)',
-}
-
-const SPARK_VOICE_LABELS: Record<string, string> = {
-  'Ryan':    'Ryan (ko_male · 한국어 남성)',
-  'Chelsie': 'Chelsie (ko_female · 한국어 여성)',
-  'Vivian':  'Vivian (female_1 · 여성 variant)',
-  'Aiden':   'Aiden (ko_male · 한국어 남성)',
-  'Ethan':   'Ethan (male_1 · 남성 variant)',
-  'Serena':  'Serena (ko_female · 한국어 여성)',
-  'Eric':    'Eric (male_1 · 남성 variant)',
-  'Dylan':   'Dylan (ko_male · 한국어 남성)',
-}
-
-// @@gentop Qwen3-TTS CustomVoice 9화자 — 화자카드 레이블
-// 서버: http://localhost:7860  모델: qwen3-tts
-const QWEN3_VOICE_LABELS: Record<string, string> = {
-  Ryan:    'Ryan (ryan · 남성, 안정적)',
-  Chelsie: 'Chelsie (sohee · 여성, 밝고 자연스러운)',
-  Vivian:  'Vivian (vivian · 여성)',
-  Aiden:   'Aiden (aiden · 남성)',
-  Ethan:   'Ethan (uncle_fu · 남성, 중후한)',
-  Serena:  'Serena (serena · 여성)',
-  Eric:    'Eric (eric · 남성)',
-  Dylan:   'Dylan (dylan · 남성)',
-}
-
-const TTS_SERVER_INFO: Record<string, { label: string; badge: string; desc: string; color: string; port: number }> = {
-  mlx_ko:    { label: 'MLX-Qwen3',  badge: 'MPS', desc: '한국어 전용 · Qwen3-TTS 4bit · :8800 · ~0.9초', color: 'blue',    port: 8800 },
-  mlx_en:    { label: 'MLX-Kokoro', badge: 'MPS', desc: '영어 전용 · Kokoro-82M 82MB 상주 · :8801 · ~0.9초', color: 'cyan', port: 8801 },
-  mlx_mix:   { label: 'MLX-Spark',  badge: 'MPS', desc: '한영 혼용 전용 · Spark-TTS-0.5B · :8802 · ~2초', color: 'indigo',  port: 8802 },
-  qwen3:     { label: 'Qwen3-TTS',  badge: '9화자', desc: '@@gentop :7860 · CustomVoice 9화자 · ryan/sohee/vivian 등 · ~1.5초', color: 'emerald', port: 7860 },
-  all_tts:   { label: 'all-tts Hub', badge: 'Stream', desc: '16 adapters · edge_tts streaming · :7861 · ~0.5초', color: 'amber', port: 7861 },
+interface LoginItemStatus {
+  supported: boolean
+  openAtLogin: boolean
+  status: string
 }
 
 export function SettingsPanel() {
-  const { settings, setSettings: setStoreSettings } = useAppStore()
-  const [localSettings, setLocalSettings] = useState<AppSettings | null>(null)
+  const sharedSettings = useAppStore((state) => state.settings)
+  const setStoreSettings = useAppStore((state) => state.setSettings)
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
+  const [loginStatus, setLoginStatus] = useState<LoginItemStatus | null>(null)
+  const [sttStatus, setSttStatus] = useState<SttStatus | null>(null)
+  const [metaStatus, setMetaStatus] = useState<MetaPromptStatus | null>(null)
+  const [reconnecting, setReconnecting] = useState(false)
+  const [reconnectError, setReconnectError] = useState('')
+  const [shortcutError, setShortcutError] = useState('')
   const [saved, setSaved] = useState(false)
-  const [mlxVoices, setMlxVoices] = useState<string[]>([])
-  const [ttsServers, setTtsServers] = useState<TTSServerStatus[]>([])
-  const [serverBusy, setServerBusy] = useState<Record<string, 'starting' | 'stopping' | 'previewing' | null>>({})
-  const [sayVoices, setSayVoices] = useState<{ id: string; name: string; desc: string }[]>([])
-  const [sayPreviewBusy, setSayPreviewBusy] = useState(false)
-  const [allTtsAdapters, setAllTtsAdapters] = useState<any[]>([])
-  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const isInitialLoad = useRef(true)
-
-  const refreshServerStatus = useCallback(async () => {
-    try {
-      const statuses = await window.electronAPI.getTTSServerStatuses()
-      setTtsServers(statuses)
-    } catch { /* ignore */ }
-  }, [])
 
   useEffect(() => {
-    async function loadSettings() {
-      const s = await window.electronAPI.getSettings()
-      isInitialLoad.current = true
-      setStoreSettings(s)
-      setLocalSettings(s)
-      try {
-        const voices = await window.electronAPI.getMLXVoices()
-        setMlxVoices(voices)
-      } catch { /* MLX not available */ }
-      try {
-        const sv = await window.electronAPI.getSayVoices()
-        setSayVoices(sv)
-      } catch { /* ignore */ }
-      try {
-        const res = await window.electronAPI.getAllTtsAdapters()
-        if (res?.adapters) setAllTtsAdapters(res.adapters)
-      } catch { /* ignore */ }
-    }
-    loadSettings()
-    refreshServerStatus()
-    const interval = setInterval(refreshServerStatus, 8000)
-    return () => clearInterval(interval)
-  }, [setStoreSettings, refreshServerStatus])
+    void Promise.all([
+      window.electronAPI.getSettings(),
+      window.electronAPI.getLoginItemStatus(),
+      window.electronAPI.getSttStatus(),
+      window.electronAPI.getMetaPromptStatus(),
+    ]).then(([loadedSettings, loadedLoginStatus, loadedSttStatus, loadedMetaStatus]) => {
+      setSettings(loadedSettings)
+      setStoreSettings(loadedSettings)
+      setLoginStatus(loadedLoginStatus)
+      setSttStatus(loadedSttStatus)
+      setMetaStatus(loadedMetaStatus)
+    })
+    const refreshTimer = window.setInterval(() => {
+      void window.electronAPI.getMetaPromptStatus().then(setMetaStatus)
+    }, 8_000)
+    return () => window.clearInterval(refreshTimer)
+  }, [setStoreSettings])
 
-  // 설정 변경 시 자동저장 (debounce 600ms) — 초기 로드는 제외
   useEffect(() => {
-    if (!localSettings) return
-    if (isInitialLoad.current) {
-      isInitialLoad.current = false
-      return
-    }
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
-    autoSaveTimer.current = setTimeout(async () => {
-      await window.electronAPI.setSettings(localSettings)
-      setStoreSettings(localSettings)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
-    }, 600)
-    return () => {
-      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
-    }
-  }, [localSettings, setStoreSettings])
+    if (sharedSettings) setSettings(sharedSettings)
+  }, [sharedSettings])
 
-  const handleServerToggle = async (id: string, running: boolean) => {
-    setServerBusy(b => ({ ...b, [id]: running ? 'stopping' : 'starting' }))
+  const persist = async (patch: Partial<AppSettings>) => {
+    const next = { ...settings, ...patch }
+    setSettings(next)
+    setStoreSettings(next)
+    const confirmed = await window.electronAPI.setSettings(patch)
+    setSettings(confirmed)
+    setStoreSettings(confirmed)
+    setSaved(true)
+    window.setTimeout(() => setSaved(false), 900)
+  }
+
+  /**
+   * Shortcut writes are the one setting the main process can reject (another
+   * app may already own the accelerator), so the rejection is surfaced and the
+   * field is restored from the value that is actually registered.
+   */
+  const persistShortcut = async (patch: Partial<AppSettings>) => {
+    setShortcutError('')
     try {
-      if (running) {
-        await window.electronAPI.stopTTSServer(id)
-      } else {
-        await window.electronAPI.startTTSServer(id)
-      }
-      await refreshServerStatus()
-    } finally {
-      setServerBusy(b => ({ ...b, [id]: null }))
+      await persist(patch)
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      setShortcutError(detail.replace(/^Error invoking remote method '[^']*':\s*Error:\s*/, ''))
+      const current = await window.electronAPI.getSettings()
+      setSettings(current)
+      setStoreSettings(current)
     }
   }
 
-  const handlePreview = async (id: string, voice?: string) => {
-    setServerBusy(b => ({ ...b, [id]: 'previewing' }))
+  const toggleLaunchAtLogin = async () => {
+    const enabled = !settings.launchAtLogin
+    const next = { ...settings, launchAtLogin: enabled }
+    setSettings(next)
+    setStoreSettings(next)
+    setLoginStatus(await window.electronAPI.setLoginItemEnabled(enabled))
+  }
+
+  const reconnectNco = async () => {
+    if (reconnecting) return
+    setReconnecting(true)
+    setReconnectError('')
     try {
-      await window.electronAPI.previewTTSVoice(id, voice)
-    } finally {
-      setServerBusy(b => ({ ...b, [id]: null }))
-    }
-  }
-
-  const updateSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    if (localSettings) {
-      setLocalSettings({ ...localSettings, [key]: value })
-    }
-  }
-
-  const saveSettings = async () => {
-    if (localSettings) {
-      await window.electronAPI.setSettings(localSettings)
-      setStoreSettings(localSettings)
+      setMetaStatus(await window.electronAPI.reconnectNcoProvider(settings.ncoProvider))
       setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
+      window.setTimeout(() => setSaved(false), 900)
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      setReconnectError(detail.replace(/^Error invoking remote method '[^']*':\s*Error:\s*/, ''))
+    } finally {
+      setReconnecting(false)
     }
   }
 
-  if (!localSettings) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-6 h-6 border-2 border-primary-400 border-t-transparent rounded-full animate-spin" />
-      </div>
-    )
+  const providerStatusLabel = (status: NonNullable<MetaPromptStatus['providers']>[number]['status']) => {
+    switch (status) {
+      case 'ready': return '사용 가능'
+      case 'working': return '작업 중'
+      case 'verification-required': return '온라인 · 재연결 필요'
+      case 'limited': return '제한됨'
+      case 'idle': return '온라인'
+      default: return '오프라인'
+    }
   }
-
-  // localSettings.mlxVoice가 단일 소스 — 독립 currentVoice state 제거
-  const currentVoice = localSettings.mlxVoice || 'Ryan'
-
-  const mlxKoStatus  = ttsServers.find(s => s.id === 'mlx_ko')
-  const mlxEnStatus  = ttsServers.find(s => s.id === 'mlx_en')
-  const mlxMixStatus = ttsServers.find(s => s.id === 'mlx_mix')
-  const mlxAnyRunning = mlxKoStatus?.running || mlxEnStatus?.running || mlxMixStatus?.running
-
-  // legacy compat
-  const mlxServerStatus = mlxKoStatus
-  const mlxRunning = mlxKoStatus?.running ?? false
-  const mlxBusy = serverBusy['mlx_ko'] || serverBusy['mlx']
-
-  const MLX_SUB_MODELS = [
-    { id: 'mlx',     label: 'MLX-Auto',   badge: '권장',    desc: '자동 라우팅 · 한국어→Qwen3, 영어→Kokoro, 혼용→Spark', color: 'blue',   serverId: null as string | null },
-    { id: 'mlx_ko',  label: 'MLX-Qwen3',  badge: '한국어',  desc: 'Qwen3-TTS 4bit · :8800', color: 'blue',   serverId: 'mlx_ko' as string },
-    { id: 'mlx_en',  label: 'MLX-Kokoro', badge: '영어',    desc: 'Kokoro-82M-bf16 · :8801', color: 'cyan',   serverId: 'mlx_en' as string },
-    { id: 'mlx_mix', label: 'MLX-Spark',  badge: '한영혼용', desc: 'Spark-TTS-0.5B-bf16 · :8802', color: 'indigo', serverId: 'mlx_mix' as string },
-  ] as const
 
   return (
-    <div className="p-6 h-full overflow-y-auto">
-      <h2 className="text-xl font-semibold mb-6">Settings</h2>
+    <div className="h-full overflow-y-auto px-6 py-6 sm:px-8 sm:py-7">
+      <div className="mx-auto w-full max-w-3xl pb-8">
+        <header className="flex items-end justify-between gap-5">
+          <div>
+            <p className="nova-eyebrow">STT CONTROL</p>
+            <h2 className="nova-page-title">설정</h2>
+            <p className="nova-page-copy">Whisper 받아쓰기와 NCO 메타 프롬프트 동작을 조정합니다.</p>
+          </div>
+          <span className={`text-[9px] font-mono tracking-[0.14em] transition-opacity ${saved ? 'text-emerald-300 opacity-100' : 'text-white/20 opacity-60'}`}>
+            {saved ? 'SAVED' : 'AUTO SAVE'}
+          </span>
+        </header>
 
-      {/* ── TTS 목소리 대시보드 ── */}
-      {['mlx','mlx_ko','mlx_en','mlx_mix','qwen3'].includes(localSettings.ttsModel) && (
-        <section className="mb-6">
-          <h3 className="text-sm font-medium text-white/60 uppercase tracking-wide mb-3">
-            목소리 고정 설정
-          </h3>
-
-          {/* 현재 고정 목소리 상태 바 */}
-          <div className="glass-light rounded-xl p-3 mb-3 border border-primary-400/30 bg-primary-400/5 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-              <span className="text-xs text-white/50">현재 고정 목소리</span>
-              <span className="text-sm font-bold text-primary-300">{currentVoice}</span>
-              <span className="text-xs text-white/40">{(
-                localSettings.ttsModel === 'mlx_en' ? KOKORO_VOICE_LABELS :
-                localSettings.ttsModel === 'mlx_mix' ? SPARK_VOICE_LABELS :
-                localSettings.ttsModel === 'qwen3' ? QWEN3_VOICE_LABELS :
-                MLX_VOICE_LABELS
-              )[currentVoice]?.replace(/^[^ ]+ /, '') || ''}</span>
+        <section className="mt-6 rounded-[24px] border border-white/[0.075] bg-white/[0.022] p-5">
+          <div className="flex items-start justify-between gap-5">
+            <div>
+              <p className="text-[10px] font-mono tracking-[0.14em] text-white/28">OPTIMIZED ENGINE</p>
+              <h3 className="mt-2 text-sm font-medium text-white/78">{STT_ENGINE_NAME}</h3>
+              <p className="mt-1.5 text-xs leading-5 text-white/38">Apple Silicon MLX, 한국어 고정 디코딩, 16kHz 모노 PCM 직접 전송</p>
             </div>
-            <button
-              disabled={!!serverBusy[localSettings.ttsModel]}
-              onClick={async () => {
-                setServerBusy(b => ({ ...b, [localSettings.ttsModel]: 'previewing' }))
-                try { await window.electronAPI.previewTTSVoice(localSettings.ttsModel as any, currentVoice) }
-                finally { setServerBusy(b => ({ ...b, [localSettings.ttsModel]: null })) }
-              }}
-              className="text-xs px-3 py-1.5 rounded-lg bg-primary-400/20 hover:bg-primary-400/30 text-primary-300 transition-colors flex items-center gap-1.5"
+            <span className={`mt-0.5 rounded-full border px-2.5 py-1 text-[9px] ${sttStatus?.ready ? 'border-emerald-300/15 bg-emerald-300/[0.055] text-emerald-200' : 'border-amber-300/15 bg-amber-300/[0.055] text-amber-200'}`}>
+              {sttStatus?.ready ? '준비됨' : '시작 중'}
+            </span>
+          </div>
+          <div className="mt-5 grid grid-cols-3 gap-2">
+            {['16kHz PCM', 'No ffmpeg', 'Warm model'].map((item) => (
+              <div key={item} className="rounded-xl border border-white/[0.055] bg-black/10 px-3 py-2 text-center text-[9px] font-mono text-white/38">{item}</div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-4 rounded-[24px] border border-violet-300/[0.09] bg-[linear-gradient(145deg,rgba(113,91,220,.055),rgba(255,255,255,.018))] p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-mono tracking-[0.14em] text-violet-200/35">META PROMPT AI</p>
+              <h3 className="mt-2 text-sm font-medium text-white/78">NCO 연결</h3>
+              <p className="mt-1.5 text-xs leading-5 text-white/35">NCO Core 또는 전용 로컬 AI가 요청을 내부 재구성한 뒤 사용자가 바로 읽을 최종 답변을 작성합니다.</p>
+            </div>
+            <span className={`mt-0.5 rounded-full border px-2.5 py-1 text-[9px] ${metaStatus?.ncoConnected ? 'border-emerald-300/15 bg-emerald-300/[0.055] text-emerald-200' : 'border-amber-300/15 bg-amber-300/[0.055] text-amber-200'}`}>
+              {metaStatus?.ncoConnected ? 'NCO 연결됨' : 'NCO 오프라인'}
+            </span>
+          </div>
+
+          <div className="mt-5 border-t border-white/[0.055] pt-4">
+            <SettingSwitch
+              label="NCO 연결 사용"
+              description="끄면 전용 로컬 AI만 사용합니다. 켜면 선택한 NCO 프로바이더와 로컬 AI 중 먼저 완료된 결과를 사용합니다."
+              checked={settings.ncoEnabled}
+              badge={settings.ncoEnabled ? '활성' : '로컬 전용'}
+              onChange={() => void persist({ ncoEnabled: !settings.ncoEnabled })}
+            />
+          </div>
+
+          <label className={`mt-4 block transition-opacity ${settings.ncoEnabled ? 'opacity-100' : 'opacity-45'}`}>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-white/68">NCO 프로바이더</span>
+              <span className="text-[9px] font-mono text-white/25">{metaStatus?.readyProviders?.length ?? 0} READY</span>
+            </div>
+            <select
+              value={settings.ncoProvider}
+              disabled={!settings.ncoEnabled}
+              onChange={(event) => void persist({ ncoProvider: event.target.value })}
+              className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#111520] px-3.5 text-xs text-white/68 outline-none transition-colors focus:border-violet-300/35 disabled:cursor-not-allowed"
             >
-              {serverBusy[localSettings.ttsModel] === 'previewing'
-                ? <span className="w-3 h-3 border border-primary-300/60 border-t-transparent rounded-full animate-spin" />
-                : '▶'
-              }
-              현재 목소리 테스트
-            </button>
-          </div>
+              <option value="auto">자동 선택 · 준비된 프로바이더로 전환</option>
+              {(metaStatus?.providers ?? []).map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name} · {providerStatusLabel(provider.status)}
+                </option>
+              ))}
+            </select>
+            <p className="mt-2 text-[10px] leading-5 text-white/28">
+              {settings.ncoProvider === 'auto'
+                ? `측정된 응답 속도와 NCO 실시간 상태로 프로바이더를 고르고, 실패하면 다음 순위로 즉시 넘어갑니다. 로컬 qwen3:14b도 병렬 대기하며 먼저 검증을 통과한 실제 AI 결과를 사용합니다.${metaStatus?.autoProvider ? ` 지금 선택: ${metaStatus.autoProvider}${metaStatus.autoReason ? ` · ${metaStatus.autoReason}` : ''}` : ''}`
+                : `NCO에서는 ${settings.ncoProvider}만 요청합니다. 로컬 qwen3:14b도 병렬 대기하며, 지연·실패 시 먼저 검증된 실제 AI 결과를 사용합니다.`}
+            </p>
+          </label>
 
-          {/* 목소리 그리드 */}
-          <div className="grid grid-cols-2 gap-2">
-            {Object.entries(
-              localSettings.ttsModel === 'mlx_en' ? KOKORO_VOICE_LABELS :
-              localSettings.ttsModel === 'mlx_mix' ? SPARK_VOICE_LABELS :
-              localSettings.ttsModel === 'qwen3' ? QWEN3_VOICE_LABELS :
-              MLX_VOICE_LABELS
-            ).map(([voiceId, label]) => {
-              const isActive = currentVoice === voiceId
-              const isBusy = serverBusy[`preview_${voiceId}`] === 'previewing'
-              return (
-                <div
-                  key={voiceId}
-                  onClick={async () => {
-                    updateSetting('mlxVoice', voiceId)
-                    // 즉시 저장 — Save 버튼 불필요
-                    await window.electronAPI.setMLXVoice(voiceId)
-                    const updated = { ...localSettings!, mlxVoice: voiceId }
-                    await window.electronAPI.setSettings(updated)
-                  }}
-                  className={`relative glass-light rounded-xl p-3 cursor-pointer transition-all border ${
-                    isActive
-                      ? 'border-primary-400 bg-primary-400/10 ring-1 ring-primary-400/30'
-                      : 'border-white/5 hover:border-white/20 hover:bg-white/3'
-                  }`}
-                >
-                  {isActive && (
-                    <div className="absolute top-2 right-2">
-                      <div className="w-2 h-2 rounded-full bg-primary-400" />
-                    </div>
-                  )}
-                  <div className="flex items-start justify-between gap-1">
-                    <div className="min-w-0 flex-1">
-                      <div className={`font-semibold text-sm ${isActive ? 'text-primary-300' : 'text-white/80'}`}>
-                        {voiceId}
-                      </div>
-                      <div className="text-[11px] text-white/40 mt-0.5 truncate">
-                        {label.replace(voiceId + ' ', '')}
-                      </div>
-                    </div>
-                    <button
-                      onClick={async (e) => {
-                        e.stopPropagation()
-                        setServerBusy(b => ({ ...b, [`preview_${voiceId}`]: 'previewing' }))
-                        // 현재 TTS 모델 서버로 미리듣기 (mlx/mlx_ko는 단일화자라 qwen3으로 대체)
-                        const previewMdl = (localSettings.ttsModel === 'mlx' || localSettings.ttsModel === 'mlx_ko' || localSettings.ttsModel === 'qwen3' || localSettings.ttsModel === 'say')
-                          ? 'qwen3' : localSettings.ttsModel
-                        try { await window.electronAPI.previewTTSVoice(previewMdl as any, voiceId) }
-                        finally { setServerBusy(b => ({ ...b, [`preview_${voiceId}`]: null })) }
-                      }}
-                      className="flex-shrink-0 mt-0.5 text-[10px] px-2 py-1 rounded-md bg-white/8 hover:bg-white/20 transition-colors"
-                    >
-                      {isBusy ? <span className="w-2.5 h-2.5 border border-white/40 border-t-transparent rounded-full animate-spin inline-block" /> : '▶'}
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-
-          {/* mlx/mlx_ko 단일화자 경고 */}
-          {(localSettings.ttsModel === 'mlx' || localSettings.ttsModel === 'mlx_ko') && (
-            <div className="mt-2 mb-1 glass-light rounded-xl p-3 border border-yellow-400/20 bg-yellow-400/5">
-              <p className="text-[11px] text-yellow-300/70 leading-relaxed">
-                ⚠️ MLX-Qwen3(:8800)은 단일화자 모델입니다. 실제 TTS 출력은 선택과 무관하게 동일한 목소리로 재생됩니다. 미리듣기(▶)는 Qwen3-TTS(:7860) 기준으로 재생됩니다.
+          {settings.ncoProvider === 'auto' && (metaStatus?.autoRanking?.length ?? 0) > 0 && (
+            <div className="mt-4 overflow-hidden rounded-2xl border border-white/[0.06] bg-black/15">
+              <p className="border-b border-white/[0.05] px-3.5 py-2 text-[9px] font-mono tracking-[0.14em] text-white/25">
+                AUTO SELECTION RANKING
               </p>
+              <ul>
+                {(metaStatus?.autoRanking ?? []).slice(0, 6).map((entry, index) => (
+                  <li key={entry.id} className="flex items-center gap-3 border-b border-white/[0.035] px-3.5 py-2 last:border-b-0">
+                    <span className={`w-4 flex-shrink-0 text-center font-mono text-[9px] ${index === 0 && entry.eligible ? 'text-emerald-300/80' : 'text-white/22'}`}>
+                      {index + 1}
+                    </span>
+                    <span className={`min-w-0 flex-shrink-0 text-[11px] ${entry.eligible ? 'text-white/70' : 'text-white/28'}`}>
+                      {entry.name}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[10px] text-white/28" title={entry.reason}>
+                      {entry.reason}
+                    </span>
+                    {entry.avgSeconds != null && (
+                      <span className="flex-shrink-0 font-mono text-[9px] text-primary-200/45">{entry.avgSeconds.toFixed(1)}s</span>
+                    )}
+                    {entry.successRate != null && (
+                      <span className="flex-shrink-0 font-mono text-[9px] text-white/22">{Math.round(entry.successRate * 100)}%</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
-          {/* 고정 안내 */}
-          <div className="mt-3 glass-light rounded-xl p-3 border border-green-500/20 bg-green-500/5">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-green-400 text-xs">✓</span>
-              <span className="text-xs text-green-300 font-medium">목소리 고정 보장</span>
-            </div>
-            <p className="text-[11px] text-white/40 leading-relaxed">
-              선택한 목소리는 앱 TTS · Stop 훅 · 진행 알림 모두에 동일하게 적용됩니다.
-              MLX 서버 장애 시 다른 목소리 대신 <strong className="text-white/60">침묵</strong> 처리합니다.
+          <div className="mt-4 flex flex-wrap gap-1.5" aria-label="NCO 프로바이더 상태">
+            {(metaStatus?.providers ?? []).map((provider) => (
+              <span key={provider.id} title={`${providerStatusLabel(provider.status)}${provider.blockers.length ? ` · ${provider.blockers.join(', ')}` : ''}`} className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[8px] font-mono tracking-wide ${provider.ready ? 'border-emerald-300/12 bg-emerald-300/[0.045] text-emerald-200/70' : provider.online ? 'border-sky-300/10 bg-sky-300/[0.035] text-sky-200/55' : 'border-white/[0.055] bg-black/10 text-white/28'}`}>
+                <span className={`h-1 w-1 rounded-full ${provider.ready ? 'bg-emerald-300' : provider.online ? 'bg-sky-300/70' : 'bg-white/20'}`} />
+                {provider.id.toUpperCase()}
+              </span>
+            ))}
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <p className="min-w-0 truncate font-mono text-[9px] text-white/20" title={metaStatus?.endpoint}>
+              {metaStatus?.source || 'NCO Core'} · neural-cli-orchestrator · {metaStatus?.endpoint || 'http://127.0.0.1:6200'}
             </p>
+            <button type="button" onClick={() => void reconnectNco()} disabled={!settings.ncoEnabled || reconnecting || !metaStatus?.ncoConnected} className="flex-shrink-0 rounded-lg border border-violet-300/10 bg-violet-300/[0.045] px-2.5 py-1.5 text-[9px] text-violet-100/60 transition-colors hover:bg-violet-300/[0.09] disabled:cursor-not-allowed disabled:opacity-35">
+              {reconnecting ? '확인 중…' : 'NCO 다시 연결'}
+            </button>
+          </div>
+          {reconnectError && <p role="alert" className="mt-2 text-[10px] text-red-200/70">{reconnectError}</p>}
+        </section>
+
+        <section className="mt-4 rounded-[24px] border border-white/[0.075] bg-white/[0.022] p-5">
+          <p className="text-[10px] font-mono tracking-[0.14em] text-white/28">RECORDING</p>
+          <div className="mt-4 space-y-5">
+            {shortcutError && <p role="alert" className="text-[11px] text-red-200/75">{shortcutError}</p>}
+
+            <label className="block">
+              <span className="text-sm text-white/68">일반 받아쓰기 단축키</span>
+              <p className="mt-1 text-xs text-white/32">인식한 문장을 그대로 입력합니다.</p>
+              <input
+                value={settings.shortcut}
+                onChange={(event) => setSettings({ ...settings, shortcut: event.target.value })}
+                onBlur={() => void persistShortcut({ shortcut: settings.shortcut })}
+                onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+                className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-black/15 px-3.5 font-mono text-xs text-white/72 outline-none transition-colors focus:border-primary-300/35"
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-sm text-white/68">메타 프롬프트 단축키</span>
+              <p className="mt-1 text-xs text-white/32">같은 방식으로 녹음하되, 이 한 번만 AI가 최종 답변을 만듭니다. 저장된 기본 모드는 바뀌지 않습니다. 비워 두면 사용하지 않습니다.</p>
+              <input
+                value={settings.metaShortcut}
+                onChange={(event) => setSettings({ ...settings, metaShortcut: event.target.value })}
+                onBlur={() => void persistShortcut({ metaShortcut: settings.metaShortcut })}
+                onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+                className="mt-2 h-10 w-full rounded-xl border border-violet-300/12 bg-black/15 px-3.5 font-mono text-xs text-violet-100/70 outline-none transition-colors focus:border-violet-300/35"
+              />
+            </label>
+
+            <label className="block">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <span className="text-sm text-white/68">말이 끝난 뒤 자동 중지</span>
+                  <p className="mt-1 text-xs text-white/32">짧을수록 빠르고, 길수록 문장 중간 멈춤에 안전합니다.</p>
+                </div>
+                <select value={settings.silenceTimeoutMs} onChange={(event) => void persist({ silenceTimeoutMs: Number(event.target.value) })} className="h-9 rounded-xl border border-white/[0.08] bg-[#111520] px-3 text-xs text-white/65 outline-none focus:border-primary-300/35">
+                  <option value={700}>0.7초 · 최속</option>
+                  <option value={900}>0.9초 · 권장</option>
+                  <option value={1200}>1.2초</option>
+                  <option value={1600}>1.6초</option>
+                  <option value={2000}>2.0초</option>
+                </select>
+              </div>
+            </label>
           </div>
         </section>
-      )}
 
-
-      {/* TTS 기본 모델 */}
-      <section className="mb-6">
-        <h3 className="text-sm font-medium text-white/60 uppercase tracking-wide mb-3">
-          TTS 기본 모델
-        </h3>
-        <div className="space-y-2">
-          {/* MLX 그룹 */}
-          <div className={`glass-light rounded-xl overflow-hidden border transition-all ${
-            ['mlx','mlx_ko','mlx_en','mlx_mix'].includes(localSettings.ttsModel)
-              ? 'border-primary-400/40' : 'border-white/5'
-          }`}>
-            <div className="px-3 py-2 border-b border-white/5 flex items-center gap-2">
-              <span className="text-xs text-white/40 font-medium">MLX-Audio</span>
-              <div className={`w-1.5 h-1.5 rounded-full ${mlxAnyRunning ? 'bg-green-400' : 'bg-white/20'}`} />
-            </div>
-            {MLX_SUB_MODELS.map(m => {
-              const serverStatus = m.serverId ? ttsServers.find(s => s.id === m.serverId) : null
-              const previewServerId = m.serverId || 'mlx_ko'
-              const previewBusy = serverBusy[previewServerId]
-              const selected = localSettings.ttsModel === m.id
-              return (
-                <div
-                  key={m.id}
-                  onClick={() => updateSetting('ttsModel', m.id as AppSettings['ttsModel'])}
-                  className={`px-3 py-2.5 cursor-pointer transition-all flex items-center justify-between border-b border-white/5 last:border-0 ${
-                    selected ? 'bg-primary-400/10' : 'hover:bg-white/3'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${selected ? 'bg-primary-400' : 'bg-white/20'}`} />
-                    {serverStatus && (
-                      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${serverStatus.running ? 'bg-green-400' : 'bg-white/15'}`} />
-                    )}
-                    <span className="font-medium text-sm">{m.label}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono flex-shrink-0 ${
-                      m.color === 'blue'   ? 'bg-blue-500/20 text-blue-300' :
-                      m.color === 'cyan'   ? 'bg-cyan-500/20 text-cyan-300' :
-                      m.color === 'indigo' ? 'bg-indigo-500/20 text-indigo-300' :
-                      'bg-white/10 text-white/50'
-                    }`}>{m.badge}</span>
-                    <span className="text-[11px] text-white/30 truncate hidden sm:block">{m.desc}</span>
-                  </div>
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation()
-                      setServerBusy(b => ({ ...b, [previewServerId]: 'previewing' }))
-                      try {
-                        await window.electronAPI.previewTTSVoice(previewServerId, (m.id === 'mlx_ko' || m.id === 'mlx') ? currentVoice : undefined)
-                      } finally {
-                        setServerBusy(b => ({ ...b, [previewServerId]: null }))
-                      }
-                    }}
-                    disabled={previewBusy === 'previewing'}
-                    className="text-xs px-2.5 py-1 rounded bg-white/8 hover:bg-white/15 transition-colors ml-2 flex-shrink-0 flex items-center gap-1"
-                  >
-                    {previewBusy === 'previewing' ? (
-                      <span className="w-3 h-3 border border-white/40 border-t-transparent rounded-full animate-spin inline-block" />
-                    ) : '▶ 미리듣기'}
-                  </button>
-                </div>
-              )
-            })}
-
-            {/* MLX 화자 선택 — mlx_en/mlx_mix만 표시 (mlx/mlx_ko는 단일화자라 숨김) */}
-            {['mlx','mlx_ko'].includes(localSettings.ttsModel) && (
-              <div className="px-3 py-2 border-t border-white/8 bg-yellow-400/3">
-                <p className="text-[11px] text-yellow-300/60 leading-relaxed">
-                  ⚠️ MLX-Auto · MLX-Qwen3은 한국어를 <strong className="text-yellow-200/80">단일화자(:8800)</strong>로 출력합니다.<br/>
-                  화자를 선택하려면 아래 <strong className="text-white/60">Qwen3-TTS</strong>를 선택하세요 (9화자 지원).
-                </p>
-              </div>
-            )}
-            {['mlx_en','mlx_mix'].includes(localSettings.ttsModel) && (
-              <div className="px-3 py-3 border-t border-white/8 bg-white/2">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] text-white/40 font-medium">화자 고정</span>
-                  <span className="text-[10px] text-white/25">
-                    {localSettings.ttsModel === 'mlx_en' ? 'Kokoro(:8801) 화자' : 'Spark(:8802) 화자'}
-                  </span>
-                </div>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {Object.entries(
-                    localSettings.ttsModel === 'mlx_en' ? KOKORO_VOICE_LABELS :
-                    localSettings.ttsModel === 'mlx_mix' ? SPARK_VOICE_LABELS :
-                    MLX_VOICE_LABELS
-                  ).map(([voiceId, label]) => {
-                    const isActive = currentVoice === voiceId
-                    return (
-                      <div
-                        key={voiceId}
-                        onClick={async () => {
-                          updateSetting('mlxVoice', voiceId)
-                          await window.electronAPI.setMLXVoice(voiceId)
-                          const updated = { ...localSettings!, mlxVoice: voiceId }
-                          await window.electronAPI.setSettings(updated)
-                        }}
-                        className={`relative text-left rounded-lg px-2 py-1.5 transition-all border text-[11px] cursor-pointer ${
-                          isActive
-                            ? 'border-primary-400 bg-primary-400/15 text-primary-300 font-medium'
-                            : 'border-white/8 hover:border-white/20 text-white/50 hover:text-white/70'
-                        }`}
-                      >
-                        <div className="font-medium">{voiceId}</div>
-                        <div className="text-[9px] opacity-60 truncate">{label.split('·')[0].replace(voiceId + ' ', '').trim()}</div>
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation()
-                            setServerBusy(b => ({ ...b, [`inline_preview_${voiceId}`]: 'previewing' }))
-                            try {
-                              // mlx/mlx_ko(:8800)는 단일화자 → :7860 Qwen3-TTS로 화자 차이 시연
-                              const previewModel = (localSettings.ttsModel === 'mlx' || localSettings.ttsModel === 'mlx_ko')
-                                ? 'qwen3' : localSettings.ttsModel as any
-                              await window.electronAPI.previewTTSVoice(previewModel, voiceId)
-                            } finally {
-                              setServerBusy(b => ({ ...b, [`inline_preview_${voiceId}`]: null }))
-                            }
-                          }}
-                          className="absolute top-1 right-1 w-4 h-4 flex items-center justify-center rounded text-[8px] bg-white/10 hover:bg-white/25 transition-colors"
-                        >
-                          {serverBusy[`inline_preview_${voiceId}`] === 'previewing'
-                            ? <span className="w-2 h-2 border border-white/40 border-t-transparent rounded-full animate-spin inline-block" />
-                            : '▶'}
-                        </button>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 나머지 모델 */}
-          {[
-            { id: 'qwen3',     label: 'Qwen3-TTS',  badge: '9화자',  desc: '@@gentop :7860 · 9화자 한국어 고품질 · ryan/sohee/aiden 등', color: 'emerald' },
-            { id: 'say',       label: 'macOS say',  badge: 'System', desc: '즉시 응답 · 오프라인 · 기본 음성', color: 'gray' },
-            { id: 'all_tts',   label: 'all-tts Hub', badge: 'Stream', desc: '16 adapters · edge_tts 실시간 스트리밍 · :7861', color: 'amber' },
-          ].map(m => {
-            const serverRunning = (m.id === 'qwen3' || m.id === 'all_tts') ? ttsServers.find(s => s.id === m.id)?.running : undefined
-            return (
-            <button
-              key={m.id}
-              onClick={() => updateSetting('ttsModel', m.id as AppSettings['ttsModel'])}
-              className={`w-full text-left glass-light rounded-xl p-3 transition-all border ${
-                localSettings.ttsModel === m.id
-                  ? 'border-primary-400 bg-primary-400/10'
-                  : 'border-transparent hover:border-white/10'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                {serverRunning !== undefined && (
-                  <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${serverRunning ? 'bg-green-400' : 'bg-white/20'}`} />
-                )}
-                <span className="font-medium text-sm">{m.label}</span>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
-                  m.color === 'emerald' ? 'bg-emerald-500/20 text-emerald-300' :
-                  m.color === 'amber'   ? 'bg-amber-500/20 text-amber-300' :
-                  m.color === 'violet'  ? 'bg-violet-500/20 text-violet-300' :
-                  'bg-white/10 text-white/50'
-                }`}>{m.badge}</span>
-              </div>
-              <p className="text-xs text-white/40 mt-0.5">{m.desc}</p>
-            </button>
-            )
-          })}
-        </div>
-
-        {/* 청크 분해 모드 토글 */}
-        <div className="mt-4 flex items-start justify-between gap-4 cursor-pointer"
-          onClick={() => updateSetting('ttsChunkMode', !localSettings.ttsChunkMode)}
-        >
-          <div className="flex-1">
-            <span className="text-sm block">청크 분해 합성</span>
-            <p className="text-xs text-white/40 mt-0.5">
-              {localSettings.ttsChunkMode
-                ? '문단 단위로 분해 후 병렬 합성 — 첫 소리 빠름, 긴 텍스트에 유리'
-                : '텍스트 전체를 단일 요청으로 합성 — 끊김 없음, 짧은 텍스트에 유리'}
-            </p>
-          </div>
-          <div
-            className={`w-10 h-6 rounded-full transition-colors relative cursor-pointer flex-shrink-0 mt-0.5 ${
-              localSettings.ttsChunkMode ? 'bg-primary-500' : 'bg-white/20'
-            }`}
-          >
-            <div
-              className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-transform ${
-                localSettings.ttsChunkMode ? 'translate-x-5' : 'translate-x-1'
-              }`}
+        <section className="mt-4 rounded-[24px] border border-white/[0.075] bg-white/[0.022] p-5">
+          <p className="text-[10px] font-mono tracking-[0.14em] text-white/28">BEHAVIOR</p>
+          <div className="mt-4 divide-y divide-white/[0.055]">
+            <SettingSwitch
+              label="Mac 시작 시 자동 실행"
+              description="로그인하면 메뉴바에서 조용히 시작합니다."
+              checked={settings.launchAtLogin}
+              badge={loginStatus?.status === 'requires-approval' ? '승인 필요' : settings.launchAtLogin ? '활성' : undefined}
+              onChange={() => void toggleLaunchAtLogin()}
+            />
+            <SettingSwitch
+              label="인식 텍스트 자동 입력"
+              description="권한이 있으면 이전 앱에 입력하고, 권한이 없으면 클립보드에 복사합니다."
+              checked={settings.autoInject}
+              onChange={() => void persist({ autoInject: !settings.autoInject })}
+            />
+            <SettingSwitch
+              label="입력 후 Enter"
+              description="받아쓰기 결과를 붙여넣은 뒤 Enter를 눌러 CLI·프롬프트 입력을 실행합니다."
+              checked={settings.submitAfterInject}
+              onChange={() => void persist({ submitAfterInject: !settings.submitAfterInject })}
+            />
+            <SettingSwitch
+              label="녹음 오버레이 표시"
+              description="다른 앱 위에 마이크 레벨과 인식 상태를 표시합니다."
+              checked={settings.showOverlay}
+              onChange={() => void persist({ showOverlay: !settings.showOverlay })}
             />
           </div>
-        </div>
-      </section>
-
-      {/* macOS say 화자 */}
-      {localSettings.ttsModel === 'say' && sayVoices.length > 0 && (
-        <section className="mb-6">
-          <h3 className="text-sm font-medium text-white/60 uppercase tracking-wide mb-3">
-            macOS say 화자
-          </h3>
-          <div className="space-y-2">
-            {sayVoices.map(v => (
-              <div key={v.id} className={`glass-light rounded-xl p-3 transition-all border flex items-center justify-between ${
-                localSettings.sayVoice === v.id
-                  ? 'border-primary-400 bg-primary-400/10'
-                  : 'border-transparent hover:border-white/10'
-              }`}>
-                <button
-                  className="flex-1 text-left"
-                  onClick={() => updateSetting('sayVoice', v.id)}
-                >
-                  <span className="font-medium text-sm">{v.name}</span>
-                  <span className="text-xs text-white/40 ml-2">{v.desc}</span>
-                </button>
-                <button
-                  disabled={sayPreviewBusy}
-                  onClick={async () => {
-                    setSayPreviewBusy(true)
-                    try { await window.electronAPI.previewSayVoice(v.id) }
-                    finally { setSayPreviewBusy(false) }
-                  }}
-                  className="text-xs px-2 py-1 rounded bg-white/8 hover:bg-white/15 transition-colors ml-2 flex-shrink-0"
-                >
-                  {sayPreviewBusy ? '▶ ...' : '▶'}
-                </button>
-              </div>
-            ))}
-          </div>
         </section>
-      )}
 
-      {/* Shortcut */}
-      <section className="mb-6">
-        <h3 className="text-sm font-medium text-white/60 uppercase tracking-wide mb-3">
-          Keyboard Shortcut
-        </h3>
-        <div className="glass-light rounded-xl p-4 space-y-4">
-          <div>
-            <label className="block text-sm mb-2">Toggle Recording</label>
-            <input
-              type="text"
-              value={localSettings.shortcut}
-              onChange={(e) => updateSetting('shortcut', e.target.value)}
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm
-                focus:outline-none focus:border-primary-400 transition-colors"
-              placeholder="Ctrl+Shift+Space"
-            />
-            <p className="text-xs text-white/40 mt-1">
-              Format: Modifier+Key (e.g., Alt+Space, CommandOrControl+Shift+V)
-            </p>
-          </div>
-          <div className="border-t border-white/5 pt-4">
-            <label className="block text-sm mb-2">Cancel Task</label>
-            <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border border-white/10 rounded-lg">
-              {['Ctrl', 'Shift', 'Esc'].map((key) => (
-                <kbd
-                  key={key}
-                  className="px-2 py-0.5 rounded bg-white/10 text-white/70 text-xs font-mono border border-white/15"
-                >
-                  {key}
-                </kbd>
-              ))}
-            </div>
-            <p className="text-xs text-white/40 mt-1">
-              처리 중 작업 취소 — 글로벌 단축키 (다른 앱 포커스 시에도 동작)
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* Language */}
-      <section className="mb-6">
-        <h3 className="text-sm font-medium text-white/60 uppercase tracking-wide mb-3">
-          Language
-        </h3>
-        <div className="glass-light rounded-xl p-4">
-          <select
-            value={localSettings.language}
-            onChange={(e) => updateSetting('language', e.target.value)}
-            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm
-              focus:outline-none focus:border-primary-400 transition-colors"
-          >
-            {LANGUAGES.map((lang) => (
-              <option key={lang.code} value={lang.code} className="bg-surface-800">
-                {lang.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      </section>
-
-      {/* Model */}
-      <section className="mb-6">
-        <h3 className="text-sm font-medium text-white/60 uppercase tracking-wide mb-3">
-          Whisper Model
-        </h3>
-        <div className="space-y-2">
-          {MODELS.map((model) => (
-            <button
-              key={model.name}
-              onClick={() => updateSetting('modelName', model.name)}
-              className={`w-full text-left glass-light rounded-xl p-4 transition-all border ${
-                localSettings.modelName === model.name
-                  ? 'border-primary-400 bg-primary-400/10'
-                  : 'border-transparent hover:border-white/10'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-medium capitalize">{model.name}</span>
-                <span className="text-xs text-white/40">{model.size}</span>
-              </div>
-              <p className="text-xs text-white/50 mt-1">{model.desc}</p>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      {/* AI Provider */}
-      <section className="mb-6">
-        <h3 className="text-sm font-medium text-white/60 uppercase tracking-wide mb-3">
-          AI Provider
-        </h3>
-        <div className="space-y-2">
-          {[
-            { id: 'nco', name: 'NCO (Smart Router)', desc: '9개 AI 통합 오케스트레이터 — 자동 최적 AI 선택' },
-            { id: 'claude', name: 'Claude CLI', desc: 'Claude Code — 최고 정확도' },
-            { id: 'gemini', name: 'Gemini CLI', desc: 'Google Gemini — 빠르고 정확' }
-          ].map((p) => (
-            <button
-              key={p.id}
-              onClick={() => updateSetting('aiProvider', p.id)}
-              className={`w-full text-left glass-light rounded-xl p-3 transition-all border ${
-                localSettings.aiProvider === p.id
-                  ? 'border-primary-400 bg-primary-400/10'
-                  : 'border-transparent hover:border-white/10'
-              }`}
-            >
-              <span className="font-medium text-sm">{p.name}</span>
-              <p className="text-xs text-white/40 mt-0.5">{p.desc}</p>
-            </button>
-          ))}
-        </div>
-      </section>
-
-
-      {/* all-tts Hub 어댑터/음성 선택 */}
-      {localSettings.ttsModel === 'all_tts' && (
-        <section className="mb-6">
-          <h3 className="text-sm font-medium text-white/60 uppercase tracking-wide mb-3">
-            all-tts Hub 설정 <span className="text-[10px] text-white/30 ml-2">:7861 · {allTtsAdapters.filter(a => a.available).length} adapters</span>
-          </h3>
-          <div className="space-y-3">
-            {/* 어댑터 선택 — API에서 동적 로드 */}
-            <div>
-              <label className="text-xs text-white/40 block mb-1">어댑터</label>
-              <div className="space-y-1.5">
-                {(allTtsAdapters.length > 0 ? allTtsAdapters : [
-                  { name: 'edge_tts', available: true, supports_streaming: true, description: 'edge-tts streaming', serverless: true, speakers: [] }
-                ]).filter(a => a.available).map(a => (
-                  <button
-                    key={a.name}
-                    onClick={() => {
-                      updateSetting('allTtsAdapter', a.name)
-                      // 어댑터 전환 시 첫 번째 스피커 자동 선택
-                      const firstSpeaker = a.speakers?.[0] || ''
-                      updateSetting('allTtsVoice', firstSpeaker)
-                    }}
-                    className={`w-full text-left rounded-lg px-3 py-2 transition-all border text-sm ${
-                      (localSettings.allTtsAdapter || 'edge_tts') === a.name
-                        ? 'border-amber-400/60 bg-amber-400/10'
-                        : 'border-transparent glass-light hover:border-white/10'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${a.available ? 'bg-green-400' : 'bg-white/20'}`} />
-                      <span className="font-mono text-xs">{a.name}</span>
-                      {a.supports_streaming && (
-                        <span className="text-[9px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-300">Stream</span>
-                      )}
-                      {a.serverless && (
-                        <span className="text-[9px] px-1 py-0.5 rounded bg-green-500/20 text-green-300">Serverless</span>
-                      )}
-                      {a.supports_clone && (
-                        <span className="text-[9px] px-1 py-0.5 rounded bg-purple-500/20 text-purple-300">Clone</span>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-white/30 mt-0.5 truncate">{a.description}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-            {/* 음성 선택 — 어댑터별 스피커 목록 */}
-            <div>
-              <label className="text-xs text-white/40 block mb-1">음성</label>
-              {(() => {
-                const currentAdapter = allTtsAdapters.find(a => a.name === (localSettings.allTtsAdapter || 'edge_tts'))
-                const speakers = currentAdapter?.speakers || []
-                if (speakers.length > 0) {
-                  return (
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {speakers.map((s: string) => (
-                        <button
-                          key={s}
-                          onClick={() => updateSetting('allTtsVoice', s)}
-                          className={`text-left rounded-lg px-2.5 py-1.5 text-xs font-mono transition-all border ${
-                            (localSettings.allTtsVoice || '') === s
-                              ? 'border-amber-400/60 bg-amber-400/10 text-amber-200'
-                              : 'border-transparent glass-light hover:border-white/10 text-white/50'
-                          }`}
-                        >
-                          {s.replace(/Neural$/, '').replace(/^ko-KR-|^en-US-|^ja-JP-/, '')}
-                        </button>
-                      ))}
-                    </div>
-                  )
-                }
-                return (
-                  <input
-                    type="text"
-                    value={localSettings.allTtsVoice || ''}
-                    onChange={(e) => updateSetting('allTtsVoice', e.target.value)}
-                    placeholder="음성 ID (비워두면 기본값)"
-                    className="w-full glass-light rounded-lg px-3 py-2 text-sm bg-transparent border border-white/10 focus:border-primary-400 outline-none placeholder-white/20"
-                  />
-                )
-              })()}
-            </div>
-          </div>
-        </section>
-      )}
-      {/* TTS Servers */}
-      <section className="mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-white/60 uppercase tracking-wide">
-            TTS 서버
-          </h3>
-          <button
-            onClick={refreshServerStatus}
-            className="text-xs text-white/40 hover:text-white/70 transition-colors px-2 py-1 rounded"
-          >
-            새로고침
-          </button>
-        </div>
-
-        {/* ── MLX 3-서버 그룹 ── */}
-        <div className="mb-3">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-xs font-medium text-white/50">MLX-Audio (3-서버 · 모델 교체 없음)</span>
-            <div className={`w-1.5 h-1.5 rounded-full ${mlxAnyRunning ? 'bg-green-400' : 'bg-white/20'}`} />
-          </div>
-          <div className="space-y-2 pl-2 border-l border-white/10">
-            {(['mlx_ko', 'mlx_en', 'mlx_mix'] as const).map((id) => {
-              const info = TTS_SERVER_INFO[id]
-              const status = ttsServers.find(s => s.id === id)
-              const busy = serverBusy[id]
-              const running = status?.running ?? false
-              const badgeColor =
-                id === 'mlx_ko'  ? 'bg-blue-500/20 text-blue-300' :
-                id === 'mlx_en'  ? 'bg-cyan-500/20 text-cyan-300' :
-                'bg-indigo-500/20 text-indigo-300'
-
-              return (
-                <div key={id} className={`glass-light rounded-xl p-3 border transition-all ${
-                  running ? 'border-white/15' : 'border-white/5'
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                        busy === 'starting' ? 'bg-yellow-400 animate-pulse' :
-                        busy === 'stopping' ? 'bg-orange-400 animate-pulse' :
-                        running ? 'bg-green-400' : 'bg-white/20'
-                      }`} />
-                      <span className="font-medium text-sm">{info.label}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono flex-shrink-0 ${badgeColor}`}>
-                        :{info.port}
-                      </span>
-                      {running && status?.latencyMs && (
-                        <span className="text-[10px] text-green-400/70 flex-shrink-0">{status.latencyMs}ms</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
-                      {running && (
-                        <button
-                          onClick={() => handlePreview(id, id === 'mlx_ko' ? currentVoice : undefined)}
-                          disabled={busy === 'previewing'}
-                          className="text-xs px-2.5 py-1 rounded bg-white/8 hover:bg-white/15 transition-colors flex items-center gap-1"
-                        >
-                          {busy === 'previewing' ? (
-                            <><span className="w-3 h-3 border border-white/40 border-t-transparent rounded-full animate-spin inline-block" /> 합성 중</>
-                          ) : '▶ 미리듣기'}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleServerToggle(id, running)}
-                        disabled={!!busy}
-                        className={`text-xs px-2.5 py-1 rounded-lg font-medium transition-all ${
-                          busy ? 'opacity-50 cursor-not-allowed' :
-                          running
-                            ? 'bg-white/10 hover:bg-red-500/20 hover:text-red-300 text-white/60'
-                            : 'bg-primary-600/80 hover:bg-primary-500 text-white'
-                        }`}
-                      >
-                        {busy === 'starting' ? '시작 중' :
-                         busy === 'stopping' ? '중지 중' :
-                         running ? '중지' : '시작'}
-                      </button>
-                    </div>
-                  </div>
-                  <p className="text-xs text-white/35 mt-1.5 pl-4">
-                    {info.desc}
-                    {running && status?.model && (
-                      <span className="ml-1 text-white/20">· {status.model}</span>
-                    )}
-                  </p>
-                  {/* mlx_ko: 단일 화자 모델 안내 */}
-                  {id === 'mlx_ko' && running && (
-                    <p className="mt-1.5 pl-4 text-xs text-white/30">
-                      단일 화자 고정 · 화자 선택 미지원 (Qwen3-TTS-Base)
-                    </p>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* ── 나머지 서버 (Qwen3-TTS + all-tts Hub) ── */}
-        <div className="space-y-3">
-          {(['qwen3', 'all_tts'] as const).map((id) => {
-            const info = TTS_SERVER_INFO[id]
-            const status = ttsServers.find(s => s.id === id)
-            const busy = serverBusy[id]
-            const running = status?.running ?? false
-
-            return (
-              <div key={id} className={`glass-light rounded-xl p-4 border transition-all ${
-                running ? 'border-white/15' : 'border-white/5'
-              }`}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                      busy === 'starting' ? 'bg-yellow-400 animate-pulse' :
-                      busy === 'stopping' ? 'bg-orange-400 animate-pulse' :
-                      running ? 'bg-green-400' : 'bg-white/20'
-                    }`} />
-                    <span className="font-medium text-sm">{info.label}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
-                      'bg-emerald-500/20 text-emerald-300'
-                    }`}>{info.badge}</span>
-                    {running && status?.latencyMs && (
-                      <span className="text-[10px] text-green-400/70">{status.latencyMs}ms</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    {running && (
-                      <button
-                        onClick={() => handlePreview(id)}
-                        disabled={busy === 'previewing'}
-                        className="text-xs px-2 py-1 rounded bg-white/8 hover:bg-white/15 transition-colors"
-                      >
-                        {busy === 'previewing' ? (
-                          <span className="w-3 h-3 border border-white/40 border-t-transparent rounded-full animate-spin inline-block" />
-                        ) : '▶ 미리듣기'}
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleServerToggle(id, running)}
-                      disabled={!!busy}
-                      className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
-                        busy ? 'opacity-50 cursor-not-allowed' :
-                        running
-                          ? 'bg-white/10 hover:bg-red-500/20 hover:text-red-300 text-white/60'
-                          : 'bg-primary-600/80 hover:bg-primary-500 text-white'
-                      }`}
-                    >
-                      {busy === 'starting' ? '시작 중...' :
-                       busy === 'stopping' ? '중지 중...' :
-                       running ? '중지' : '시작'}
-                    </button>
-                  </div>
-                </div>
-                <p className="text-xs text-white/40">
-                  {info.desc}
-                  {running && status?.model && (
-                    <span className="ml-2 text-white/25">· {status.model}</span>
-                  )}
-                </p>
-              </div>
-            )
-          })}
-        </div>
-      </section>
-
-      {/* TTS Voice (MLX voices shown inline above, this section for legacy) */}
-      {mlxVoices.length > 0 && false && (
-        <section className="mb-6">
-          <h3 className="text-sm font-medium text-white/60 uppercase tracking-wide mb-3">
-            TTS Voice (화자)
-          </h3>
-          <div className="space-y-2">
-            {mlxVoices.map((voice) => (
-              <button
-                key={voice}
-                onClick={async () => {
-                  updateSetting('mlxVoice', voice)
-                  await window.electronAPI.setMLXVoice(voice)
-                }}
-                className={`w-full text-left glass-light rounded-xl p-3 transition-all border ${
-                  currentVoice === voice
-                    ? 'border-primary-400 bg-primary-400/10'
-                    : 'border-transparent hover:border-white/10'
-                }`}
-              >
-                <span className="font-medium text-sm">{MLX_VOICE_LABELS[voice] || voice}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Options */}
-      <section className="mb-6">
-        <h3 className="text-sm font-medium text-white/60 uppercase tracking-wide mb-3">
-          Options
-        </h3>
-        <div className="glass-light rounded-xl p-4 space-y-4">
-          <label className="flex items-center justify-between cursor-pointer">
-            <span className="text-sm">Auto-inject text</span>
-            <div
-              onClick={() => updateSetting('autoInject', !localSettings.autoInject)}
-              className={`w-10 h-6 rounded-full transition-colors relative cursor-pointer ${
-                localSettings.autoInject ? 'bg-primary-500' : 'bg-white/20'
-              }`}
-            >
-              <div
-                className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-transform ${
-                  localSettings.autoInject ? 'translate-x-5' : 'translate-x-1'
-                }`}
-              />
-            </div>
-          </label>
-
-          <div className="flex items-start justify-between gap-4 cursor-pointer"
-            onClick={() => updateSetting('voiceCorrection', !localSettings.voiceCorrection)}
-          >
-            <div className="flex-1">
-              <span className="text-sm block">AI 맞춤법·교정</span>
-              <p className="text-xs text-white/40 mt-0.5">Direct 모드에서 AI가 오탈자·문법·맥락을 자동 교정</p>
-            </div>
-            <div
-              className={`w-10 h-6 rounded-full transition-colors relative cursor-pointer flex-shrink-0 mt-0.5 ${
-                localSettings.voiceCorrection ? 'bg-primary-500' : 'bg-white/20'
-              }`}
-            >
-              <div
-                className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-transform ${
-                  localSettings.voiceCorrection ? 'translate-x-5' : 'translate-x-1'
-                }`}
-              />
-            </div>
-          </div>
-
-          <div className="flex items-start justify-between gap-4 cursor-pointer"
-            onClick={() => updateSetting('autoEnter', !localSettings.autoEnter)}
-          >
-            <div className="flex-1">
-              <span className="text-sm block">자동 엔터</span>
-              <p className="text-xs text-white/40 mt-0.5">텍스트 주입 후 Enter 자동 입력 — 터미널·채팅에서 바로 실행</p>
-            </div>
-            <div
-              className={`w-10 h-6 rounded-full transition-colors relative cursor-pointer flex-shrink-0 mt-0.5 ${
-                localSettings.autoEnter ? 'bg-primary-500' : 'bg-white/20'
-              }`}
-            >
-              <div
-                className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-transform ${
-                  localSettings.autoEnter ? 'translate-x-5' : 'translate-x-1'
-                }`}
-              />
-            </div>
-          </div>
-
-          <label className="flex items-center justify-between cursor-pointer">
-            <span className="text-sm">Show overlay</span>
-            <div
-              onClick={() => updateSetting('showOverlay', !localSettings.showOverlay)}
-              className={`w-10 h-6 rounded-full transition-colors relative cursor-pointer ${
-                localSettings.showOverlay ? 'bg-primary-500' : 'bg-white/20'
-              }`}
-            >
-              <div
-                className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-transform ${
-                  localSettings.showOverlay ? 'translate-x-5' : 'translate-x-1'
-                }`}
-              />
-            </div>
-          </label>
-        </div>
-      </section>
-
-      {/* Save button */}
-      <button
-        onClick={saveSettings}
-        className="w-full bg-primary-600 hover:bg-primary-500 text-white rounded-xl py-3 px-4
-          font-medium transition-colors"
-      >
-        {saved ? '✓ Saved' : 'Save Settings'}
-      </button>
+        <button type="button" onClick={() => window.electronAPI.quit()} className="mt-4 w-full rounded-2xl border border-red-300/10 bg-red-400/[0.035] py-3 text-xs text-red-200/55 transition-colors hover:bg-red-400/[0.07] hover:text-red-100">
+          NOVA VOICE 완전히 종료
+        </button>
+      </div>
     </div>
+  )
+}
+
+function SettingSwitch({ label, description, checked, badge, onChange }: {
+  label: string
+  description: string
+  checked: boolean
+  badge?: string
+  onChange: () => void
+}) {
+  return (
+    <button type="button" role="switch" aria-checked={checked} onClick={onChange} className="flex w-full items-start justify-between gap-5 py-4 text-left first:pt-0 last:pb-0">
+      <span>
+        <span className="flex items-center gap-2 text-sm text-white/68">
+          {label}
+          {badge && <span className="rounded-full border border-emerald-300/10 bg-emerald-300/[0.045] px-1.5 py-0.5 text-[8px] text-emerald-200/70">{badge}</span>}
+        </span>
+        <span className="mt-1 block text-xs leading-5 text-white/32">{description}</span>
+      </span>
+      <span className={`relative mt-0.5 h-6 w-10 flex-shrink-0 rounded-full transition-colors ${checked ? 'bg-primary-500' : 'bg-white/15'}`} aria-hidden="true">
+        <span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-transform ${checked ? 'translate-x-5' : 'translate-x-1'}`} />
+      </span>
+    </button>
   )
 }

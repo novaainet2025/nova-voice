@@ -3,19 +3,30 @@
  * @@gentop/lib/stt 내장 서버(FastAPI WebSocket :8765)를 자동 시작/종료
  */
 import { spawn, ChildProcess } from 'child_process'
+import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import http from 'http'
 import net from 'net'
-import { is } from '@electron-toolkit/utils'
 
 const STT_PORT = 8765
 const STT_URL = `http://localhost:${STT_PORT}`
 
 function getSttServerDir(): string {
-  if (is.dev) {
-    return path.resolve(process.cwd(), '..', '@@gentop', 'lib', 'stt')
+  const candidates = [
+    process.env.NOVA_STT_SERVER_DIR,
+    path.join(os.homedir(), 'project', '@@gentop', 'lib', 'stt'),
+    path.resolve(process.cwd(), '..', '@@gentop', 'lib', 'stt'),
+    path.resolve(__dirname, '..', '..', '..', '..', '@@gentop', 'lib', 'stt'),
+  ].filter((candidate): candidate is string => Boolean(candidate))
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, 'server', 'main.py'))
+      && fs.existsSync(path.join(candidate, '.venv', 'bin', 'python3'))) {
+      return candidate
+    }
   }
-  return path.resolve(__dirname, '..', '..', '..', '..', '@@gentop', 'lib', 'stt')
+  throw new Error(`Whisper STT server not found. Checked: ${candidates.join(', ')}`)
 }
 
 let serverProcess: ChildProcess | null = null
@@ -86,12 +97,13 @@ export async function startSttServer(): Promise<boolean> {
   console.log(`[STT Server] Starting... (${venvPython} -m server.main)`)
   console.log(`[STT Server] cwd: ${sttDir}`)
 
-  serverProcess = spawn(venvPython, ['-m', 'server.main'], {
+  const spawnedProcess = spawn(venvPython, ['-m', 'server.main'], {
     cwd: sttDir,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PYTHONUNBUFFERED: '1' },
+    env: { ...process.env, PYTHONUNBUFFERED: '1', STT_PARTIALS_DEFAULT: 'off' },
     detached: false,
   })
+  serverProcess = spawnedProcess
 
   const stdoutHandler = (d: Buffer) => {
     console.log(`[STT Server] ${d.toString().trimEnd()}`)
@@ -101,23 +113,23 @@ export async function startSttServer(): Promise<boolean> {
   }
   const exitHandler = (code: number | null) => {
     console.log(`[STT Server] Exited with code ${code}`)
-    serverProcess = null
+    if (serverProcess === spawnedProcess) serverProcess = null
   }
 
-  serverProcess.stdout?.on('data', stdoutHandler)
-  serverProcess.stderr?.on('data', stderrHandler)
-  serverProcess.on('exit', exitHandler)
+  spawnedProcess.stdout?.on('data', stdoutHandler)
+  spawnedProcess.stderr?.on('data', stderrHandler)
+  spawnedProcess.on('exit', exitHandler)
 
   const ready = await waitForReady()
   if (ready) {
     console.log(`[STT Server] Ready on :${STT_PORT}`)
   } else {
     console.error(`[STT Server] Failed to start within 30s`)
-    serverProcess?.stdout?.off('data', stdoutHandler)
-    serverProcess?.stderr?.off('data', stderrHandler)
-    serverProcess?.off('exit', exitHandler)
-    serverProcess?.kill('SIGTERM')
-    serverProcess = null
+    spawnedProcess.stdout?.off('data', stdoutHandler)
+    spawnedProcess.stderr?.off('data', stderrHandler)
+    spawnedProcess.off('exit', exitHandler)
+    spawnedProcess.kill('SIGTERM')
+    if (serverProcess === spawnedProcess) serverProcess = null
   }
   return ready
   })()
@@ -141,6 +153,33 @@ export async function ensureSttServerReady(maxWaitMs = 10000): Promise<boolean> 
   }
 
   return waitForReady(maxWaitMs)
+}
+
+export async function restartSttServer(maxWaitMs = 30_000): Promise<boolean> {
+  const processToStop = serverProcess
+  if (!processToStop) {
+    if (!await canConnectToPort()) return startSttServer()
+    console.warn('[STT Server] Cannot restart an unmanaged process on :8765')
+    return false
+  }
+
+  console.warn('[STT Server] Restarting after an inference transport failure')
+  if (serverProcess === processToStop) serverProcess = null
+  processToStop.kill('SIGTERM')
+
+  const stopDeadline = Date.now() + 4_000
+  while (Date.now() < stopDeadline && await canConnectToPort()) {
+    await new Promise((resolve) => setTimeout(resolve, 120))
+  }
+  if (await canConnectToPort()) {
+    processToStop.kill('SIGKILL')
+    const killDeadline = Date.now() + 2_000
+    while (Date.now() < killDeadline && await canConnectToPort()) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+  }
+  if (await canConnectToPort()) return false
+  return startSttServer().then(async (started) => started && waitForReady(maxWaitMs))
 }
 
 export function stopSttServer(): void {

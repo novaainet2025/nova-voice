@@ -1,122 +1,111 @@
 import React, { useMemo } from 'react'
+import { AudioVisualizer } from '../visualizer/AudioVisualizer'
 import { useAppStore } from '../../stores/appStore'
-
-const BAR_COUNT = 24
 
 export function RecordingOverlay() {
   const {
-    isRecording, recordingDuration, audioLevel,
-    currentTranscription, isTranscribing, aiStage,
-    currentMode, aiModes
+    isRecording,
+    recordingDuration,
+    currentTranscription,
+    isTranscribing,
+    transcriptionProgress,
+    transcriptionStage,
+    history,
+    settings,
+    activeInputMode,
   } = useAppStore()
+  // While a capture is running the hotkey that started it wins, so the overlay
+  // shows the mode this utterance is actually using.
+  const inputMode = activeInputMode ?? settings?.inputMode ?? 'normal'
+  const latestResult = history[0]
 
-  const formattedDuration = useMemo(() => {
-    const mins = Math.floor(recordingDuration / 60)
-    const secs = Math.floor(recordingDuration % 60)
-    return `${mins}:${secs.toString().padStart(2, '0')}`
+  const duration = useMemo(() => {
+    const minutes = Math.floor(recordingDuration / 60)
+    const seconds = Math.floor(recordingDuration % 60)
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`
   }, [recordingDuration])
 
-  const activeMode = aiModes.find(m => m.id === currentMode)
-  const stageLabels: Record<string, string> = {
-    'transcribing':    '🎙 음성 인식 중...',
-    'ai_processing':   `${activeMode?.icon || '🤖'} ${activeMode?.name || 'AI'} 처리 중...`,
-    'ai_answering':    '💬 답변 생성 중...',
-    'ai_searching':    '🔍 실시간 검색 중...',
-    'screen_capture':  '📷 화면 캡처 중...',
-    'screen_analyzing':'👁 화면 분석 중...',
-    'command_parsing': '⚡ 명령 실행 중...',
-    'nco_processing':  '🧠 NCO 처리 중...',
-    'confirm_required':'⚠️ 확인 필요...',
-    'nco_discussion':  '🗣 토론 중...',
-    'nco_parallel':    '👥 팀 작업 중...',
-    'nco_agent':       '🤖 에이전트 작업 중...',
-    'nco_hive':        '🐝 하이브 실행 중...',
-  }
-  const colonIdx = aiStage.indexOf(':')
-  const stageKey = colonIdx >= 0 ? aiStage.substring(0, colonIdx) : aiStage
-  const stageDetail = colonIdx >= 0 ? aiStage.substring(colonIdx + 1) : ''
-  const stageLabel = stageLabels[stageKey] || ''
-  const stageDisplay = stageLabel + (stageDetail ? ` — ${stageDetail}` : '')
-
   return (
-    <div className="flex items-center justify-center w-full h-full p-4">
-      <div className="glass rounded-2xl px-6 py-4 w-full max-w-[380px] shadow-2xl border border-white/10">
+    <div className="flex h-full w-full items-center justify-center p-4">
+      <div className="nova-overlay-card glass w-full max-w-[390px] rounded-[22px] px-5 py-4 shadow-2xl">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="relative flex h-6 w-6 items-center justify-center rounded-lg border border-primary-300/20 bg-primary-400/10" aria-hidden="true">
+              <span className="absolute h-2.5 w-3.5 -rotate-12 rounded-[50%] border border-primary-300/35" />
+              <span className="h-1 w-1 rounded-full bg-red-300 shadow-[0_0_6px_rgba(255,107,116,.7)]" />
+            </div>
+            <div>
+              <p className="text-[9px] font-semibold tracking-[0.16em] text-white/55">NOVA VOICE</p>
+              <p className="mt-0.5 font-mono text-[8px] text-white/20">WHISPER STT · PCM 16 KHZ</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className={`rounded-full border px-2 py-1 text-[8px] font-mono tracking-wide ${inputMode === 'meta' ? 'border-violet-300/20 bg-violet-300/[0.08] text-violet-100/75' : 'border-white/[0.07] bg-white/[0.045] text-white/40'}`}>
+              {inputMode === 'meta' ? 'META AI' : 'NORMAL'}
+            </span>
+            <span className="rounded-full border border-white/[0.07] bg-white/[0.045] px-2 py-1 text-[9px] text-white/40">MLX</span>
+          </div>
+        </div>
+
         {isRecording && (
           <>
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse-recording" />
-              <span className="text-sm font-medium text-white/80">Recording</span>
-              {activeMode && activeMode.id !== 'direct' && (
-                <span className="text-xs bg-primary-600/30 text-primary-300 px-2 py-0.5 rounded-full">
-                  {activeMode.icon} {activeMode.name}
-                </span>
-              )}
-              <span className="text-sm font-mono text-white/50 ml-auto">{formattedDuration}</span>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="relative flex h-3 w-3 items-center justify-center">
+                <span className="absolute inset-0 animate-ping rounded-full bg-red-400/25" />
+                <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+              </span>
+              <span className="text-xs font-medium text-white/72">{inputMode === 'meta' ? '메타 모드로 듣고 있습니다' : '일반 모드로 듣고 있습니다'}</span>
+              <span className="ml-auto font-mono text-xs tabular-nums text-white/40">{duration}</span>
             </div>
-
-            <div className="flex items-center justify-center gap-[3px] h-14 mb-3">
-              {Array.from({ length: BAR_COUNT }, (_, i) => {
-                const phase = Math.sin(Date.now() / 90 + i * 0.65) * 0.3 + 0.7
-                const phase2 = Math.cos(Date.now() / 150 + i * 1.0) * 0.2
-                const raw = audioLevel * (phase + phase2)
-                const h = 4 + raw * 48
-                const centerDist = Math.abs(i - BAR_COUNT / 2) / (BAR_COUNT / 2)
-                const opacity = 0.4 + (1 - centerDist) * 0.6
-                return (
-                  <div key={i} className="rounded-full" style={{
-                    width: 4, height: Math.max(4, h),
-                    backgroundColor: `rgba(116, 143, 252, ${opacity})`,
-                    transition: 'height 80ms ease-out',
-                  }} />
-                )
-              })}
+            <div className="mb-2 h-14 w-full">
+              <AudioVisualizer active variant="overlay" mode={inputMode} />
             </div>
-            <button
-              onClick={() => window.electronAPI?.cancelRecording?.()}
-              className="w-full text-xs text-white/30 hover:text-red-400 transition-colors py-1"
-            >
-              취소 (Esc)
-            </button>
+            <button type="button" onClick={() => void window.electronAPI.cancelRecording()} className="w-full py-1 text-[10px] text-white/25 transition-colors hover:text-red-300">Esc · 녹음 취소</button>
           </>
         )}
 
-        {/* AI processing stage */}
-        {stageLabel && !isRecording && (
-          <div className="flex items-center gap-2 mb-2">
-            <div className={`w-4 h-4 border-2 border-t-transparent rounded-full animate-spin ${
-              stageKey.startsWith('screen') ? 'border-cyan-400' :
-              stageKey === 'ai_searching' ? 'border-yellow-400' :
-              stageKey === 'ai_answering' ? 'border-green-400' :
-              stageKey === 'command_parsing' ? 'border-orange-400' :
-              stageKey.startsWith('nco') ? 'border-purple-400' :
-              'border-primary-400'
-            }`} />
-            <span className={`text-sm ${
-              stageKey.startsWith('screen') ? 'text-cyan-300' :
-              stageKey === 'ai_searching' ? 'text-yellow-300' :
-              stageKey === 'ai_answering' ? 'text-green-300' :
-              stageKey === 'command_parsing' ? 'text-orange-300' :
-              stageKey.startsWith('nco') ? 'text-purple-300' :
-              'text-white/60'
-            }`}>{stageDisplay}</span>
+        {isTranscribing && !isRecording && (
+          <div className="py-3">
+            <div className="flex items-center gap-3">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-400 border-t-transparent" />
+              <span className="text-xs text-white/60">
+                {transcriptionStage === 'meta-prompting'
+                  ? 'AI 최종 답변 생성 중'
+                  : transcriptionStage === 'injecting'
+                    ? '포커스 위치에 입력 중'
+                    : inputMode === 'meta'
+                      ? 'Whisper 인식 후 AI가 직접 답변'
+                      : 'Whisper 음성 인식 중'}
+              </span>
+            </div>
+            <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/[0.06]">
+              <div className="h-full rounded-full bg-gradient-to-r from-primary-400 to-purple-400 transition-all" style={{ width: `${Math.max(12, transcriptionProgress * 100)}%` }} />
+            </div>
           </div>
         )}
 
-        {currentTranscription && !isRecording && !stageLabel && (
-          <div className="mt-1">
-            <p className="text-sm text-white/90 leading-relaxed line-clamp-5">
-              {currentTranscription}
-            </p>
+        {currentTranscription && !isRecording && !isTranscribing && (
+          <div className="mt-1 rounded-xl border border-white/[0.06] bg-white/[0.025] px-3.5 py-3">
+            {latestResult?.inputMode === 'meta' && (
+              <p className="mb-2 text-[8px] font-mono tracking-wide text-violet-200/65">
+                META 완료 · {(latestResult.metaPromptProvider || 'AI').replace(/^(?:NCO|Local AI)\s*·\s*/i, '').toUpperCase()}
+                {latestResult.metaPromptDuration != null ? ` · ${latestResult.metaPromptDuration.toFixed(2)}s` : ''}
+              </p>
+            )}
+            <p className="line-clamp-4 select-text text-xs leading-relaxed text-white/78">{currentTranscription}</p>
           </div>
         )}
 
-        {!isRecording && !currentTranscription && !isTranscribing && !stageLabel && (
-          <div className="text-center">
-            <p className="text-sm text-white/40">
-              Press <kbd className="px-2 py-0.5 bg-white/10 rounded text-white/60 text-xs">
-                {window.electronAPI?.platform === 'darwin' ? '⌃' : 'Ctrl'} + Shift + Space
-              </kbd> to start
-            </p>
+        {!isRecording && !isTranscribing && !currentTranscription && (
+          <div className="space-y-1.5 py-3 text-center text-[11px] text-white/32">
+            <div>
+              <kbd className="rounded-md border border-white/[0.07] bg-white/[0.045] px-2 py-1 font-mono text-[10px] text-white/55">⌃ ⇧ Space</kbd>
+              <span className="ml-2">일반 받아쓰기</span>
+            </div>
+            <div>
+              <kbd className="rounded-md border border-violet-300/15 bg-violet-300/[0.05] px-2 py-1 font-mono text-[10px] text-violet-100/60">⌃ ⇧ ⌥ Space</kbd>
+              <span className="ml-2">메타 프롬프트</span>
+            </div>
           </div>
         )}
       </div>

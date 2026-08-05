@@ -9,18 +9,21 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "verify:core": "node scripts/verify-core-behavior.mjs",
+    "verify:providers": "node scripts/verify-provider-ranking.mjs",
+    "verify:stt": "node scripts/verify-stt-streaming.mjs",
+    "verify:meta-ai": "node scripts/verify-meta-prompt-ai.mjs",
+    "verify:mac": "node scripts/verify-installed-mac.mjs",
+    "sync:commands": "node scripts/sync-cli-command-catalog.mjs",
     "package": "electron-builder",
-    "package:mac": "electron-builder --mac",
+    "package:mac": "electron-builder --mac dir --arm64 && zsh scripts/sign-mac-app.sh",
     "package:win": "electron-builder --win",
-    "package:linux": "electron-builder --linux"
+    "package:linux": "electron-builder --linux",
+    "verify:latch": "node scripts/verify-front-app-latch.mjs",
+    "verify:all": "npm run verify:core && npm run verify:latch && npm run verify:providers && npm run verify:stt"
   },
   "dependencies": {
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/addon-web-links": "^0.12.0",
-    "@xterm/xterm": "^6.0.0",
     "better-sqlite3": "^11.0.0",
-    "electron-store": "^10.0.0",
-    "node-pty": "^1.1.0",
     "ws": "^8.21.0",
     "zustand": "^5.0.0"
   },
@@ -44,7 +47,7 @@
   },
   "build": {
     "appId": "com.novavoice.app",
-    "productName": "NOVA-VOICE",
+    "productName": "NOVA VOICE",
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "resources/icon.icns",
@@ -68,12 +71,6 @@
     "files": [
       "out/**/*",
       "resources/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "models/",
-        "to": "models/"
-      }
     ]
   }
 }

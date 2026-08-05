@@ -1,22 +1,28 @@
 import { systemPreferences, clipboard } from 'electron'
-import { execFile as execFileCb, spawn } from 'child_process'
+import { execFile as execFileCb } from 'child_process'
 import { promisify } from 'util'
-import { appendFileSync } from 'fs'
-import { join } from 'path'
-import { tmpdir } from 'os'
 
 const execFile = promisify(execFileCb)
 
-const DEBUG_LOG = join(tmpdir(), 'nova-inject-debug.log')
-function dlog(msg: string) {
-  const line = `${new Date().toISOString()} ${msg}\n`
-  try { appendFileSync(DEBUG_LOG, line) } catch { /* ignore */ }
-  console.log(msg)
+function escapeAppleScript(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
 
-export function checkAccessibilityPermission(prompt = false): boolean {
-  if (process.platform !== 'darwin') return true
-  return systemPreferences.isTrustedAccessibilityClient(prompt)
+async function getFrontmostApp(): Promise<{ name: string; bundleId: string }> {
+  const { stdout } = await execFile('osascript', ['-e', `
+    tell application "System Events"
+      set frontProcess to first application process whose frontmost is true
+      set frontName to name of frontProcess
+      try
+        set frontBundleId to bundle identifier of frontProcess
+      on error
+        set frontBundleId to ""
+      end try
+      return frontName & linefeed & frontBundleId
+    end tell
+  `])
+  const [name = '', bundleId = ''] = stdout.trim().split('\n')
+  return { name, bundleId }
 }
 
 // Inject text into the target app's focused text field.
@@ -31,8 +37,8 @@ export function checkAccessibilityPermission(prompt = false): boolean {
 export async function injectText(text: string, targetApp?: string, bundleId?: string, autoEnter = false): Promise<boolean> {
   if (process.platform === 'darwin') {
     if (!systemPreferences.isTrustedAccessibilityClient(false)) {
-      console.error('[Inject] BLOCKED — no Accessibility permission')
-      systemPreferences.isTrustedAccessibilityClient(true)
+      clipboard.writeText(text)
+      console.warn('[Inject] Accessibility unavailable — result copied to clipboard without prompting')
       return false
     }
   }
@@ -41,6 +47,7 @@ export async function injectText(text: string, targetApp?: string, bundleId?: st
     // ── Step 1: Save clipboard, set inject text ──────────────────────────────
     const prevClip = clipboard.readText()
     clipboard.writeText(text)
+    let injected = false
     console.log(`[Inject] Clipboard set (${text.length} chars), target: "${targetApp || 'frontmost'}" bundle: "${bundleId || 'n/a'}"`)
 
     try {
@@ -59,56 +66,31 @@ export async function injectText(text: string, targetApp?: string, bundleId?: st
         if (processName) {
           try {
             await execFile('osascript', ['-e',
-              `tell application "System Events" to set frontmost of process "${processName}" to true`
+              `tell application "System Events" to set frontmost of process "${escapeAppleScript(processName)}" to true`
             ])
           } catch { /* ignore */ }
         }
 
-        // ── Step 3: Wait for app to settle + send paste ───────────────────────
-        await new Promise(r => setTimeout(r, 400))
-
-        // Verify clipboard content right before paste
-        const clipCheck = await execFile('pbpaste').catch(() => ({ stdout: '' }))
-        const clipPreview = clipCheck.stdout.substring(0, 30)
-        console.log(`[Inject] Clipboard before paste: "${clipPreview}${clipCheck.stdout.length > 30 ? '...' : ''}" (${clipCheck.stdout.length} chars)`)
-
-        const result = await execFile('osascript', ['-e', `
-          tell application "System Events"
-            set frontProcess to first application process whose frontmost is true
-            set frontName to name of frontProcess
-            try
-              set frontBundleId to bundle identifier of frontProcess
-            on error
-              set frontBundleId to ""
-            end try
-            key code 9 using {command down}
-            ${autoEnter ? 'key code 36' : ''}
-          end tell
-          return frontName & linefeed & frontBundleId
-        `])
-        const [actualTarget = '', actualBundleId = ''] = result.stdout.trim().split('\n')
-        console.log(`[Inject] Keystroke sent → frontmost: "${actualTarget}" / bundle: "${actualBundleId}" (wanted: "${processName || bundleId}")${autoEnter ? ' + Enter' : ''}`)
-        const frontmostMatches = (processName && actualTarget === processName)
-          || (bundleId && actualBundleId === bundleId)
+        // ── Step 3: Verify target before sending any keystroke ────────────────
+        await new Promise(r => setTimeout(r, 350))
+        const frontmost = await getFrontmostApp()
+        const frontmostMatches = (processName && frontmost.name === processName)
+          || (bundleId && frontmost.bundleId === bundleId)
         if (!frontmostMatches) {
-          console.warn(`[Inject] Target mismatch — frontmost: "${actualTarget}" / "${actualBundleId}", wanted: "${processName}" / "${bundleId}"`)
+          console.warn(`[Inject] Target mismatch — frontmost: "${frontmost.name}" / "${frontmost.bundleId}", wanted: "${processName}" / "${bundleId}"`)
           return false
         }
-
-      } else {
-        // ── No target: paste to current frontmost ─────────────────────────────
-        await new Promise(r => setTimeout(r, 100))
-        const result = await execFile('osascript', ['-e', `
-          tell application "System Events"
-            set frontName to name of first application process whose frontmost is true
-            keystroke "v" using command down
-            ${autoEnter ? 'key code 36' : ''}
-          end tell
-          return frontName
-        `])
-        console.log(`[Inject] OK → frontmost: "${result.stdout.trim()}"${autoEnter ? ' + Enter' : ''}`)
       }
 
+      // ── Step 4: Paste and optionally submit ────────────────────────────────
+      await execFile('osascript', ['-e', `
+        tell application "System Events"
+          key code 9 using {command down}
+          ${autoEnter ? 'delay 0.05\n          key code 36' : ''}
+        end tell
+      `])
+      injected = true
+      console.log(`[Inject] OK → "${processName || 'frontmost'}"${autoEnter ? ' + Enter' : ''}`)
       return true
     } catch (e) {
       console.error('[Inject] Failed:', (e as Error).message)
@@ -116,10 +98,12 @@ export async function injectText(text: string, targetApp?: string, bundleId?: st
       console.log('[Inject] Text is in clipboard — press Cmd+V to paste manually')
       return false
     } finally {
-      // Restore original clipboard after 3s
-      setTimeout(() => {
-        try { clipboard.writeText(prevClip) } catch { /* ignore */ }
-      }, 3000)
+      if (injected) {
+        // Restore only after a confirmed paste. On failure, keep STT text in clipboard.
+        setTimeout(() => {
+          try { clipboard.writeText(prevClip) } catch { /* ignore */ }
+        }, 3000)
+      }
     }
 
   } else if (process.platform === 'win32') {

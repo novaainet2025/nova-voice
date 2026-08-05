@@ -6,75 +6,116 @@ import type { TranscriptionResult } from '../shared/types'
 let db: Database.Database
 
 export function initDB(): void {
-  const dbPath = path.join(app.getPath('userData'), 'nova-voice.db')
-  db = new Database(dbPath)
-
+  db = new Database(path.join(app.getPath('userData'), 'nova-voice.db'))
+  db.pragma('journal_mode = WAL')
+  db.pragma('synchronous = NORMAL')
   db.exec(`
     CREATE TABLE IF NOT EXISTS transcriptions (
       id TEXT PRIMARY KEY,
       text TEXT NOT NULL,
-      language TEXT DEFAULT 'auto',
+      language TEXT DEFAULT 'ko',
       duration REAL DEFAULT 0,
       timestamp INTEGER NOT NULL,
-      model_used TEXT DEFAULT 'base',
-      ai_mode TEXT DEFAULT 'direct',
-      ai_result TEXT DEFAULT ''
+      model_used TEXT DEFAULT 'whisper-large-v3-turbo-mlx'
     )
   `)
 
-  // Migration: add ai columns if missing
-  try {
-    db.exec(`ALTER TABLE transcriptions ADD COLUMN ai_mode TEXT DEFAULT 'direct'`)
-  } catch { /* column exists */ }
-  try {
-    db.exec(`ALTER TABLE transcriptions ADD COLUMN ai_result TEXT DEFAULT ''`)
-  } catch { /* column exists */ }
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    )
-  `)
+  const columns = db.pragma('table_info(transcriptions)') as Array<{ name: string }>
+  if (columns.some(({ name }) => name === 'ai_mode' || name === 'ai_result')) {
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE transcriptions_stt_only (
+          id TEXT PRIMARY KEY,
+          text TEXT NOT NULL,
+          language TEXT DEFAULT 'ko',
+          duration REAL DEFAULT 0,
+          timestamp INTEGER NOT NULL,
+          model_used TEXT DEFAULT 'whisper-large-v3-turbo-mlx'
+        );
+        INSERT INTO transcriptions_stt_only (id, text, language, duration, timestamp, model_used)
+        SELECT id, text, language, duration, timestamp, model_used FROM transcriptions;
+        DROP TABLE transcriptions;
+        ALTER TABLE transcriptions_stt_only RENAME TO transcriptions;
+      `)
+    })()
+    console.log('[DB] Removed legacy AI columns; preserved transcription history')
+  }
+  const currentColumns = new Set(
+    (db.pragma('table_info(transcriptions)') as Array<{ name: string }>).map(({ name }) => name),
+  )
+  if (!currentColumns.has('input_mode')) {
+    db.exec("ALTER TABLE transcriptions ADD COLUMN input_mode TEXT DEFAULT 'normal'")
+  }
+  if (!currentColumns.has('source_text')) {
+    db.exec('ALTER TABLE transcriptions ADD COLUMN source_text TEXT')
+  }
+  if (!currentColumns.has('meta_prompt_outcome')) {
+    db.exec('ALTER TABLE transcriptions ADD COLUMN meta_prompt_outcome TEXT')
+  }
+  if (!currentColumns.has('meta_prompt_provider')) {
+    db.exec('ALTER TABLE transcriptions ADD COLUMN meta_prompt_provider TEXT')
+  }
+  if (!currentColumns.has('processing_duration')) {
+    db.exec('ALTER TABLE transcriptions ADD COLUMN processing_duration REAL')
+  }
+  if (!currentColumns.has('meta_prompt_duration')) {
+    db.exec('ALTER TABLE transcriptions ADD COLUMN meta_prompt_duration REAL')
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_transcriptions_timestamp ON transcriptions(timestamp DESC)')
 }
 
 export function saveTranscription(result: TranscriptionResult): void {
-  const stmt = db.prepare(`
-    INSERT INTO transcriptions (id, text, language, duration, timestamp, model_used, ai_mode, ai_result)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `)
-  stmt.run(result.id, result.text, result.language, result.duration, result.timestamp,
-    result.modelUsed, result.aiMode || 'direct', result.aiResult || '')
+  db.prepare(`
+    INSERT INTO transcriptions (
+      id, text, language, duration, timestamp, model_used,
+      input_mode, source_text, meta_prompt_outcome, meta_prompt_provider,
+      processing_duration, meta_prompt_duration
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    result.id,
+    result.text,
+    result.language,
+    result.duration,
+    result.timestamp,
+    result.modelUsed,
+    result.inputMode ?? 'normal',
+    result.sourceText ?? null,
+    result.metaPromptOutcome ?? null,
+    result.metaPromptProvider ?? null,
+    result.processingDuration ?? null,
+    result.metaPromptDuration ?? null,
+  )
 }
 
 export function getHistory(limit = 50, offset = 0): TranscriptionResult[] {
-  const stmt = db.prepare(`
-    SELECT id, text, language, duration, timestamp,
-      model_used as modelUsed, ai_mode as aiMode, ai_result as aiResult
+  return db.prepare(`
+    SELECT id, text, language, duration, timestamp, model_used AS modelUsed,
+      input_mode AS inputMode, source_text AS sourceText,
+      meta_prompt_outcome AS metaPromptOutcome, meta_prompt_provider AS metaPromptProvider,
+      processing_duration AS processingDuration, meta_prompt_duration AS metaPromptDuration
     FROM transcriptions
     ORDER BY timestamp DESC
     LIMIT ? OFFSET ?
-  `)
-  return stmt.all(limit, offset) as TranscriptionResult[]
+  `).all(limit, offset) as TranscriptionResult[]
 }
 
 export function searchHistory(query: string): TranscriptionResult[] {
-  const stmt = db.prepare(`
-    SELECT id, text, language, duration, timestamp,
-      model_used as modelUsed, ai_mode as aiMode, ai_result as aiResult
+  return db.prepare(`
+    SELECT id, text, language, duration, timestamp, model_used AS modelUsed,
+      input_mode AS inputMode, source_text AS sourceText,
+      meta_prompt_outcome AS metaPromptOutcome, meta_prompt_provider AS metaPromptProvider,
+      processing_duration AS processingDuration, meta_prompt_duration AS metaPromptDuration
     FROM transcriptions
-    WHERE text LIKE ? OR ai_result LIKE ?
+    WHERE text LIKE ?
     ORDER BY timestamp DESC
     LIMIT 100
-  `)
-  return stmt.all(`%${query}%`, `%${query}%`) as TranscriptionResult[]
+  `).all(`%${query}%`) as TranscriptionResult[]
 }
 
 export function deleteTranscription(id: string): void {
-  const stmt = db.prepare('DELETE FROM transcriptions WHERE id = ?')
-  stmt.run(id)
+  db.prepare('DELETE FROM transcriptions WHERE id = ?').run(id)
 }
 
 export function closeDB(): void {
-  if (db) db.close()
+  if (db?.open) db.close()
 }

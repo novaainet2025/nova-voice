@@ -1,401 +1,437 @@
-import { app } from 'electron'
-import path from 'path'
-import fs from 'fs'
-import { execFile as execFileCb } from 'child_process'
-import { promisify } from 'util'
 import WebSocket from 'ws'
-import { ensureSttServerReady } from './stt-server'
-
-const execFile = promisify(execFileCb)
+import { logInfo, logWarn } from './logger'
+import { ensureSttServerReady, restartSttServer } from './stt-server'
+import { normalizeTranscript } from './transcript-normalizer'
 
 export interface WhisperOptions {
-  modelPath: string
-  language?: string
-  translate?: boolean
   signal?: AbortSignal
 }
 
 export interface WhisperResult {
   text: string
-  language: string
+  language: 'ko'
   duration: number
 }
 
-const STT_WS_URL = 'ws://localhost:8765/ws/stt'
-const CHUNK_SAMPLES = 4096   // 4096 samples per chunk
-const CHUNK_BYTES = CHUNK_SAMPLES * 2  // 16-bit = 2 bytes/sample
-const SILENCE_CHUNKS = 6    // ~1.5s silence (6 * 4096/16000 ≈ 1.54s) > VAD silence_limit 0.7s
+const STT_WS_URL = 'ws://127.0.0.1:8765/ws/stt'
+const CHUNK_SAMPLES = 4096
+const CHUNK_BYTES = CHUNK_SAMPLES * 2
+// Four 4096-sample chunks provide 1.024s of silence. Three chunks (0.768s)
+// sit too close to the server VAD's 0.7s boundary and can produce an empty
+// final for otherwise valid speech after windowing/state transitions.
+const FINALIZE_SILENCE_CHUNKS = 4
+const MAX_TRANSCRIPTION_ATTEMPTS = 2
+const RETRY_DELAY_MS = 120
+const INITIAL_TRANSCRIPTION_TIMEOUT_MS = 45_000
+const RECOVERY_TRANSCRIPTION_TIMEOUT_MS = 90_000
+
+// The server finalises a segment 0.7s after speech stops, so audio that is
+// streamed while the user is still talking is already decoded by the time the
+// renderer's own endpointing fires. A capture that is only uploaded after the
+// recording ends pays the full decode cost as visible latency instead.
+const LIVE_DRAIN_POLL_MS = 10
+const LIVE_DRAIN_MAX_MS = 250
 
 let whisperReady = false
 
-// ─── Model discovery (유지: 설정 UI에서 사용) ────────────────────────────────
-
-function getModelSearchDirs(): string[] {
-  const dirs = [path.join(app.getPath('userData'), 'models')]
-  const appModelsDir = path.join(app.getAppPath(), 'models')
-  if (fs.existsSync(appModelsDir)) dirs.unshift(appModelsDir)
-  const cwdModels = path.join(process.cwd(), 'models')
-  if (fs.existsSync(cwdModels) && !dirs.includes(cwdModels)) dirs.unshift(cwdModels)
-  return dirs
+interface LiveCapture {
+  socket: WebSocket
+  finals: string[]
+  buffered: Buffer[]
+  bytes: number
+  open: boolean
+  failed: boolean
+  pending: Buffer[]
+  startedAt: number
+  /** Resolves once the server acknowledges the post-finalize echo. */
+  settle?: (error?: Error) => void
 }
 
-export function getModelsDir(): string {
-  const dirs = getModelSearchDirs()
-  for (const dir of dirs) {
-    if (fs.existsSync(dir)) return dir
-  }
-  const userDataModels = path.join(app.getPath('userData'), 'models')
-  fs.mkdirSync(userDataModels, { recursive: true })
-  return userDataModels
-}
+let liveCapture: LiveCapture | null = null
 
-export function getAvailableModels(): { name: string; path: string; size: string }[] {
-  const models: { name: string; path: string; size: string }[] = []
-  const seen = new Set<string>()
-  for (const dir of getModelSearchDirs()) {
-    if (!fs.existsSync(dir)) continue
-    const files = fs.readdirSync(dir)
-    for (const file of files) {
-      if (!(file.endsWith('.bin') || file.endsWith('.ggml'))) continue
-      const name = file.replace(/^ggml-/, '').replace(/\.(bin|ggml)$/, '')
-      if (seen.has(name)) continue
-      seen.add(name)
-      const filePath = path.join(dir, file)
-      const stats = fs.statSync(filePath)
-      const sizeMB = (stats.size / (1024 * 1024)).toFixed(0)
-      models.push({ name, path: filePath, size: `${sizeMB}MB` })
-    }
-  }
-  return models
-}
-
-// ─── Init: STT 서버 연결 확인 ────────────────────────────────────────────────
-
-export async function initWhisper(): Promise<boolean> {
+function destroyLiveCapture(capture: LiveCapture | null): void {
+  if (!capture) return
+  capture.failed = true
+  capture.settle?.(new Error('Live capture closed'))
+  capture.settle = undefined
   try {
-    // STT 서버 헬스 체크
-    const http = await import('http')
-    const ok = await new Promise<boolean>((resolve) => {
-      const req = http.get('http://localhost:8765/', { timeout: 3000 }, (res) => {
-        res.resume()
-        resolve(res.statusCode === 200)
-      })
-      req.on('error', () => resolve(false))
-      req.on('timeout', () => { req.destroy(); resolve(false) })
-    })
-    whisperReady = ok
-    console.log(`[Whisper] STT Server health: ${ok ? 'OK' : 'NOT READY'} (ws://localhost:8765)`)
-    if (!ok) {
-      console.warn('[Whisper] STT Server not responding — transcription will fail until server is up')
-    }
-    return whisperReady
+    capture.socket.close()
+  } catch {
+    // The socket may already be closing.
+  }
+}
+
+/**
+ * Opens the STT socket while the user is still speaking and starts feeding it
+ * audio immediately. Never throws: a failed session simply degrades to the
+ * buffered {@link transcribePcm} path.
+ */
+export function beginLiveCapture(): void {
+  if (liveCapture) {
+    destroyLiveCapture(liveCapture)
+    liveCapture = null
+  }
+
+  let socket: WebSocket
+  try {
+    socket = new WebSocket(STT_WS_URL)
   } catch (error) {
-    console.error('[Whisper] Init failed:', error)
-    return false
+    logWarn('[Whisper] Live capture socket could not be created', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return
+  }
+
+  const capture: LiveCapture = {
+    socket,
+    finals: [],
+    buffered: [],
+    bytes: 0,
+    open: false,
+    failed: false,
+    pending: [],
+    startedAt: performance.now(),
+  }
+  liveCapture = capture
+
+  socket.once('open', () => {
+    if (liveCapture !== capture) {
+      destroyLiveCapture(capture)
+      return
+    }
+    capture.open = true
+    // Deliberately no `engine` key: the server answers any message carrying one
+    // with an `info` frame, and `info` is reserved here as the finalize
+    // terminator. mlx is already the server-side default for a new connection.
+    socket.send(JSON.stringify({ partials: false }))
+    for (const chunk of capture.pending) socket.send(chunk)
+    capture.pending = []
+  })
+  socket.once('error', (error) => {
+    capture.failed = true
+    capture.settle?.(new Error(`Whisper WebSocket error: ${error.message}`))
+    capture.settle = undefined
+  })
+  socket.once('close', () => {
+    capture.open = false
+    capture.failed = true
+    capture.settle?.(new Error('Whisper connection closed before final result'))
+    capture.settle = undefined
+  })
+  socket.on('message', (data) => {
+    let message: { type?: string; text?: string }
+    try {
+      message = JSON.parse(data.toString())
+    } catch {
+      return
+    }
+    if (message.type === 'final') {
+      // The engine emits one final per completed VAD segment. A mid-sentence
+      // pause longer than the server's 0.7s window therefore splits an
+      // utterance, so every segment has to be kept in arrival order.
+      const text = (message.text || '').trim()
+      if (text) capture.finals.push(text)
+    } else if (message.type === 'info') {
+      // Echo of the post-finalize engine ping: the server processes messages
+      // sequentially, so every final it will ever send has already arrived.
+      capture.settle?.()
+      capture.settle = undefined
+    } else if (message.type === 'error') {
+      capture.settle?.(new Error(message.text || 'Whisper server error'))
+      capture.settle = undefined
+    }
+  })
+}
+
+/** Streams one recorded chunk to the live session. */
+export function pushLiveAudio(chunk: Buffer): void {
+  const capture = liveCapture
+  if (!capture || capture.failed) return
+  capture.buffered.push(chunk)
+  capture.bytes += chunk.byteLength
+  if (capture.open) {
+    try {
+      capture.socket.send(chunk)
+    } catch {
+      capture.failed = true
+    }
+  } else {
+    capture.pending.push(chunk)
   }
 }
 
-export async function ensureSttReady(maxWaitMs = 10000): Promise<boolean> {
-  if (whisperReady) return true
-
-  const ready = await ensureSttServerReady(maxWaitMs)
-  whisperReady = ready
-  if (!ready) {
-    console.warn(`[Whisper] STT Server not ready after ${maxWaitMs}ms`)
-  }
-  return ready
+export function abortLiveCapture(): void {
+  destroyLiveCapture(liveCapture)
+  liveCapture = null
 }
 
-// ─── Transcribe via WebSocket ────────────────────────────────────────────────
+/**
+ * Finishes the streamed utterance. Resolves to `null` when the session cannot
+ * be trusted, which tells the caller to fall back to a buffered upload.
+ */
+export async function finishLiveCapture(
+  streamedBytes: number,
+  signal?: AbortSignal,
+  timeoutMs = INITIAL_TRANSCRIPTION_TIMEOUT_MS,
+): Promise<WhisperResult | null> {
+  const capture = liveCapture
+  liveCapture = null
+  if (!capture) return null
+  if (capture.failed || !capture.open) {
+    destroyLiveCapture(capture)
+    return null
+  }
+  const finishStartedAt = performance.now()
 
-export async function transcribe(
-  audioBuffer: Buffer,
-  options: WhisperOptions
-): Promise<WhisperResult> {
-  const startTime = Date.now()
-  const tempDir = app.getPath('temp')
-  const timestamp = Date.now()
-  const tempWebmPath = path.join(tempDir, `nova-voice-${timestamp}.webm`)
-  const tempPcmPath = path.join(tempDir, `nova-voice-${timestamp}.pcm`)
+  // The final PCM arrives on a different IPC channel than the streamed chunks.
+  // Give the stream a bounded moment to catch up before judging completeness.
+  const drainDeadline = Date.now() + LIVE_DRAIN_MAX_MS
+  while (capture.bytes < streamedBytes && Date.now() < drainDeadline && !capture.failed) {
+    await new Promise((resolve) => setTimeout(resolve, LIVE_DRAIN_POLL_MS))
+  }
+  if (capture.failed || capture.bytes < streamedBytes) {
+    logWarn('[Whisper] Live capture incomplete; falling back to buffered upload', {
+      streamedBytes,
+      receivedBytes: capture.bytes,
+      failed: capture.failed,
+    })
+    destroyLiveCapture(capture)
+    return null
+  }
 
   try {
-    const ready = await ensureSttReady(10000)
-    if (!ready) {
-      throw new Error('STT server not ready after 10000ms')
-    }
-
-    // webm → raw PCM (16kHz mono s16le)
-    fs.writeFileSync(tempWebmPath, audioBuffer)
-    await convertToPcm(tempWebmPath, tempPcmPath)
-
-    const pcmData = fs.readFileSync(tempPcmPath)
-
-    // WebSocket으로 STT 서버에 전송
-    const result = await transcribeViaWs(pcmData, options)
-
-    const duration = (Date.now() - startTime) / 1000
-    return {
-      text: result.text.trim(),
-      language: result.language || options.language || 'auto',
-      duration
-    }
-  } finally {
-    for (const f of [tempWebmPath, tempPcmPath]) {
-      if (fs.existsSync(f)) {
-        try { fs.unlinkSync(f) } catch { /* ignore */ }
-      }
-    }
-  }
-}
-
-async function convertToPcm(inputPath: string, outputPath: string): Promise<void> {
-  const ffmpegPaths = ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg']
-  let ffmpeg = ''
-  for (const p of ffmpegPaths) {
-    if (fs.existsSync(p)) { ffmpeg = p; break }
-  }
-  if (!ffmpeg) {
-    try {
-      const { stdout } = await execFile('which', ['ffmpeg'])
-      ffmpeg = stdout.trim()
-    } catch {
-      throw new Error('ffmpeg not found. Please install ffmpeg: brew install ffmpeg')
-    }
-  }
-
-  await execFile(ffmpeg, [
-    '-i', inputPath,
-    '-af', [
-      'highpass=f=80',
-      'anlmdn=s=0.5',
-      'volume=1.2',
-    ].join(','),
-    '-ar', '16000',
-    '-ac', '1',
-    '-f', 's16le',        // raw PCM (no WAV header)
-    '-c:a', 'pcm_s16le',
-    '-y',
-    outputPath
-  ], { timeout: 30000 })
-}
-
-async function transcribeViaWs(
-  pcmData: Buffer,
-  options: WhisperOptions
-): Promise<{ text: string; language: string }> {
-  return new Promise((resolve, reject) => {
-    let settled = false
-    const ws = new WebSocket(STT_WS_URL)
-
-    const timeout = setTimeout(() => {
-      if (!settled) {
-        settled = true
-        ws.close()
-        reject(new Error('STT WebSocket timeout (30s)'))
-      }
-    }, 30000)
-
-    // AbortSignal 연결
-    if (options.signal) {
-      if (options.signal.aborted) {
+    await new Promise<void>((resolve, reject) => {
+      let done = false
+      const finish = (error?: Error) => {
+        if (done) return
+        done = true
         clearTimeout(timeout)
-        reject(new Error('STT cancelled'))
+        signal?.removeEventListener('abort', abortFromParent)
+        if (error) reject(error)
+        else resolve()
+      }
+      const timeout = setTimeout(() => finish(new Error('Whisper STT timed out')), timeoutMs)
+      const abortFromParent = () => finish(new Error('Whisper STT cancelled'))
+      if (signal?.aborted) {
+        finish(new Error('Whisper STT cancelled'))
         return
       }
-      options.signal.addEventListener('abort', () => {
-        if (!settled) {
-          settled = true
-          clearTimeout(timeout)
-          ws.close()
-          reject(new Error('STT cancelled'))
-        }
-      }, { once: true })
+      signal?.addEventListener('abort', abortFromParent, { once: true })
+      capture.settle = finish
+
+      const silence = Buffer.alloc(CHUNK_BYTES)
+      for (let index = 0; index < FINALIZE_SILENCE_CHUNKS; index++) capture.socket.send(silence)
+      capture.socket.send(JSON.stringify({ finalize: true }))
+      // `finalize` only answers when no segment final was sent yet, so it is not
+      // a reliable terminator. The engine echo always answers and, because the
+      // handler is sequential, it can only be processed after every final.
+      capture.socket.send(JSON.stringify({ engine: 'mlx' }))
+    })
+  } catch (error) {
+    destroyLiveCapture(capture)
+    if (signal?.aborted) throw error
+    logWarn('[Whisper] Live capture finalize failed; falling back to buffered upload', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return null
+  }
+
+  destroyLiveCapture(capture)
+  const transcript = capture.finals.join(' ').trim()
+  logInfo('[Whisper] Live capture finished', {
+    segments: capture.finals.length,
+    textLength: transcript.length,
+    bytes: capture.bytes,
+    elapsedMs: Math.round(performance.now() - capture.startedAt),
+  })
+  return {
+    text: normalizeTranscript(filterHallucinations(transcript)),
+    language: 'ko',
+    duration: (performance.now() - capture.startedAt) / 1000,
+  }
+}
+
+export async function initWhisper(): Promise<boolean> {
+  whisperReady = await ensureSttServerReady(30_000)
+  console.log(`[Whisper] Server ${whisperReady ? 'ready' : 'not ready'} at ${STT_WS_URL}`)
+  return whisperReady
+}
+
+export async function ensureSttReady(maxWaitMs = 10_000): Promise<boolean> {
+  whisperReady = await ensureSttServerReady(maxWaitMs)
+  return whisperReady
+}
+
+export async function transcribePcm(
+  pcmData: Buffer,
+  sampleRate: number,
+  options: WhisperOptions = {},
+): Promise<WhisperResult> {
+  if (sampleRate !== 16_000) {
+    throw new Error(`Expected 16000Hz PCM, received ${sampleRate}Hz`)
+  }
+  if (!await ensureSttReady()) {
+    throw new Error('Whisper STT server is not ready')
+  }
+
+  const startedAt = performance.now()
+  let transcript = ''
+  let lastError: Error | undefined
+  for (let attempt = 1; attempt <= MAX_TRANSCRIPTION_ATTEMPTS; attempt += 1) {
+    if (options.signal?.aborted) throw new Error('Whisper STT cancelled')
+    try {
+      const result = await transcribeViaWebSocket(
+        pcmData,
+        options.signal,
+        attempt === 1 ? INITIAL_TRANSCRIPTION_TIMEOUT_MS : RECOVERY_TRANSCRIPTION_TIMEOUT_MS,
+      )
+      transcript = result.text.trim()
+      if (transcript) break
+      lastError = new Error('Whisper returned an empty final result')
+    } catch (error) {
+      if (options.signal?.aborted) throw error
+      lastError = error instanceof Error ? error : new Error(String(error))
     }
 
-    ws.on('error', (err) => {
-      if (!settled) {
-        settled = true
-        clearTimeout(timeout)
-        reject(new Error(`STT WebSocket error: ${err.message}`))
-      }
-    })
+    if (attempt < MAX_TRANSCRIPTION_ATTEMPTS) {
+      logWarn('[Whisper] Transcription attempt failed; retrying once', {
+        attempt,
+        bytes: pcmData.byteLength,
+        error: lastError.message,
+      })
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
+      const transportFailed = /(?:timed out|connection closed|WebSocket error)/i.test(lastError.message)
+      const recovered = transportFailed
+        ? await restartSttServer(30_000)
+        : await ensureSttReady(5_000)
+      if (!recovered) throw new Error(`Whisper STT recovery failed after: ${lastError.message}`)
+    }
+  }
 
-    ws.on('open', () => {
-      console.log(`[Whisper/WS] Connected, sending ${pcmData.length} bytes PCM`)
+  if (!transcript && lastError && !/empty final result/i.test(lastError.message)) throw lastError
+  logInfo('[Whisper] Transcription attempts finished', {
+    bytes: pcmData.byteLength,
+    textLength: transcript.length,
+    recovered: Boolean(lastError && transcript),
+  })
+  return {
+    text: normalizeTranscript(filterHallucinations(transcript)),
+    language: 'ko',
+    duration: (performance.now() - startedAt) / 1000,
+  }
+}
 
-      // partial 전사 비활성화 — 이 클라이언트는 final만 사용.
-      // 서버가 발화 중 누적 버퍼를 반복 재전사(폐기됨)하던 낭비를 제거 → 지연 대폭 감소
-      ws.send(JSON.stringify({ partials: false }))
+function transcribeViaWebSocket(
+  pcmData: Buffer,
+  signal?: AbortSignal,
+  timeoutMs = INITIAL_TRANSCRIPTION_TIMEOUT_MS,
+): Promise<{ text: string }> {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(STT_WS_URL)
+    const finals: string[] = []
+    let settled = false
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      signal?.removeEventListener('abort', abortFromParent)
+      socket.close()
+      if (error) reject(error)
+      else resolve({ text: finals.join(' ').trim() })
+    }
+    const timeout = setTimeout(() => finish(new Error('Whisper STT timed out')), timeoutMs)
+    const abortFromParent = () => finish(new Error('Whisper STT cancelled'))
 
-      // PCM을 청크 단위로 전송
+    if (signal?.aborted) {
+      finish(new Error('Whisper STT cancelled'))
+      return
+    }
+    signal?.addEventListener('abort', abortFromParent, { once: true })
+
+    socket.once('error', (error) => finish(new Error(`Whisper WebSocket error: ${error.message}`)))
+    socket.once('open', () => {
+      // No `engine` key: the server answers any message carrying one with an
+      // `info` frame, which is used below as the deterministic terminator.
+      socket.send(JSON.stringify({ partials: false }))
       for (let offset = 0; offset < pcmData.length; offset += CHUNK_BYTES) {
-        const end = Math.min(offset + CHUNK_BYTES, pcmData.length)
-        ws.send(pcmData.subarray(offset, end))
+        socket.send(pcmData.subarray(offset, Math.min(offset + CHUNK_BYTES, pcmData.length)))
       }
-
-      // silence padding 전송 — VAD가 final을 발행하도록 트리거
-      const silenceChunk = Buffer.alloc(CHUNK_BYTES, 0)
-      for (let i = 0; i < SILENCE_CHUNKS; i++) {
-        ws.send(silenceChunk)
-      }
+      const silence = Buffer.alloc(CHUNK_BYTES)
+      for (let index = 0; index < FINALIZE_SILENCE_CHUNKS; index++) socket.send(silence)
+      socket.send(JSON.stringify({ finalize: true }))
+      // `finalize` answers only when no segment final was sent yet, so closing
+      // on the first final used to drop every later segment of a long
+      // utterance — and hang whenever no segment completed at all.
+      socket.send(JSON.stringify({ engine: 'mlx' }))
     })
-
-    ws.on('message', (data) => {
+    socket.on('message', (data) => {
       try {
-        const msg = JSON.parse(data.toString())
-
-        if (msg.type === 'final') {
-          if (!settled) {
-            settled = true
-            clearTimeout(timeout)
-            ws.close()
-
-            let text = msg.text || ''
-            text = filterHallucinations(text)
-            text = restoreEnglishTerms(text)
-
-            console.log(`[Whisper/WS] Final: "${text}" (latency=${msg.latency_ms}ms, rtf=${msg.rtf})`)
-            resolve({ text, language: 'ko' })
-          }
-        } else if (msg.type === 'partial') {
-          console.log(`[Whisper/WS] Partial: "${msg.text}"`)
-        } else if (msg.type === 'error') {
-          console.error(`[Whisper/WS] Server error: ${msg.text}`)
-          if (!settled) {
-            settled = true
-            clearTimeout(timeout)
-            ws.close()
-            reject(new Error(`STT server error: ${msg.text}`))
-          }
+        const message = JSON.parse(data.toString())
+        if (message.type === 'final') {
+          console.log(`[Whisper] Final in ${message.latency_ms}ms (rtf=${message.rtf})`)
+          const text = (message.text || '').trim()
+          if (text) finals.push(text)
+        } else if (message.type === 'info') {
+          finish()
+        } else if (message.type === 'error') {
+          finish(new Error(message.text || 'Whisper server error'))
         }
-      } catch { /* ignore parse errors */ }
-    })
-
-    ws.on('close', () => {
-      if (!settled) {
-        settled = true
-        clearTimeout(timeout)
-        // 서버가 final 없이 닫힌 경우 — 빈 결과 반환
-        resolve({ text: '', language: 'ko' })
+      } catch {
+        // Ignore unrelated server messages.
       }
+    })
+    socket.once('close', () => {
+      if (!settled) finish(new Error('Whisper connection closed before final result'))
     })
   })
 }
 
-// ─── 한글 음사 → 영어 원문 복원 ──────────────────────────────────────────────
+export async function warmupWhisper(): Promise<boolean> {
+  if (!await ensureSttReady(30_000)) return false
 
-const ENGLISH_RESTORE_MAP: [RegExp, string][] = [
-  [/\bNCO\b|엔씨오\b/g,                    'NCO'],
-  [/\bAI\b|에이아이\b|에이 아이\b/g,         'AI'],
-  [/\bAPI\b|에이피아이\b|에이 피 아이\b/g,   'API'],
-  [/클로드\b/g,                             'Claude'],
-  [/제미나이\b|재미나이\b|지미나이\b/g,       'Gemini'],
-  [/\bGPT\b|지피티\b/g,                    'GPT'],
-  [/\bLLM\b|엘엘엠\b/g,                    'LLM'],
-  [/위스퍼\b/g,                             'Whisper'],
-  [/코덱스\b/g,                             'Codex'],
-  [/에이더\b|아이더\b/g,                    'Aider'],
-  [/코파일럿\b/g,                           'Copilot'],
-  [/깃허브\b/g,                             'GitHub'],
-  [/\b깃\b(?!허브)/g,                       'git'],
-  [/비에스코드\b|브이에스코드\b/g,            'VS Code'],
-  [/\bnpm\b|엔피엠\b/g,                     'npm'],
-  [/\bSSH\b|에스에스에이치\b/g,              'SSH'],
-  [/\bURL\b|유알엘\b/g,                     'URL'],
-  [/\bJSON\b|제이슨\b(?!씨)/g,              'JSON'],
-  [/\bUI\b|유아이\b/g,                      'UI'],
-  [/\bUX\b|유엑스\b/g,                      'UX'],
-  [/\bPR\b|피알\b/g,                        'PR'],
-  [/크롬\b/g,                               'Chrome'],
-  [/사파리\b(?!공원)/g,                      'Safari'],
-  [/슬랙\b/g,                               'Slack'],
-  [/디스코드\b/g,                            'Discord'],
-  [/노션\b/g,                               'Notion'],
-  [/피그마\b/g,                              'Figma'],
-  [/도커\b/g,                               'Docker'],
-  [/\bTTS\b|티티에스\b/g,                   'TTS'],
-  [/\bSTT\b|에스티티\b/g,                   'STT'],
-  [/\bMLX\b|엠엘엑스\b/g,                   'MLX'],
-  [/\bPTY\b|피티와이\b/g,                   'PTY'],
-]
-
-function restoreEnglishTerms(text: string): string {
-  if (!text) return text
-  let result = text
-  for (const [pattern, replacement] of ENGLISH_RESTORE_MAP) {
-    result = result.replace(pattern, replacement)
-  }
-  return result
-}
-
-function filterHallucinations(text: string): string {
-  if (!text) return text
-
-  const phantomPhrases = [
-    /^(MBC 뉴스|KBS 뉴스|SBS 뉴스).*$/i,
-    /^시청해 ?주셔서 ?감사합니다\.?$/,
-    /^감사합니다\.?$/,
-    /^(구독|좋아요|알림).*(눌러|부탁).*$/,
-    /^Thank you (for watching|so much)\.?$/i,
-    /^Thanks for watching\.?$/i,
-    /^Subtitles by.*$/i,
-    /^(ご視聴ありがとうございました|お疲れ様でした)\.?$/,
-    /^\.+$/,
-    /^\[.*\]$/,
-    /^♪.*$/,
-    /자막.*제공/,
-    /광고.*포함/,
-    /한글\s*자막/,
-    /^(영상|동영상|비디오).*(제공|시청|감상)/,
-    /^(이 영상|본 영상|다음 영상)/,
-    /Amara\.org/i,
-    /^(Continue|Continued)\.?$/i,
-    /^(다음|이전)\s*(영상|편|회)/,
-    /협찬|제작지원|제공/,
-  ]
-
-  for (const pattern of phantomPhrases) {
-    if (pattern.test(text.trim())) {
-      console.log(`[Whisper] Filtered hallucination: "${text}"`)
-      return ''
+  return new Promise((resolve) => {
+    const socket = new WebSocket(STT_WS_URL)
+    let settled = false
+    const finish = (ready: boolean) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      socket.close()
+      console.log(`[Whisper] Model warmup ${ready ? 'complete' : 'skipped'}`)
+      resolve(ready)
     }
-  }
-
-  const words = text.split(/\s+/)
-  if (words.length >= 6) {
-    const half = Math.floor(words.length / 2)
-    const first = words.slice(0, half).join(' ')
-    const second = words.slice(half, half * 2).join(' ')
-    if (first === second) {
-      console.log(`[Whisper] Filtered repeated hallucination: "${text.substring(0, 60)}..."`)
-      return first
-    }
-  }
-
-  return text
-}
-
-// ─── Warmup: STT 서버에 테스트 요청 ──────────────────────────────────────────
-
-export async function warmupWhisper(_modelPath: string): Promise<void> {
-  try {
-    console.log('[Whisper] Warming up STT server...')
-    // 0.5초 무음 PCM → 서버로 전송하여 MLX 모델 로드 트리거
-    const numSamples = 8000  // 0.5s at 16kHz
-    const silencePcm = Buffer.alloc(numSamples * 2, 0)
-
-    await transcribeViaWs(silencePcm, { modelPath: '' })
-    console.log('[Whisper] Warmup complete (STT server MLX model loaded)')
-  } catch {
-    // warmup 실패는 무시
-    console.log('[Whisper] Warmup skipped (server may not be ready yet)')
-  }
+    const timeout = setTimeout(() => finish(false), 60_000)
+    socket.once('error', () => finish(false))
+    socket.once('open', () => socket.send(JSON.stringify({ warmup: true, engine: 'mlx' })))
+    socket.on('message', (data) => {
+      try {
+        const message = JSON.parse(data.toString())
+        if (message.type === 'ready') finish(true)
+        else if (message.type === 'error') finish(false)
+      } catch {
+        // Ignore malformed messages.
+      }
+    })
+  })
 }
 
 export function isReady(): boolean {
   return whisperReady
 }
 
-export function getWhisperBinaryPath(): string {
-  return '' // CLI 바이너리 더 이상 사용하지 않음
+function filterHallucinations(text: string): string {
+  if (!text) return ''
+  const phantomPhrases = [
+    /^(MBC 뉴스|KBS 뉴스|SBS 뉴스).*$/i,
+    /^시청해 ?주셔서 ?감사합니다\.?$/,
+    /^감사합니다\.?$/,
+    /^(구독|좋아요|알림).*(눌러|부탁).*$/,
+    /^Thank(s| you) for watching\.?$/i,
+    /^Subtitles by.*$/i,
+    /^♪.*$/,
+    /자막.*제공/,
+    /Amara\.org/i,
+  ]
+  if (phantomPhrases.some((pattern) => pattern.test(text.trim()))) return ''
+  return text
 }

@@ -1,0 +1,2977 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-04T05:42:16.825Z",
+  "sources": [
+    "/Users/nova-ai/.claude/commands",
+    "/Users/nova-ai/.codex/prompts",
+    "/Users/nova-ai/project/nco/.claude/commands"
+  ],
+  "commands": [
+    {
+      "command": "/claude-gemma-pipeline",
+      "provider": "codex",
+      "domain": "provider",
+      "description": "Claude-Gemma 저토큰 마일스톤 워크플로와 검증 게이트를 적용합니다.",
+      "usage": "/claude-gemma-pipeline [작업 설명]",
+      "aliases": [
+        "/claude-gemma-pipeline",
+        "claude-gemma-pipeline",
+        "claude gemma pipeline"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/claude-gemma-pipeline.md"
+    },
+    {
+      "command": "/claude-gemma-pipeline",
+      "provider": "nco-source",
+      "domain": "provider",
+      "description": "claude-gemma 전 구간 워크플로 (선택 참고용)",
+      "usage": "/claude-gemma-pipeline",
+      "aliases": [
+        "/claude-gemma-pipeline",
+        "claude-gemma-pipeline",
+        "claude gemma pipeline"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/claude-gemma-pipeline.md"
+    },
+    {
+      "command": "/inter-session",
+      "provider": "codex",
+      "domain": "inter-session",
+      "description": "inter-session 메시지 버스 연결·조회·전송·브로드캐스트를 관리합니다.",
+      "usage": "/inter-session connect|install-deps|list|send|broadcast|rename|status|disconnect|auto-start ...",
+      "aliases": [
+        "/inter-session",
+        "inter-session",
+        "inter session"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/inter-session.md"
+    },
+    {
+      "command": "/inter-session-auto-start",
+      "provider": "codex",
+      "domain": "inter-session",
+      "description": "inter-session 플러그인의 자동 시작 설정을 관리합니다.",
+      "usage": "/inter-session-auto-start on|off|status",
+      "aliases": [
+        "/inter-session-auto-start",
+        "inter-session-auto-start",
+        "inter session auto start"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/inter-session-auto-start.md"
+    },
+    {
+      "command": "/inter-session-broadcast",
+      "provider": "codex",
+      "domain": "inter-session",
+      "description": "모든 inter-session 피어에 메시지를 브로드캐스트합니다.",
+      "usage": "/inter-session-broadcast 메시지",
+      "aliases": [
+        "/inter-session-broadcast",
+        "inter-session-broadcast",
+        "inter session broadcast"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/inter-session-broadcast.md"
+    },
+    {
+      "command": "/inter-session-connect",
+      "provider": "codex",
+      "domain": "inter-session",
+      "description": "현재 Codex 채팅을 inter-session 메시지 버스에 연결합니다.",
+      "usage": "/inter-session-connect [세션 이름]",
+      "aliases": [
+        "/inter-session-connect",
+        "inter-session-connect",
+        "inter session connect"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/inter-session-connect.md"
+    },
+    {
+      "command": "/inter-session-disconnect",
+      "provider": "codex",
+      "domain": "inter-session",
+      "description": "현재 Codex 채팅의 inter-session 연결을 종료합니다.",
+      "usage": "/inter-session-disconnect",
+      "aliases": [
+        "/inter-session-disconnect",
+        "inter-session-disconnect",
+        "inter session disconnect"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/inter-session-disconnect.md"
+    },
+    {
+      "command": "/inter-session-install-deps",
+      "provider": "codex",
+      "domain": "inter-session",
+      "description": "inter-session 런타임 의존성을 격리 venv에 설치합니다.",
+      "usage": "/inter-session-install-deps",
+      "aliases": [
+        "/inter-session-install-deps",
+        "inter-session-install-deps",
+        "inter session install deps"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/inter-session-install-deps.md"
+    },
+    {
+      "command": "/inter-session-list",
+      "provider": "codex",
+      "domain": "inter-session",
+      "description": "현재 연결된 inter-session 피어 목록을 조회합니다.",
+      "usage": "/inter-session-list",
+      "aliases": [
+        "/inter-session-list",
+        "inter-session-list",
+        "inter session list"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/inter-session-list.md"
+    },
+    {
+      "command": "/inter-session-rename",
+      "provider": "codex",
+      "domain": "inter-session",
+      "description": "현재 inter-session 연결 이름을 변경합니다.",
+      "usage": "/inter-session-rename 새 이름",
+      "aliases": [
+        "/inter-session-rename",
+        "inter-session-rename",
+        "inter session rename"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/inter-session-rename.md"
+    },
+    {
+      "command": "/inter-session-send",
+      "provider": "codex",
+      "domain": "inter-session",
+      "description": "지정한 inter-session 피어에 메시지를 전송합니다.",
+      "usage": "/inter-session-send 대상 메시지",
+      "aliases": [
+        "/inter-session-send",
+        "inter-session-send",
+        "inter session send"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/inter-session-send.md"
+    },
+    {
+      "command": "/inter-session-status",
+      "provider": "codex",
+      "domain": "inter-session",
+      "description": "현재 Codex 채팅의 inter-session 연결 상태를 확인합니다.",
+      "usage": "/inter-session-status",
+      "aliases": [
+        "/inter-session-status",
+        "inter-session-status",
+        "inter session status"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/inter-session-status.md"
+    },
+    {
+      "command": "/mp",
+      "provider": "claude-code",
+      "domain": "meta-prompt",
+      "description": "메타 프롬프트 — 입력한 요청을 고품질 프롬프트로 변환하여 실행",
+      "usage": "/mp 원본 프롬프트",
+      "aliases": [
+        "/mp",
+        "mp"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/mp.md"
+    },
+    {
+      "command": "/mp",
+      "provider": "codex",
+      "domain": "meta-prompt",
+      "description": "원본 요청을 검증 가능한 메타 프롬프트로 변환한 뒤 실행합니다.",
+      "usage": "/mp 원본 프롬프트",
+      "aliases": [
+        "/mp",
+        "mp"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/mp.md"
+    },
+    {
+      "command": "/nco-agent",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "에이전트 세션을 관리합니다.",
+      "usage": "/nco-agent start provider 프롬프트 — 세션 시작",
+      "aliases": [
+        "/nco-agent",
+        "nco-agent",
+        "nco agent"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-agent.md"
+    },
+    {
+      "command": "/nco-agent",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "에이전트 세션을 시작하고 상태·승인·중단을 관리합니다.",
+      "usage": "/nco-agent start|status|abort|approve|reject|sessions ...",
+      "aliases": [
+        "/nco-agent",
+        "nco-agent",
+        "nco agent"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-agent.md"
+    },
+    {
+      "command": "/nco-agent",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "에이전트 세션을 관리합니다.",
+      "usage": "/nco-agent start provider 프롬프트 — 세션 시작",
+      "aliases": [
+        "/nco-agent",
+        "nco-agent",
+        "nco agent"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-agent.md"
+    },
+    {
+      "command": "/nco-analyze",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "심층 분석 명령어: 최적 AI 자동 선정 → 병렬 분석 → 토론 → 수정 → 검증 → Gap 분석(100% 루프)",
+      "usage": "/nco-analyze 분석 주제 또는 질문",
+      "aliases": [
+        "/nco-analyze",
+        "nco-analyze",
+        "nco analyze"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-analyze.md"
+    },
+    {
+      "command": "/nco-analyze",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "여러 AI를 활용해 주제를 심층 분석하고 검증합니다.",
+      "usage": "/nco-analyze 분석 주제 또는 질문",
+      "aliases": [
+        "/nco-analyze",
+        "nco-analyze",
+        "nco analyze"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-analyze.md"
+    },
+    {
+      "command": "/nco-broadcast",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "전체 AI에 메시지를 브로드캐스트합니다.",
+      "usage": "/nco-broadcast 메시지",
+      "aliases": [
+        "/nco-broadcast",
+        "nco-broadcast",
+        "nco broadcast"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-broadcast.md"
+    },
+    {
+      "command": "/nco-broadcast",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "모든 NCO AI에 메시지를 브로드캐스트합니다.",
+      "usage": "/nco-broadcast 메시지",
+      "aliases": [
+        "/nco-broadcast",
+        "nco-broadcast",
+        "nco broadcast"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-broadcast.md"
+    },
+    {
+      "command": "/nco-ceo",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "NCO 프로젝트를 CEO 관점에서 전략적으로 진단합니다.",
+      "usage": "/nco-ceo [전략 주제]",
+      "aliases": [
+        "/nco-ceo",
+        "nco-ceo",
+        "nco ceo"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-ceo.md"
+    },
+    {
+      "command": "/nco-ceo",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "NCO Strategic CEO (Nova-AX CEO Layer)",
+      "usage": "/nco-gap",
+      "aliases": [
+        "/nco-ceo",
+        "nco-ceo",
+        "nco ceo"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-ceo.md"
+    },
+    {
+      "command": "/nco-collab",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO 그룹 지성 협업 세션을 관리합니다 (생성, 참여, 기여, 투표, 종료).",
+      "usage": "/nco-collab",
+      "aliases": [
+        "/nco-collab",
+        "nco-collab",
+        "nco collab"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-collab.md"
+    },
+    {
+      "command": "/nco-collab",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "NCO 그룹 협업 세션의 생성·기여·투표·종료를 관리합니다.",
+      "usage": "/nco-collab create|join|contribute|vote|close|list ...",
+      "aliases": [
+        "/nco-collab",
+        "nco-collab",
+        "nco collab"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-collab.md"
+    },
+    {
+      "command": "/nco-collab-force",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "codex·agy 필수 협업 강제 + 의견 상충 시 discussion→consensus 합의 도출",
+      "usage": "/nco-collab-force 작업 또는 상충 주제",
+      "aliases": [
+        "/nco-collab-force",
+        "nco-collab-force",
+        "nco collab force"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-collab-force.md"
+    },
+    {
+      "command": "/nco-collab-force",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "필수 협업과 합의 오케스트레이션을 강제로 실행합니다.",
+      "usage": "/nco-collab-force 작업 또는 상충 주제",
+      "aliases": [
+        "/nco-collab-force",
+        "nco-collab-force",
+        "nco collab force"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-collab-force.md"
+    },
+    {
+      "command": "/nco-commander",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Commander 4-Layer 계층 실행을 시작합니다.",
+      "usage": "/nco-commander 작업 설명",
+      "aliases": [
+        "/nco-commander",
+        "nco-commander",
+        "nco commander"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-commander.md"
+    },
+    {
+      "command": "/nco-commander",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "Commander 4계층 워크플로로 복합 작업을 실행합니다.",
+      "usage": "/nco-commander 작업 설명",
+      "aliases": [
+        "/nco-commander",
+        "nco-commander",
+        "nco commander"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-commander.md"
+    },
+    {
+      "command": "/nco-commander",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "Commander 4-Layer 계층 실행을 시작합니다.",
+      "usage": "/nco-commander 작업 설명",
+      "aliases": [
+        "/nco-commander",
+        "nco-commander",
+        "nco commander"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-commander.md"
+    },
+    {
+      "command": "/nco-company",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO 회사 팀에 작업을 위임하고 오케스트레이션합니다.",
+      "usage": "/nco-company [subcommand] [args...]",
+      "aliases": [
+        "/nco-company",
+        "nco-company",
+        "nco company"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-company.md"
+    },
+    {
+      "command": "/nco-company",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "Nova-AX 회사 조직과 팀에 실작업을 위임합니다.",
+      "usage": "/nco-company 작업 설명",
+      "aliases": [
+        "/nco-company",
+        "nco-company",
+        "nco company"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-company.md"
+    },
+    {
+      "command": "/nco-company-cancel",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "실행 중인 NCO 회사 오케스트레이션과 활성 하위 태스크를 취소합니다.",
+      "usage": "/nco-company-cancel runId",
+      "aliases": [
+        "/nco-company-cancel",
+        "nco-company-cancel",
+        "nco company cancel"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-company-cancel.md"
+    },
+    {
+      "command": "/nco-company-cancel",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "실행 중인 Nova-AX 회사 워크플로를 취소합니다.",
+      "usage": "/nco-company-cancel runId",
+      "aliases": [
+        "/nco-company-cancel",
+        "nco-company-cancel",
+        "nco company cancel"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-company-cancel.md"
+    },
+    {
+      "command": "/nco-conductor",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Smart Router가 복잡도를 분석하고 최적 모드+AI를 자동 선택하여 실행합니다.",
+      "usage": "/nco-conductor 작업 설명",
+      "aliases": [
+        "/nco-conductor",
+        "nco-conductor",
+        "nco conductor"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-conductor.md"
+    },
+    {
+      "command": "/nco-conductor",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "작업 복잡도를 분석해 최적 NCO 모드와 AI를 자동 선택합니다.",
+      "usage": "/nco-conductor 작업 설명",
+      "aliases": [
+        "/nco-conductor",
+        "nco-conductor",
+        "nco conductor"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-conductor.md"
+    },
+    {
+      "command": "/nco-conductor",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "Smart Router가 복잡도를 분석하고 최적 모드+AI를 자동 선택하여 실행합니다.",
+      "usage": "/nco-conductor 작업 설명",
+      "aliases": [
+        "/nco-conductor",
+        "nco-conductor",
+        "nco conductor"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-conductor.md"
+    },
+    {
+      "command": "/nco-consensus",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "AI 합의 투표 — 여러 AI가 투표로 최적 답안을 결정합니다.",
+      "usage": "/nco-consensus 질문 또는 설계 결정",
+      "aliases": [
+        "/nco-consensus",
+        "nco-consensus",
+        "nco consensus"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-consensus.md"
+    },
+    {
+      "command": "/nco-consensus",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "여러 AI의 투표로 질문이나 설계 결정의 합의를 도출합니다.",
+      "usage": "/nco-consensus 질문 또는 설계 결정",
+      "aliases": [
+        "/nco-consensus",
+        "nco-consensus",
+        "nco consensus"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-consensus.md"
+    },
+    {
+      "command": "/nco-debug",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Ollama 프록시 디버그 메뉴 — 전체 서브커맨드 인덱스 및 직접 실행.",
+      "usage": "/nco-debug [status|errors|recover|test|clear|help]",
+      "aliases": [
+        "/nco-debug",
+        "nco-debug",
+        "nco debug"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-debug.md"
+    },
+    {
+      "command": "/nco-debug",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "Ollama 프록시 디버그 하위 명령을 통합 실행합니다.",
+      "usage": "/nco-debug [status|errors|recover|test|clear|help]",
+      "aliases": [
+        "/nco-debug",
+        "nco-debug",
+        "nco debug"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-debug.md"
+    },
+    {
+      "command": "/nco-debug-clear",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Ollama 프록시 에러 카운터와 이력을 초기화합니다.",
+      "usage": "/nco-debug-clear",
+      "aliases": [
+        "/nco-debug-clear",
+        "nco-debug-clear",
+        "nco debug clear"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-debug-clear.md"
+    },
+    {
+      "command": "/nco-debug-clear",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "Ollama 프록시 오류 카운터와 이력을 초기화합니다.",
+      "usage": "/nco-debug-clear",
+      "aliases": [
+        "/nco-debug-clear",
+        "nco-debug-clear",
+        "nco debug clear"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-debug-clear.md"
+    },
+    {
+      "command": "/nco-debug-errors",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Ollama 프록시 최근 에러 목록을 출력합니다 (타입별 분류 포함).",
+      "usage": "/nco-debug-errors",
+      "aliases": [
+        "/nco-debug-errors",
+        "nco-debug-errors",
+        "nco debug errors"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-debug-errors.md"
+    },
+    {
+      "command": "/nco-debug-errors",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "Ollama 프록시의 최근 오류를 유형별로 조회합니다.",
+      "usage": "/nco-debug-errors",
+      "aliases": [
+        "/nco-debug-errors",
+        "nco-debug-errors",
+        "nco debug errors"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-debug-errors.md"
+    },
+    {
+      "command": "/nco-debug-recover",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Ollama 프록시 자가 복구를 실행합니다 — 모델 캐시 갱신 + 헬스체크 + 컨텍스트 재감지.",
+      "usage": "/nco-debug-recover [auto|modelrefresh|healthcheck|ctxrefresh|errorclear]",
+      "aliases": [
+        "/nco-debug-recover",
+        "nco-debug-recover",
+        "nco debug recover"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-debug-recover.md"
+    },
+    {
+      "command": "/nco-debug-recover",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "Ollama 프록시의 모델·헬스·컨텍스트 상태를 복구합니다.",
+      "usage": "/nco-debug-recover [auto|modelrefresh|healthcheck|ctxrefresh|errorclear]",
+      "aliases": [
+        "/nco-debug-recover",
+        "nco-debug-recover",
+        "nco debug recover"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-debug-recover.md"
+    },
+    {
+      "command": "/nco-debug-recover-ctx",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "프록시 컨텍스트 한계를 재감지합니다 — 컨텍스트 초과 에러 발생 시 재보정.",
+      "usage": "/nco-debug-recover-ctx",
+      "aliases": [
+        "/nco-debug-recover-ctx",
+        "nco-debug-recover-ctx",
+        "nco debug recover ctx"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-debug-recover-ctx.md"
+    },
+    {
+      "command": "/nco-debug-recover-ctx",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "Ollama 프록시 컨텍스트 한계를 다시 감지합니다.",
+      "usage": "/nco-debug-recover-ctx",
+      "aliases": [
+        "/nco-debug-recover-ctx",
+        "nco-debug-recover-ctx",
+        "nco debug recover ctx"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-debug-recover-ctx.md"
+    },
+    {
+      "command": "/nco-debug-recover-model",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Ollama 프록시 모델 캐시를 강제 갱신합니다 — 모델 전환 후 인식 불일치 해결.",
+      "usage": "/nco-debug-recover-model",
+      "aliases": [
+        "/nco-debug-recover-model",
+        "nco-debug-recover-model",
+        "nco debug recover model"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-debug-recover-model.md"
+    },
+    {
+      "command": "/nco-debug-recover-model",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "Ollama 프록시 모델 캐시를 강제로 갱신합니다.",
+      "usage": "/nco-debug-recover-model",
+      "aliases": [
+        "/nco-debug-recover-model",
+        "nco-debug-recover-model",
+        "nco debug recover model"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-debug-recover-model.md"
+    },
+    {
+      "command": "/nco-debug-status",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Ollama 프록시 헬스 + 에러 통계를 출력합니다.",
+      "usage": "/nco-debug-status",
+      "aliases": [
+        "/nco-debug-status",
+        "nco-debug-status",
+        "nco debug status"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-debug-status.md"
+    },
+    {
+      "command": "/nco-debug-status",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "Ollama 프록시 헬스와 오류 통계를 조회합니다.",
+      "usage": "/nco-debug-status",
+      "aliases": [
+        "/nco-debug-status",
+        "nco-debug-status",
+        "nco debug status"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-debug-status.md"
+    },
+    {
+      "command": "/nco-debug-test",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Ollama 프록시 추론 테스트 — 단순 메시지를 전송해 end-to-end 동작을 확인합니다.",
+      "usage": "/nco-debug-test",
+      "aliases": [
+        "/nco-debug-test",
+        "nco-debug-test",
+        "nco debug test"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-debug-test.md"
+    },
+    {
+      "command": "/nco-debug-test",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "Ollama 프록시의 end-to-end 추론을 테스트합니다.",
+      "usage": "/nco-debug-test",
+      "aliases": [
+        "/nco-debug-test",
+        "nco-debug-test",
+        "nco debug test"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-debug-test.md"
+    },
+    {
+      "command": "/nco-delegate",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "CLI 세션 간 작업 위임 명령어.",
+      "usage": "/nco-delegate @세션명 \\\"작업 제목\\\" \\\"설명(선택)\\\"",
+      "aliases": [
+        "/nco-delegate",
+        "nco-delegate",
+        "nco delegate"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-delegate.md"
+    },
+    {
+      "command": "/nco-delegate",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "다른 CLI 세션에 작업을 위임하고 결과를 회수합니다.",
+      "usage": "/nco-delegate 대상 작업",
+      "aliases": [
+        "/nco-delegate",
+        "nco-delegate",
+        "nco delegate"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-delegate.md"
+    },
+    {
+      "command": "/nco-discussion",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "멀티 AI 토론을 시작합니다.",
+      "usage": "/nco-discussion 토론 주제",
+      "aliases": [
+        "/nco-discussion",
+        "nco-discussion",
+        "nco discussion"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-discussion.md"
+    },
+    {
+      "command": "/nco-discussion",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "여러 AI가 참여하는 다중 라운드 토론을 시작합니다.",
+      "usage": "/nco-discussion 토론 주제",
+      "aliases": [
+        "/nco-discussion",
+        "nco-discussion",
+        "nco discussion"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-discussion.md"
+    },
+    {
+      "command": "/nco-discussion",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "멀티 AI 토론을 시작합니다.",
+      "usage": "/nco-discussion 토론 주제",
+      "aliases": [
+        "/nco-discussion",
+        "nco-discussion",
+        "nco discussion"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-discussion.md"
+    },
+    {
+      "command": "/nco-do",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Plan을 실행합니다. 칸반 태스크를 순차/병렬로 에이전트에게 위임합니다.",
+      "usage": "/nco-do planId [sequential|parallel|auto]",
+      "aliases": [
+        "/nco-do",
+        "nco-do",
+        "nco do"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-do.md"
+    },
+    {
+      "command": "/nco-do",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "Plan의 칸반 태스크를 순차·병렬·자동 모드로 실행합니다.",
+      "usage": "/nco-do planId [sequential|parallel|auto]",
+      "aliases": [
+        "/nco-do",
+        "nco-do",
+        "nco do"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-do.md"
+    },
+    {
+      "command": "/nco-do",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "Plan을 실행합니다. 칸반 태스크를 순차/병렬로 에이전트에게 위임합니다.",
+      "usage": "/nco-do planId [sequential|parallel|auto]",
+      "aliases": [
+        "/nco-do",
+        "nco-do",
+        "nco do"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-do.md"
+    },
+    {
+      "command": "/nco-flow",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO Flow — 원샷 자동 풀파이프라인 (MVP Phase A)",
+      "usage": "/nco-flow 요청",
+      "aliases": [
+        "/nco-flow",
+        "nco-flow",
+        "nco flow"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-flow.md"
+    },
+    {
+      "command": "/nco-flow",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "NCO 원샷 자동 풀파이프라인을 실행합니다.",
+      "usage": "/nco-flow 요청",
+      "aliases": [
+        "/nco-flow",
+        "nco-flow",
+        "nco flow"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-flow.md"
+    },
+    {
+      "command": "/nco-gap",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "현재 작업의 Gap 분석을 수동으로 실행합니다.",
+      "usage": "/nco-gap",
+      "aliases": [
+        "/nco-gap",
+        "nco-gap",
+        "nco gap"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-gap.md"
+    },
+    {
+      "command": "/nco-gap",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "현재 작업의 누락과 품질 Gap을 분석합니다.",
+      "usage": "/nco-gap [검증 대상]",
+      "aliases": [
+        "/nco-gap",
+        "nco-gap",
+        "nco gap"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-gap.md"
+    },
+    {
+      "command": "/nco-gap",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "현재 작업의 Gap 분석을 수동으로 실행합니다.",
+      "usage": "/nco-gap",
+      "aliases": [
+        "/nco-gap",
+        "nco-gap",
+        "nco gap"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-gap.md"
+    },
+    {
+      "command": "/nco-hive",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Hive 모드 — 전체 9개 AI를 하나처럼 실행합니다.",
+      "usage": "/nco-hive 프롬프트",
+      "aliases": [
+        "/nco-hive",
+        "nco-hive",
+        "nco hive"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-hive.md"
+    },
+    {
+      "command": "/nco-hive",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "활성 AI 전체를 하나의 Hive처럼 실행합니다.",
+      "usage": "/nco-hive 프롬프트",
+      "aliases": [
+        "/nco-hive",
+        "nco-hive",
+        "nco hive"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-hive.md"
+    },
+    {
+      "command": "/nco-inter-session",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Nova-AX Inter-Session — CLI 세션 간 에이전트 직통 메시징",
+      "usage": "/nco-inter-session send 대상이름 메시지",
+      "aliases": [
+        "/nco-inter-session",
+        "nco-inter-session",
+        "nco inter session"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-inter-session.md"
+    },
+    {
+      "command": "/nco-inter-session",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "Nova-AX inter-session 연결과 메시징을 통합 관리합니다.",
+      "usage": "/nco-inter-session connect|list|send|broadcast|status|disconnect ...",
+      "aliases": [
+        "/nco-inter-session",
+        "nco-inter-session",
+        "nco inter session"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-inter-session.md"
+    },
+    {
+      "command": "/nco-invocations",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "현재 에이전트 호출 현황을 조회합니다.",
+      "usage": "/nco-invocations [--all]",
+      "aliases": [
+        "/nco-invocations",
+        "nco-invocations",
+        "nco invocations"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-invocations.md"
+    },
+    {
+      "command": "/nco-invocations",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "현재 및 최근 NCO 에이전트 호출 현황을 조회합니다.",
+      "usage": "/nco-invocations [--all]",
+      "aliases": [
+        "/nco-invocations",
+        "nco-invocations",
+        "nco invocations"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-invocations.md"
+    },
+    {
+      "command": "/nco-kanban",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "칸반 보드를 조회합니다.",
+      "usage": "/nco-kanban [planId]",
+      "aliases": [
+        "/nco-kanban",
+        "nco-kanban",
+        "nco kanban"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-kanban.md"
+    },
+    {
+      "command": "/nco-kanban",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "전체 또는 특정 Plan의 칸반 보드를 조회합니다.",
+      "usage": "/nco-kanban [planId]",
+      "aliases": [
+        "/nco-kanban",
+        "nco-kanban",
+        "nco kanban"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-kanban.md"
+    },
+    {
+      "command": "/nco-kanban",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "칸반 보드를 조회합니다.",
+      "usage": "/nco-kanban [planId]",
+      "aliases": [
+        "/nco-kanban",
+        "nco-kanban",
+        "nco kanban"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-kanban.md"
+    },
+    {
+      "command": "/nco-leaderboard",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "AI 에이전트 리더보드를 조회합니다. 성공률, 태스크 수, 평균 응답 시간을 표시합니다.",
+      "usage": "/nco-leaderboard",
+      "aliases": [
+        "/nco-leaderboard",
+        "nco-leaderboard",
+        "nco leaderboard"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-leaderboard.md"
+    },
+    {
+      "command": "/nco-leaderboard",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "AI 에이전트 성공률과 성능 리더보드를 조회합니다.",
+      "usage": "/nco-leaderboard",
+      "aliases": [
+        "/nco-leaderboard",
+        "nco-leaderboard",
+        "nco leaderboard"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-leaderboard.md"
+    },
+    {
+      "command": "/nco-leaderboard",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "AI 에이전트 리더보드를 조회합니다. 성공률, 태스크 수, 평균 응답 시간을 표시합니다.",
+      "usage": "/nco-leaderboard",
+      "aliases": [
+        "/nco-leaderboard",
+        "nco-leaderboard",
+        "nco leaderboard"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-leaderboard.md"
+    },
+    {
+      "command": "/nco-learn",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO 지식 베이스를 검색합니다.",
+      "usage": "/nco-learn 검색 키워드",
+      "aliases": [
+        "/nco-learn",
+        "nco-learn",
+        "nco learn"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-learn.md"
+    },
+    {
+      "command": "/nco-learn",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "NCO 지식 베이스를 키워드로 검색합니다.",
+      "usage": "/nco-learn 검색 키워드",
+      "aliases": [
+        "/nco-learn",
+        "nco-learn",
+        "nco learn"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-learn.md"
+    },
+    {
+      "command": "/nco-learn",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "NCO 지식 베이스를 검색합니다.",
+      "usage": "/nco-learn 검색 키워드",
+      "aliases": [
+        "/nco-learn",
+        "nco-learn",
+        "nco learn"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-learn.md"
+    },
+    {
+      "command": "/nco-menu",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "등록된 NCO와 inter-session Codex 커스텀 메뉴 전체를 조회하고 선택합니다.",
+      "usage": "/nco-menu [검색어]",
+      "aliases": [
+        "/nco-menu",
+        "nco-menu",
+        "nco menu"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-menu.md"
+    },
+    {
+      "command": "/nco-mesh",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "CLI Mesh — Multi-agent state & sync",
+      "usage": "/nco-mesh [done|check|send|messages|ping]",
+      "aliases": [
+        "/nco-mesh",
+        "nco-mesh",
+        "nco mesh"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-mesh.md"
+    },
+    {
+      "command": "/nco-mesh",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "CLI Mesh 세션 상태와 동기화를 관리합니다.",
+      "usage": "/nco-mesh [명령]",
+      "aliases": [
+        "/nco-mesh",
+        "nco-mesh",
+        "nco mesh"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-mesh.md"
+    },
+    {
+      "command": "/nco-mesh",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "CLI Mesh — 열린 CLI 세션 간 실시간 상태 공유 및 통신 시스템입니다.",
+      "usage": "/nco-mesh — 활성 세션 목록 + 작업 요약",
+      "aliases": [
+        "/nco-mesh",
+        "nco-mesh",
+        "nco mesh"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-mesh.md"
+    },
+    {
+      "command": "/nco-mesh-ping",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Mesh Heartbeat 전송 — 현재 세션 상태를 NCO Mesh에 등록합니다 (다른 CLI 세션에서 내 존재가 보입니다).",
+      "usage": "/nco-mesh-ping",
+      "aliases": [
+        "/nco-mesh-ping",
+        "nco-mesh-ping",
+        "nco mesh ping"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-mesh-ping.md"
+    },
+    {
+      "command": "/nco-mesh-ping",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "활성 세션을 확인하고 Mesh heartbeat를 전송합니다.",
+      "usage": "/nco-mesh-ping",
+      "aliases": [
+        "/nco-mesh-ping",
+        "nco-mesh-ping",
+        "nco mesh ping"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-mesh-ping.md"
+    },
+    {
+      "command": "/nco-mesh-ping",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "Mesh Heartbeat 전송 — 현재 세션 상태를 NCO Mesh에 등록합니다 (다른 CLI 세션에서 내 존재가 보입니다).",
+      "usage": "/nco-mesh-ping",
+      "aliases": [
+        "/nco-mesh-ping",
+        "nco-mesh-ping",
+        "nco mesh ping"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-mesh-ping.md"
+    },
+    {
+      "command": "/nco-mesh-watch",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Live mesh inbox watcher — 새 DM이 도착할 때마다 system notification으로 즉시 알립니다.",
+      "usage": "/nco-mesh-watch",
+      "aliases": [
+        "/nco-mesh-watch",
+        "nco-mesh-watch",
+        "nco mesh watch"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-mesh-watch.md"
+    },
+    {
+      "command": "/nco-mesh-watch",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "CLI Mesh 메시지와 상태 변화를 지속 감시합니다.",
+      "usage": "/nco-mesh-watch",
+      "aliases": [
+        "/nco-mesh-watch",
+        "nco-mesh-watch",
+        "nco mesh watch"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-mesh-watch.md"
+    },
+    {
+      "command": "/nco-metrics",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO 시스템 메트릭을 조회합니다. 태스크 통계, 에이전트 수, 메모리 사용량 등을 표시합니다.",
+      "usage": "/nco-metrics",
+      "aliases": [
+        "/nco-metrics",
+        "nco-metrics",
+        "nco metrics"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-metrics.md"
+    },
+    {
+      "command": "/nco-metrics",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "NCO 태스크·에이전트·메모리 시스템 메트릭을 조회합니다.",
+      "usage": "/nco-metrics",
+      "aliases": [
+        "/nco-metrics",
+        "nco-metrics",
+        "nco metrics"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-metrics.md"
+    },
+    {
+      "command": "/nco-metrics",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "NCO 시스템 메트릭을 조회합니다. 태스크 통계, 에이전트 수, 메모리 사용량 등을 표시합니다.",
+      "usage": "/nco-metrics",
+      "aliases": [
+        "/nco-metrics",
+        "nco-metrics",
+        "nco metrics"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-metrics.md"
+    },
+    {
+      "command": "/nco-next",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "다음 순차 작업을 실행합니다.",
+      "usage": "/nco-next",
+      "aliases": [
+        "/nco-next",
+        "nco-next",
+        "nco next"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-next.md"
+    },
+    {
+      "command": "/nco-next",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "현재 계획에서 다음 실행 가능한 태스크를 선택합니다.",
+      "usage": "/nco-next [planId]",
+      "aliases": [
+        "/nco-next",
+        "nco-next",
+        "nco next"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-next.md"
+    },
+    {
+      "command": "/nco-next",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "다음 순차 작업을 실행합니다.",
+      "usage": "/nco-next",
+      "aliases": [
+        "/nco-next",
+        "nco-next",
+        "nco next"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-next.md"
+    },
+    {
+      "command": "/nco-next-parallel",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "/nco-next-parallel 명령",
+      "usage": "/nco-next-parallel",
+      "aliases": [
+        "/nco-next-parallel",
+        "nco-next-parallel",
+        "nco next parallel"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-next-parallel.md"
+    },
+    {
+      "command": "/nco-next-parallel",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "현재 계획에서 병렬 실행 가능한 다음 태스크를 선택합니다.",
+      "usage": "/nco-next-parallel [planId]",
+      "aliases": [
+        "/nco-next-parallel",
+        "nco-next-parallel",
+        "nco next parallel"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-next-parallel.md"
+    },
+    {
+      "command": "/nco-next-parallel",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "다음 병렬 작업들을 동시에 실행합니다.",
+      "usage": "/nco-next-parallel",
+      "aliases": [
+        "/nco-next-parallel",
+        "nco-next-parallel",
+        "nco next parallel"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-next-parallel.md"
+    },
+    {
+      "command": "/nco-ollama",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "NCO용 Ollama 모델의 시작·상태·테스트·채팅을 관리합니다.",
+      "usage": "/nco-ollama [start|stop|models|test|chat ...]",
+      "aliases": [
+        "/nco-ollama",
+        "nco-ollama",
+        "nco ollama"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-ollama.md"
+    },
+    {
+      "command": "/nco-ollama",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "Ollama 로컬 LLM (양자화 Gemma gemma4:26b 등) — 시작/상태/테스트/프록시.",
+      "usage": "/nco-ollama — 상태 (기본)",
+      "aliases": [
+        "/nco-ollama",
+        "nco-ollama",
+        "nco ollama"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-ollama.md"
+    },
+    {
+      "command": "/nco-opus",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Opus Commander — 전략적 지휘관 모드: 분석→설계→Plan→Mesh배분→감독→Gap검증→100%루프",
+      "usage": "/nco-opus 작업 요청",
+      "aliases": [
+        "/nco-opus",
+        "nco-opus",
+        "nco opus"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-opus.md"
+    },
+    {
+      "command": "/nco-opus",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "전략 분석부터 Gap 검증까지 Opus Commander 흐름을 실행합니다.",
+      "usage": "/nco-opus 작업 요청",
+      "aliases": [
+        "/nco-opus",
+        "nco-opus",
+        "nco opus"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-opus.md"
+    },
+    {
+      "command": "/nco-parallel",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "여러 AI에 동일 작업을 병렬로 위임합니다.",
+      "usage": "/nco-parallel [codex, agy] 프롬프트",
+      "aliases": [
+        "/nco-parallel",
+        "nco-parallel",
+        "nco parallel"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-parallel.md"
+    },
+    {
+      "command": "/nco-parallel",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "여러 AI에 동일 작업을 병렬 위임합니다.",
+      "usage": "/nco-parallel 작업",
+      "aliases": [
+        "/nco-parallel",
+        "nco-parallel",
+        "nco parallel"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-parallel.md"
+    },
+    {
+      "command": "/nco-plan",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "새 Plan을 생성합니다. 토론 결과를 기반으로 자동 태스크 분해 + docs/plans/ 마크다운 파일을 생성합니다.",
+      "usage": "/nco-plan Plan 제목",
+      "aliases": [
+        "/nco-plan",
+        "nco-plan",
+        "nco plan"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-plan.md"
+    },
+    {
+      "command": "/nco-plan",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "요청을 태스크로 분해해 새 NCO Plan을 생성합니다.",
+      "usage": "/nco-plan Plan 제목",
+      "aliases": [
+        "/nco-plan",
+        "nco-plan",
+        "nco plan"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-plan.md"
+    },
+    {
+      "command": "/nco-plan",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "새 Plan을 생성합니다. 토론 결과를 기반으로 자동 태스크 분해 + docs/plans/ 마크다운 파일을 생성합니다.",
+      "usage": "/nco-plan Plan 제목",
+      "aliases": [
+        "/nco-plan",
+        "nco-plan",
+        "nco plan"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-plan.md"
+    },
+    {
+      "command": "/nco-progress",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO 실시간 대시보드 v2.0 — 에이전트 상태, 큐, 활성 태스크, 이벤트, 명령어 워크플로우 통합 표시",
+      "usage": "/nco-progress # 2초 갱신 실시간 모니터 (Ctrl+C 종료)",
+      "aliases": [
+        "/nco-progress",
+        "nco-progress",
+        "nco progress"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-progress.md"
+    },
+    {
+      "command": "/nco-progress",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "NCO 실시간 진행 대시보드와 활성 작업을 조회합니다.",
+      "usage": "/nco-progress [옵션]",
+      "aliases": [
+        "/nco-progress",
+        "nco-progress",
+        "nco progress"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-progress.md"
+    },
+    {
+      "command": "/nco-providers",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "등록된 AI 프로바이더 목록을 확인합니다.",
+      "usage": "/nco-providers",
+      "aliases": [
+        "/nco-providers",
+        "nco-providers",
+        "nco providers"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-providers.md"
+    },
+    {
+      "command": "/nco-providers",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "등록된 AI 프로바이더와 상태를 조회합니다.",
+      "usage": "/nco-providers",
+      "aliases": [
+        "/nco-providers",
+        "nco-providers",
+        "nco providers"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-providers.md"
+    },
+    {
+      "command": "/nco-providers",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "등록된 AI 프로바이더 목록을 확인합니다.",
+      "usage": "/nco-providers",
+      "aliases": [
+        "/nco-providers",
+        "nco-providers",
+        "nco providers"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-providers.md"
+    },
+    {
+      "command": "/nco-safety",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "파일 백업 목록과 검증 게이트 결과를 조회합니다.",
+      "usage": "/nco-safety [taskId]",
+      "aliases": [
+        "/nco-safety",
+        "nco-safety",
+        "nco safety"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-safety.md"
+    },
+    {
+      "command": "/nco-safety",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "파일 백업과 태스크 검증 게이트 결과를 조회합니다.",
+      "usage": "/nco-safety [taskId]",
+      "aliases": [
+        "/nco-safety",
+        "nco-safety",
+        "nco safety"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-safety.md"
+    },
+    {
+      "command": "/nco-safety",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "파일 백업 목록과 검증 게이트 결과를 조회합니다.",
+      "usage": "/nco-safety [taskId]",
+      "aliases": [
+        "/nco-safety",
+        "nco-safety",
+        "nco safety"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-safety.md"
+    },
+    {
+      "command": "/nco-search",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO 통합 검색 — 멀티소스 지능형 검색 엔진",
+      "usage": "/nco-search [소스:] 검색어",
+      "aliases": [
+        "/nco-search",
+        "nco-search",
+        "nco search"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-search.md"
+    },
+    {
+      "command": "/nco-search",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "여러 소스를 대상으로 NCO 통합 검색을 실행합니다.",
+      "usage": "/nco-search [소스:] 검색어",
+      "aliases": [
+        "/nco-search",
+        "nco-search",
+        "nco search"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-search.md"
+    },
+    {
+      "command": "/nco-search-github",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO GitHub 전문 검색 — 저장소 · 코드 · 이슈 · 토픽",
+      "usage": "/nco-search-github 검색어 [--type repo|code|issue|user|topic]",
+      "aliases": [
+        "/nco-search-github",
+        "nco-search-github",
+        "nco search github"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-search-github.md"
+    },
+    {
+      "command": "/nco-search-github",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "GitHub 저장소·코드·이슈·토픽을 전문 검색합니다.",
+      "usage": "/nco-search-github 검색어 [--type repo|code|issue|user|topic]",
+      "aliases": [
+        "/nco-search-github",
+        "nco-search-github",
+        "nco search github"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-search-github.md"
+    },
+    {
+      "command": "/nco-search-hf",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO Hugging Face 전문 검색 — 모델 · 데이터셋 · Spaces · 논문",
+      "usage": "/nco-search-hf 검색어 [--type model|dataset|space|paper]",
+      "aliases": [
+        "/nco-search-hf",
+        "nco-search-hf",
+        "nco search hf"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-search-hf.md"
+    },
+    {
+      "command": "/nco-search-hf",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "Hugging Face 모델·데이터셋·Spaces·논문을 검색합니다.",
+      "usage": "/nco-search-hf 검색어 [--type model|dataset|space|paper]",
+      "aliases": [
+        "/nco-search-hf",
+        "nco-search-hf",
+        "nco search hf"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-search-hf.md"
+    },
+    {
+      "command": "/nco-search-mcp",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO MCP 서버/도구 전문 검색 — MCP 서버 · 도구 · 설정",
+      "usage": "/nco-search-mcp 검색어 [--type server|tool|config|example]",
+      "aliases": [
+        "/nco-search-mcp",
+        "nco-search-mcp",
+        "nco search mcp"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-search-mcp.md"
+    },
+    {
+      "command": "/nco-search-mcp",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "MCP 서버·도구·설정·예제를 전문 검색합니다.",
+      "usage": "/nco-search-mcp 검색어 [--type server|tool|config|example]",
+      "aliases": [
+        "/nco-search-mcp",
+        "nco-search-mcp",
+        "nco search mcp"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-search-mcp.md"
+    },
+    {
+      "command": "/nco-search-npm",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO npm 패키지 전문 검색 — Node.js · TypeScript · JavaScript 라이브러리",
+      "usage": "/nco-search-npm 패키지명 또는 기능",
+      "aliases": [
+        "/nco-search-npm",
+        "nco-search-npm",
+        "nco search npm"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-search-npm.md"
+    },
+    {
+      "command": "/nco-search-npm",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "npm의 Node.js·TypeScript 패키지를 전문 검색합니다.",
+      "usage": "/nco-search-npm 패키지명 또는 기능",
+      "aliases": [
+        "/nco-search-npm",
+        "nco-search-npm",
+        "nco search npm"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-search-npm.md"
+    },
+    {
+      "command": "/nco-search-pypi",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO PyPI 패키지 전문 검색 — Python 라이브러리 · 프레임워크 · 도구",
+      "usage": "/nco-search-pypi 패키지명 또는 기능",
+      "aliases": [
+        "/nco-search-pypi",
+        "nco-search-pypi",
+        "nco search pypi"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-search-pypi.md"
+    },
+    {
+      "command": "/nco-search-pypi",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "PyPI의 Python 라이브러리와 도구를 전문 검색합니다.",
+      "usage": "/nco-search-pypi 패키지명 또는 기능",
+      "aliases": [
+        "/nco-search-pypi",
+        "nco-search-pypi",
+        "nco search pypi"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-search-pypi.md"
+    },
+    {
+      "command": "/nco-search-wiki",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO Wikipedia/문서 전문 검색 — 개념 · 원리 · 역사 · 기술문서",
+      "usage": "/nco-search-wiki 검색어 [--lang ko|en] [--type concept|history|tech]",
+      "aliases": [
+        "/nco-search-wiki",
+        "nco-search-wiki",
+        "nco search wiki"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-search-wiki.md"
+    },
+    {
+      "command": "/nco-search-wiki",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "Wikipedia와 기술 문서에서 개념·역사·원리를 검색합니다.",
+      "usage": "/nco-search-wiki 검색어 [--lang ko|en] [--type concept|history|tech]",
+      "aliases": [
+        "/nco-search-wiki",
+        "nco-search-wiki",
+        "nco search wiki"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-search-wiki.md"
+    },
+    {
+      "command": "/nco-search-youtube",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO YouTube 전문 검색 — 영상 · 튜토리얼 · 강의 검색",
+      "usage": "/nco-search-youtube 검색어 [--type tutorial|lecture|demo|review]",
+      "aliases": [
+        "/nco-search-youtube",
+        "nco-search-youtube",
+        "nco search youtube"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-search-youtube.md"
+    },
+    {
+      "command": "/nco-search-youtube",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "YouTube 영상·튜토리얼·강의·데모를 검색합니다.",
+      "usage": "/nco-search-youtube 검색어 [--type tutorial|lecture|demo|review]",
+      "aliases": [
+        "/nco-search-youtube",
+        "nco-search-youtube",
+        "nco search youtube"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-search-youtube.md"
+    },
+    {
+      "command": "/nco-security-scan",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "AI/LLM 라이브러리 보안 취약점을 스캔하고 지식 베이스를 업데이트합니다.",
+      "usage": "/nco-security-scan — 즉시 스캔 실행",
+      "aliases": [
+        "/nco-security-scan",
+        "nco-security-scan",
+        "nco security scan"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-security-scan.md"
+    },
+    {
+      "command": "/nco-security-scan",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "AI·LLM 라이브러리 보안 취약점을 스캔합니다.",
+      "usage": "/nco-security-scan [대상]",
+      "aliases": [
+        "/nco-security-scan",
+        "nco-security-scan",
+        "nco security scan"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-security-scan.md"
+    },
+    {
+      "command": "/nco-sessions",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "활성 토론 세션 목록을 조회합니다.",
+      "usage": "/nco-sessions",
+      "aliases": [
+        "/nco-sessions",
+        "nco-sessions",
+        "nco sessions"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-sessions.md"
+    },
+    {
+      "command": "/nco-sessions",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "활성 NCO 토론 세션 목록을 조회합니다.",
+      "usage": "/nco-sessions",
+      "aliases": [
+        "/nco-sessions",
+        "nco-sessions",
+        "nco sessions"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-sessions.md"
+    },
+    {
+      "command": "/nco-solve",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "풀스택 원키 해결 명령어: 웹 검색 → 분석 → 라이브러리 설치 → 설계 → 토론 → 구현 → 검증 → Gap분석(100% 루프)",
+      "usage": "/nco-solve 해결하고 싶은 것",
+      "aliases": [
+        "/nco-solve",
+        "nco-solve",
+        "nco solve"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-solve.md"
+    },
+    {
+      "command": "/nco-solve",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "검색부터 구현·검증·Gap 분석까지 원키 해결 흐름을 실행합니다.",
+      "usage": "/nco-solve 해결하고 싶은 것",
+      "aliases": [
+        "/nco-solve",
+        "nco-solve",
+        "nco solve"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-solve.md"
+    },
+    {
+      "command": "/nco-start",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO 백엔드를 시작합니다.",
+      "usage": "/nco-start",
+      "aliases": [
+        "/nco-start",
+        "nco-start",
+        "nco start"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-start.md"
+    },
+    {
+      "command": "/nco-start",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "PM2 우선 정책으로 NCO 백엔드를 시작합니다.",
+      "usage": "/nco-start",
+      "aliases": [
+        "/nco-start",
+        "nco-start",
+        "nco start"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-start.md"
+    },
+    {
+      "command": "/nco-start",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "NCO 백엔드를 시작합니다.",
+      "usage": "/nco-start",
+      "aliases": [
+        "/nco-start",
+        "nco-start",
+        "nco start"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-start.md"
+    },
+    {
+      "command": "/nco-status",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO 시스템 상태를 확인합니다.",
+      "usage": "/nco-status",
+      "aliases": [
+        "/nco-status",
+        "nco-status",
+        "nco status"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-status.md"
+    },
+    {
+      "command": "/nco-status",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "NCO 헬스와 AI 프로바이더 상태를 확인합니다.",
+      "usage": "/nco-status",
+      "aliases": [
+        "/nco-status",
+        "nco-status",
+        "nco status"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-status.md"
+    },
+    {
+      "command": "/nco-status",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "NCO 시스템 상태를 확인합니다.",
+      "usage": "/nco-status",
+      "aliases": [
+        "/nco-status",
+        "nco-status",
+        "nco status"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-status.md"
+    },
+    {
+      "command": "/nco-stop",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO 백엔드를 중지합니다.",
+      "usage": "/nco-stop",
+      "aliases": [
+        "/nco-stop",
+        "nco-stop",
+        "nco stop"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-stop.md"
+    },
+    {
+      "command": "/nco-stop",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "PM2를 통해 NCO 백엔드를 안전하게 중지합니다.",
+      "usage": "/nco-stop",
+      "aliases": [
+        "/nco-stop",
+        "nco-stop",
+        "nco stop"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-stop.md"
+    },
+    {
+      "command": "/nco-stop-1",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO 백엔드를 중지합니다.",
+      "usage": "/nco-stop-1",
+      "aliases": [
+        "/nco-stop-1",
+        "nco-stop-1",
+        "nco stop 1"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-stop-1.md"
+    },
+    {
+      "command": "/nco-stop-1",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "호환용 별칭으로 NCO 백엔드를 중지합니다.",
+      "usage": "/nco-stop-1",
+      "aliases": [
+        "/nco-stop-1",
+        "nco-stop-1",
+        "nco stop 1"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-stop-1.md"
+    },
+    {
+      "command": "/nco-task",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "단일 AI에 작업을 위임합니다.",
+      "usage": "/nco-task AI이름 작업내용",
+      "aliases": [
+        "/nco-task",
+        "nco-task",
+        "nco task"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-task.md"
+    },
+    {
+      "command": "/nco-task",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "지정한 단일 AI에 작업을 위임합니다.",
+      "usage": "/nco-task AI이름 작업내용",
+      "aliases": [
+        "/nco-task",
+        "nco-task",
+        "nco task"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-task.md"
+    },
+    {
+      "command": "/nco-task",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "단일 AI에 작업을 위임합니다.",
+      "usage": "/nco-task AI이름 작업내용",
+      "aliases": [
+        "/nco-task",
+        "nco-task",
+        "nco task"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-task.md"
+    },
+    {
+      "command": "/nco-team",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "여러 에이전트를 병렬로 실행합니다.",
+      "usage": "/nco-team 프롬프트 | parallel 프롬프트 | consensus 프롬프트",
+      "aliases": [
+        "/nco-team",
+        "nco-team",
+        "nco team"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-team.md"
+    },
+    {
+      "command": "/nco-team",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "여러 NCO 에이전트를 팀으로 병렬 실행합니다.",
+      "usage": "/nco-team 작업",
+      "aliases": [
+        "/nco-team",
+        "nco-team",
+        "nco team"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-team.md"
+    },
+    {
+      "command": "/nco-team-session",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "Nova-AX Inter-Session Team — 팀 세션 운영 커맨드",
+      "usage": "/nco-team-session role=역할 [tags=tag1,tag2] — 팀 등록 (역할/능력 선언)",
+      "aliases": [
+        "/nco-team-session",
+        "nco-team-session",
+        "nco team session"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-team-session.md"
+    },
+    {
+      "command": "/nco-team-session",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "Nova-AX inter-session 팀 세션을 운영합니다.",
+      "usage": "/nco-team-session 명령 ...",
+      "aliases": [
+        "/nco-team-session",
+        "nco-team-session",
+        "nco team session"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-team-session.md"
+    },
+    {
+      "command": "/nco-turbo",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "아래 bash 스크립트를 즉시 Bash 도구로 실행하라. Skill() 재호출 금지. ARGUMENTS=\"$ARGUMENTS",
+      "usage": "/nco-turbo",
+      "aliases": [
+        "/nco-turbo",
+        "nco-turbo",
+        "nco turbo"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-turbo.md"
+    },
+    {
+      "command": "/nco-turbo",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "NCO 고속 실행용 내부 자동화 흐름을 실행합니다.",
+      "usage": "/nco-turbo [작업]",
+      "aliases": [
+        "/nco-turbo",
+        "nco-turbo",
+        "nco turbo"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-turbo.md"
+    },
+    {
+      "command": "/nco-usage",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO 사용 대시보드",
+      "usage": "/nco-usage",
+      "aliases": [
+        "/nco-usage",
+        "nco-usage",
+        "nco usage"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-usage.md"
+    },
+    {
+      "command": "/nco-usage",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "NCO 사용량과 성능 대시보드를 조회합니다.",
+      "usage": "/nco-usage",
+      "aliases": [
+        "/nco-usage",
+        "nco-usage",
+        "nco usage"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-usage.md"
+    },
+    {
+      "command": "/nco-verify",
+      "provider": "claude-code",
+      "domain": "nco",
+      "description": "NCO 설정 및 연결을 검증합니다.",
+      "usage": "/nco-verify",
+      "aliases": [
+        "/nco-verify",
+        "nco-verify",
+        "nco verify"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.claude/commands/nco-verify.md"
+    },
+    {
+      "command": "/nco-verify",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "NCO 설정·연결·런타임 상태를 종합 검증합니다.",
+      "usage": "/nco-verify",
+      "aliases": [
+        "/nco-verify",
+        "nco-verify",
+        "nco verify"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-verify.md"
+    },
+    {
+      "command": "/nco-workflow-full",
+      "provider": "codex",
+      "domain": "nco",
+      "description": "분석·라우팅·구현·검증을 포함한 전체 워크플로를 실행합니다.",
+      "usage": "/nco-workflow-full 작업 설명",
+      "aliases": [
+        "/nco-workflow-full",
+        "nco-workflow-full",
+        "nco workflow full"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/.codex/prompts/nco-workflow-full.md"
+    },
+    {
+      "command": "/nco-workflow-full",
+      "provider": "nco-source",
+      "domain": "nco",
+      "description": "NCO Full Workflow Pipeline — 사용자 요청 전체 자동 실행",
+      "usage": "/nco-workflow-full 작업 설명",
+      "aliases": [
+        "/nco-workflow-full",
+        "nco-workflow-full",
+        "nco workflow full"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nco/.claude/commands/nco-workflow-full.md"
+    },
+    {
+      "command": "/agents",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "에이전트 목록과 상태를 엽니다.",
+      "usage": "/agents",
+      "aliases": [
+        "/agents",
+        "agents"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/archive",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "현재 세션을 보관합니다.",
+      "usage": "/archive",
+      "aliases": [
+        "/archive",
+        "archive"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/compact",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "현재 대화 컨텍스트를 압축합니다.",
+      "usage": "/compact",
+      "aliases": [
+        "/compact",
+        "compact"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/delete",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "현재 세션을 삭제합니다.",
+      "usage": "/delete",
+      "aliases": [
+        "/delete",
+        "delete"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/diff",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "현재 변경 내용을 확인합니다.",
+      "usage": "/diff",
+      "aliases": [
+        "/diff",
+        "diff"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/experimental",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "실험 기능을 관리합니다.",
+      "usage": "/experimental",
+      "aliases": [
+        "/experimental",
+        "experimental"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/fork",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "현재 세션을 분기합니다.",
+      "usage": "/fork",
+      "aliases": [
+        "/fork",
+        "fork"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/goal",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "현재 세션의 지속 목표를 설정합니다.",
+      "usage": "/goal <목표>",
+      "aliases": [
+        "/goal",
+        "goal"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/help",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "사용 가능한 도움말을 표시합니다.",
+      "usage": "/help",
+      "aliases": [
+        "/help",
+        "help"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/init",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "프로젝트 지침 파일을 초기화합니다.",
+      "usage": "/init",
+      "aliases": [
+        "/init",
+        "init"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/logout",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "Codex 인증 세션에서 로그아웃합니다.",
+      "usage": "/logout",
+      "aliases": [
+        "/logout",
+        "logout"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/mcp",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "MCP 서버와 도구 상태를 관리합니다.",
+      "usage": "/mcp",
+      "aliases": [
+        "/mcp",
+        "mcp"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/model",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "사용할 모델을 선택합니다.",
+      "usage": "/model",
+      "aliases": [
+        "/model",
+        "model"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/new",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "새 세션을 시작합니다.",
+      "usage": "/new",
+      "aliases": [
+        "/new",
+        "new"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/permissions",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "현재 권한과 sandbox 설정을 확인합니다.",
+      "usage": "/permissions",
+      "aliases": [
+        "/permissions",
+        "permissions"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/personality",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "응답 성격을 선택합니다.",
+      "usage": "/personality",
+      "aliases": [
+        "/personality",
+        "personality"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/plan",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "계획 모드를 사용합니다.",
+      "usage": "/plan",
+      "aliases": [
+        "/plan",
+        "plan"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/resume",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "이전 세션을 재개합니다.",
+      "usage": "/resume",
+      "aliases": [
+        "/resume",
+        "resume"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/review",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "코드 리뷰를 시작합니다.",
+      "usage": "/review",
+      "aliases": [
+        "/review",
+        "review"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/settings",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "Codex 설정을 엽니다.",
+      "usage": "/settings",
+      "aliases": [
+        "/settings",
+        "settings"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/skills",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "설치된 skill을 확인합니다.",
+      "usage": "/skills",
+      "aliases": [
+        "/skills",
+        "skills"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/status",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "현재 세션과 모델 상태를 표시합니다.",
+      "usage": "/status",
+      "aliases": [
+        "/status",
+        "status"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/theme",
+      "provider": "codex",
+      "domain": "codex-built-in",
+      "description": "터미널 UI 테마를 선택합니다.",
+      "usage": "/theme",
+      "aliases": [
+        "/theme",
+        "theme"
+      ],
+      "kind": "slash-command",
+      "source": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "command": "/분석",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "이 페이지 분석·재분석",
+      "usage": "/분석 이 페이지를 분석하고 무엇을 할 수 있는지 알려줘",
+      "aliases": [
+        "/분석",
+        "분석"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/스크린샷",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "화면 캡처해 판독",
+      "usage": "/스크린샷 nco-browser screenshot 으로 화면을 캡처해 내용을 판독해줘",
+      "aliases": [
+        "/스크린샷",
+        "스크린샷"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/로그인",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "이 사이트 로그인",
+      "usage": "/로그인 이 사이트에 로그인해줘",
+      "aliases": [
+        "/로그인",
+        "로그인"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/회원가입",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "회원가입(민감 제출 전 확인)",
+      "usage": "/회원가입 이 사이트에 회원가입해줘. 최종 제출 직전엔 나에게 확인해줘",
+      "aliases": [
+        "/회원가입",
+        "회원가입"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/검색",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "이 사이트에서 검색",
+      "usage": "/검색 이 사이트에서 다음을 검색해줘:",
+      "aliases": [
+        "/검색",
+        "검색"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/작성",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "글/폼 작성",
+      "usage": "/작성 다음 내용으로 작성해줘:",
+      "aliases": [
+        "/작성",
+        "작성"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/search",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "⚡즉시 검색(검색창에 입력+엔터, LLM 우회)",
+      "usage": "/search",
+      "aliases": [
+        "/search",
+        "search"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/click",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "⚡즉시 클릭 셀렉터|ref",
+      "usage": "/click",
+      "aliases": [
+        "/click",
+        "click"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/type",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "⚡즉시 입력 셀렉터 값",
+      "usage": "/type",
+      "aliases": [
+        "/type",
+        "type"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/scroll",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "⚡즉시 스크롤 셀렉터|숫자",
+      "usage": "/scroll",
+      "aliases": [
+        "/scroll",
+        "scroll"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/navigate",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "⚡즉시 이동 url",
+      "usage": "/navigate",
+      "aliases": [
+        "/navigate",
+        "navigate"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/keypress",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "⚡즉시 키 입력 Escape|Enter|키",
+      "usage": "/keypress",
+      "aliases": [
+        "/keypress",
+        "keypress"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/hover",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "⚡즉시 마우스 오버 셀렉터|ref",
+      "usage": "/hover",
+      "aliases": [
+        "/hover",
+        "hover"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/select",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "⚡즉시 선택 셀렉터 :: 라벨",
+      "usage": "/select",
+      "aliases": [
+        "/select",
+        "select"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/drag",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "⚡즉시 드래그 시작 :: 대상",
+      "usage": "/drag",
+      "aliases": [
+        "/drag",
+        "drag"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/download",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "⚡자동 다운로드 셀렉터|url :: 저장 경로",
+      "usage": "/download",
+      "aliases": [
+        "/download",
+        "download"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    },
+    {
+      "command": "/dismiss",
+      "provider": "nova-use",
+      "domain": "nova-use-browser",
+      "description": "⚡안전한 팝업 닫기(명시적 닫기 요소→Esc)",
+      "usage": "/dismiss",
+      "aliases": [
+        "/dismiss",
+        "dismiss"
+      ],
+      "kind": "slash-command",
+      "source": "/Users/nova-ai/project/nova-use/src/renderer/components/browser/BrowserControlPanel.tsx"
+    }
+  ],
+  "novaAxTools": [
+    {
+      "name": "ax_activity",
+      "description": "Get the recent Nova-AX activity log",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_agent_create_expert",
+      "description": "Create a new domain-expert agent",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_agent_get",
+      "description": "Get a single Nova-AX agent by ID",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_agents",
+      "description": "List all Nova-AX agents",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_analytics_stats",
+      "description": "Get Nova-AX analytics engine statistics",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_dashboard",
+      "description": "Get the Nova-AX dashboard summary",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_db_stats",
+      "description": "Get Nova-AX SQLite database statistics",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_engines_backends",
+      "description": "List Nova-AX multi-backend session status",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_engines_tools",
+      "description": "List tools registered in the Nova-AX tool engine",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_governance_audit",
+      "description": "Get the Nova-AX governance audit trail",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_health",
+      "description": "Health check for the Nova-AX server (GET /api/health — note: /health does not exist)",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_leaderboard",
+      "description": "Get the Nova-AX agent leaderboard",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_logs",
+      "description": "Get recent Nova-AX server logs",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_memory_recall",
+      "description": "Recall entries from the Nova-AX memory engine",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_metrics",
+      "description": "Get Nova-AX runtime metrics",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_report",
+      "description": "Get the Nova-AX aggregate report",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_request",
+      "description": "Send a validated request to a Nova-AX /api/ endpoint",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_router_select",
+      "description": "Ask the Nova-AX router engine to select a provider for a task",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_security_score",
+      "description": "Get the Nova-AX security score",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_statusline",
+      "description": "Get the Nova-AX status line summary",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    },
+    {
+      "name": "ax_sync_state",
+      "description": "Get the Nova-AX sync state",
+      "kind": "mcp-tool",
+      "source": "/Users/nova-ai/project/nova-ax/src/mcp/server.ts"
+    }
+  ],
+  "routingPolicy": {
+    "cliFocusRequired": true,
+    "exactCommandAllowlistOnly": true,
+    "ambiguousIntentFallsBackToMetaPrompt": true,
+    "primaryDomains": [
+      "nova-use",
+      "nco",
+      "nova-ax"
+    ]
+  }
+}

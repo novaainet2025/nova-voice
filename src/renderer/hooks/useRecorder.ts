@@ -1,350 +1,405 @@
 import { useCallback, useEffect, useRef } from 'react'
+import { SPECTRUM_BANDS } from '../../shared/types'
+import type { AppSettings, MetaPromptStatus, SttStatus, TranscriptionResult, TranscriptionStage, VoiceInputMode } from '../../shared/types'
 import { useAppStore } from '../stores/appStore'
 
 declare global {
   interface Window {
     electronAPI: {
-      startRecording: () => Promise<void>
+      startRecording: (mode?: VoiceInputMode) => Promise<void>
       stopRecording: () => Promise<void>
       cancelRecording: () => Promise<void>
-      sendAudioData: (buffer: ArrayBuffer) => Promise<void>
+      sendPcmData: (buffer: ArrayBuffer, sampleRate: number, streamedBytes?: number) => Promise<TranscriptionResult | null>
+      sendPcmChunk: (buffer: ArrayBuffer) => void
+      runVerificationInjection: (text: string) => Promise<boolean>
+      getVerificationWindowState: () => Promise<{ visible: boolean; destroyed: boolean }>
+      getVerificationTargetContext: () => Promise<{ targetAppName: string; targetBundleId: string; cliTarget: boolean }>
+      setVerificationPcmDelay: (delayMs: number) => Promise<number>
       sendAudioLevel: (level: number) => void
       onAudioLevel: (callback: (level: number) => void) => () => void
+      sendAudioSpectrum: (bands: Uint8Array) => void
+      onAudioSpectrum: (callback: (bands: Uint8Array) => void) => () => void
       onRecordingDuration: (callback: (duration: number) => void) => () => void
-      onRecordingState: (callback: (state: { isRecording: boolean; duration: number }) => void) => () => void
-      onTranscriptionResult: (callback: (result: any) => void) => () => void
+      onRecordingState: (callback: (state: { isRecording: boolean; duration: number; cancelled?: boolean; inputMode?: VoiceInputMode }) => void) => () => void
+      onTranscriptionResult: (callback: (result: TranscriptionResult) => void) => () => void
       onTranscriptionProgress: (callback: (progress: number) => void) => () => void
-      getSettings: () => Promise<any>
-      setSettings: (settings: any) => Promise<void>
-      getHistory: (limit?: number, offset?: number) => Promise<any[]>
-      searchHistory: (query: string) => Promise<any[]>
+      onTranscriptionStage: (callback: (stage: TranscriptionStage) => void) => () => void
+      getSttStatus: () => Promise<SttStatus>
+      getMetaPromptStatus: () => Promise<MetaPromptStatus>
+      reconnectNcoProvider: (provider: string) => Promise<MetaPromptStatus>
+      getSettings: () => Promise<AppSettings>
+      setSettings: (settings: Partial<AppSettings>) => Promise<AppSettings>
+      onSettingsChanged: (callback: (settings: AppSettings) => void) => () => void
+      getLoginItemStatus: () => Promise<{ supported: boolean; openAtLogin: boolean; status: string }>
+      setLoginItemEnabled: (enabled: boolean) => Promise<{ supported: boolean; openAtLogin: boolean; status: string }>
+      getHistory: (limit?: number, offset?: number) => Promise<TranscriptionResult[]>
+      searchHistory: (query: string) => Promise<TranscriptionResult[]>
       deleteHistory: (id: string) => Promise<void>
-      onOverlayShow: (callback: () => void) => () => void
-      onOverlayHide: (callback: () => void) => () => void
-      getAIModes: () => Promise<any[]>
-      getAIStatus: () => Promise<any>
-      processWithAI: (text: string, modeId: string) => Promise<string>
-      onAIStage: (callback: (stage: string) => void) => () => void
-      speak: (text: string, options?: any) => Promise<void>
-      getSpeakers: (lang?: string) => Promise<string[]>
-      getMLXVoices: () => Promise<string[]>
-      getMLXVoice: () => Promise<string>
-      setMLXVoice: (voice: string) => Promise<void>
-      getTTSServerStatuses: () => Promise<any[]>
-      startTTSServer: (id: string) => Promise<boolean>
-      stopTTSServer: (id: string) => Promise<boolean>
-      previewTTSVoice: (id: string, voice?: string) => Promise<void>
-      getSayVoices: () => Promise<any[]>
-      getAllTtsAdapters: () => Promise<any>
-      previewSayVoice: (voice: string, text?: string) => Promise<void>
-      getPipelineStatus: () => Promise<any>
-      getPipelineConfig: () => Promise<any>
-      setPipelineConfig: (config: any) => Promise<void>
-      initPipeline: () => Promise<any>
-      // Claude Terminal
-      claudeSend: (text: string) => Promise<string>
-      getClaudeStatus: () => Promise<{ ready: boolean; path: string }>
-      onClaudeOutput: (callback: (data: { type: string; text: string }) => void) => () => void
-      onClaudeStatus: (callback: (status: { ready: boolean; path: string }) => void) => () => void
       onViewNavigate: (callback: (view: string) => void) => () => void
-      // Real PTY Terminal (node-pty)
-      ptyInput: (data: string) => void
-      ptyResize: (cols: number, rows: number) => void
-      ptyCreate: (cols?: number, rows?: number, force?: boolean) => Promise<{ ok: boolean }>
-      ptyStatus: () => Promise<{ shell: string; ready: boolean }>
-      getPathForFile: (file: File) => string
-      ptyClaudeRunning: () => Promise<{ ready: boolean; claudeDetected: boolean }>
-      ptyType: (command: string) => Promise<{ ok: boolean }>
-      onPtyData: (callback: (data: string) => void) => () => void
-      onPtyExit: (callback: (code: number) => void) => () => void
-      // Attachment
-      processAttachment: (opts: any) => Promise<any>
-      getDebugLogs: () => Promise<{ ts: number; level: string; msg: string }[]>
-      onDebugLog: (callback: (entry: { ts: number; level: string; msg: string }) => void) => () => void
-      checkNCOHealth: () => Promise<{
-        id: string; name: string; role: string; type: string;
-        status: 'online' | 'offline' | 'degraded';
-        latencyMs: number; version?: string; model?: string; error?: string; checkedAt: number
-      }[]>
-      cancelAI: () => Promise<{ cancelled: boolean }>
-      onAICancelled: (callback: () => void) => (() => void) | undefined
       quit: () => void
       platform: string
     }
   }
 }
 
+const PCM_WORKLET = `
+class NovaPcmRecorder extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.chunk = new Float32Array(4096);
+    this.offset = 0;
+    this.port.onmessage = (event) => {
+      if (event.data === 'flush' && this.offset > 0) {
+        const tail = this.chunk.slice(0, this.offset);
+        this.port.postMessage(tail, [tail.buffer]);
+        this.offset = 0;
+      }
+    };
+  }
+  process(inputs) {
+    const input = inputs[0] && inputs[0][0];
+    if (!input) return true;
+    let sourceOffset = 0;
+    while (sourceOffset < input.length) {
+      const count = Math.min(this.chunk.length - this.offset, input.length - sourceOffset);
+      this.chunk.set(input.subarray(sourceOffset, sourceOffset + count), this.offset);
+      this.offset += count;
+      sourceOffset += count;
+      if (this.offset === this.chunk.length) {
+        const completed = this.chunk;
+        this.port.postMessage(completed, [completed.buffer]);
+        this.chunk = new Float32Array(4096);
+        this.offset = 0;
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('nova-pcm-recorder', NovaPcmRecorder);
+`
+
+/** Float32 [-1,1] → little-endian 16-bit PCM, the wire format the STT server reads. */
+function toPcm16(chunk: Float32Array): Int16Array {
+  const pcm = new Int16Array(chunk.length)
+  for (let index = 0; index < chunk.length; index++) {
+    const sample = Math.max(-1, Math.min(1, chunk[index]))
+    pcm[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff
+  }
+  return pcm
+}
+
+/**
+ * Collapses the FFT into log-spaced bands. Linear bins waste most of the width
+ * on frequencies speech barely uses, which is what makes a plain bin-per-bar
+ * meter look flat and lifeless.
+ */
+function buildSpectrum(source: Uint8Array, target: Uint8Array, minBin: number, maxBin: number): void {
+  const ratio = maxBin / minBin
+  let previous = minBin
+  for (let band = 0; band < target.length; band++) {
+    const upper = Math.min(
+      maxBin,
+      Math.max(previous + 1, Math.round(minBin * Math.pow(ratio, (band + 1) / target.length))),
+    )
+    let peak = 0
+    for (let bin = previous; bin < upper; bin++) {
+      if (source[bin] > peak) peak = source[bin]
+    }
+    target[band] = peak
+    previous = upper
+  }
+}
+
 export function useRecorder() {
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
   const streamRef = useRef<MediaStream | null>(null)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const analyserRef = useRef<AnalyserNode | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
-  const animFrameRef = useRef<number>(0)
-  // 2초 무음 자동 종료
-  const silenceStartRef = useRef<number>(0)
-  const hadSpeechRef = useRef<boolean>(false)
-  const SILENCE_THRESHOLD = 0.02  // RMS 기준 무음 임계값
-  const SILENCE_TIMEOUT_MS = 2000 // 2초 무음 시 자동 종료
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null)
+  const recorderNodeRef = useRef<AudioWorkletNode | null>(null)
+  const silentGainRef = useRef<GainNode | null>(null)
+  const pcmChunksRef = useRef<Float32Array[]>([])
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const animFrameRef = useRef(0)
+  const silenceStartRef = useRef(0)
+  const hadSpeechRef = useRef(false)
+  const stoppingRef = useRef(false)
+  const captureRequestedRef = useRef(false)
+  const transcriptionSequenceRef = useRef(0)
+  const streamedBytesRef = useRef(0)
+  const spectrumRef = useRef(new Uint8Array(SPECTRUM_BANDS))
 
   const {
     isRecording,
+    settings,
     setRecording,
     setRecordingDuration,
     setAudioLevel,
+    setSpectrum,
+    resetSpectrum,
     setIsTranscribing,
-    setCurrentTranscription
+    setCurrentTranscription,
   } = useAppStore()
 
-  const cleanupRecordingResources = useCallback(async (options?: {
-    resetState?: boolean
-    discardRecorderHandlers?: boolean
-  }) => {
+  const releaseCapture = useCallback(async (flushTail: boolean) => {
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current)
       animFrameRef.current = 0
     }
-
     if (timerRef.current) {
       clearInterval(timerRef.current)
       timerRef.current = null
     }
 
-    const mediaRecorder = mediaRecorderRef.current
-    mediaRecorderRef.current = null
-    if (mediaRecorder) {
-      if (options?.discardRecorderHandlers) {
-        mediaRecorder.ondataavailable = null
-        mediaRecorder.onstop = null
-      }
-      if (mediaRecorder.state !== 'inactive') {
-        mediaRecorder.stop()
-      }
+    if (flushTail && recorderNodeRef.current) {
+      recorderNodeRef.current.port.postMessage('flush')
+      await new Promise((resolve) => window.setTimeout(resolve, 35))
     }
 
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop())
-      streamRef.current = null
-    }
-
-    const audioContext = audioContextRef.current
-    audioContextRef.current = null
-    if (audioContext && audioContext.state !== 'closed') {
-      try {
-        await audioContext.close()
-      } catch (error) {
-        console.warn('[Recorder] AudioContext close failed:', error)
-      }
-    }
+    recorderNodeRef.current?.disconnect()
+    silentGainRef.current?.disconnect()
+    sourceRef.current?.disconnect()
+    recorderNodeRef.current = null
+    silentGainRef.current = null
+    sourceRef.current = null
     analyserRef.current = null
+
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+
+    const context = audioContextRef.current
+    audioContextRef.current = null
+    if (context && context.state !== 'closed') {
+      await context.close().catch(() => undefined)
+    }
+
     silenceStartRef.current = 0
     hadSpeechRef.current = false
+    setRecording(false)
+    setRecordingDuration(0)
+    setAudioLevel(0)
+    resetSpectrum()
+  }, [resetSpectrum, setAudioLevel, setRecording, setRecordingDuration])
 
-    if (options?.resetState) {
-      setRecording(false)
-      setRecordingDuration(0)
-      setAudioLevel(0)
+  const sendCapturedPcm = useCallback(async (sampleRate: number) => {
+    const chunks = pcmChunksRef.current
+    pcmChunksRef.current = []
+    const streamedBytes = streamedBytesRef.current
+    streamedBytesRef.current = 0
+    const sampleCount = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
+    if (sampleCount < sampleRate * 0.15) {
+      // Too short to transcribe. Cancel so the main process drops the streamed
+      // session and stops holding the injection target.
+      await window.electronAPI.cancelRecording().catch(() => undefined)
+      setCurrentTranscription('음성이 너무 짧습니다. 조금 더 길게 말해주세요.')
+      return
     }
-  }, [setRecording, setRecordingDuration, setAudioLevel])
 
-  useEffect(() => {
-    return () => {
-      void cleanupRecordingResources({ discardRecorderHandlers: true })
+    const pcm = new Int16Array(sampleCount)
+    let offset = 0
+    for (const chunk of chunks) {
+      pcm.set(toPcm16(chunk), offset)
+      offset += chunk.length
     }
-  }, [cleanupRecordingResources])
+
+    const sequence = ++transcriptionSequenceRef.current
+    setIsTranscribing(true)
+    try {
+      await window.electronAPI.sendPcmData(pcm.buffer as ArrayBuffer, sampleRate, streamedBytes)
+    } catch (error) {
+      console.error('[Recorder] STT failed:', error)
+      const detail = error instanceof Error ? error.message : String(error)
+      setCurrentTranscription(detail.includes('META_PROMPT_AI_UNAVAILABLE')
+        ? '메타 프롬프트 AI에 연결하지 못했습니다. NCO 또는 로컬 AI 상태를 확인한 뒤 다시 시도해주세요.'
+        : '음성 인식에 실패했습니다. Whisper 서버 상태를 확인해주세요.')
+    } finally {
+      // A newer capture may already be in flight. An older, cancelled request
+      // must not make the UI look idle while the newer request is processing.
+      if (transcriptionSequenceRef.current === sequence) setIsTranscribing(false)
+    }
+  }, [setCurrentTranscription, setIsTranscribing])
 
   const startRecording = useCallback(async () => {
+    if (streamRef.current) return
+    if (stoppingRef.current) {
+      // Meta prompting and injection can outlive capture teardown. Remember a
+      // start request made in that narrow window instead of silently dropping
+      // it and leaving the main process in the recording state with no stream.
+      captureRequestedRef.current = true
+      console.log('[Recorder] Capture start queued until teardown completes')
+      return
+    }
+    captureRequestedRef.current = true
+
     try {
-      console.log('[Recorder] Starting...')
-
-      if (streamRef.current || mediaRecorderRef.current) {
-        console.warn('[Recorder] Duplicate start ignored; keeping active recording')
-        return
-      }
-
-      if (animFrameRef.current) {
-        cancelAnimationFrame(animFrameRef.current)
-        animFrameRef.current = 0
-      }
-
-      if (timerRef.current) {
-        clearInterval(timerRef.current)
-        timerRef.current = null
-      }
-
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
           sampleRate: 16000,
-          // 브라우저 DSP 끔 — Whisper + ffmpeg anlmdn이 더 정확함
-          // 브라우저 노이즈 억제가 특정 주파수를 깎아 오히려 인식률 저하 유발
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-        }
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
       })
-      console.log('[Recorder] Mic stream acquired')
+      if (!captureRequestedRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
+      const context = new AudioContext({ sampleRate: 16000, latencyHint: 'interactive' })
+      if (context.state === 'suspended') await context.resume()
+
+      const workletUrl = URL.createObjectURL(new Blob([PCM_WORKLET], { type: 'text/javascript' }))
+      try {
+        await context.audioWorklet.addModule(workletUrl)
+      } finally {
+        URL.revokeObjectURL(workletUrl)
+      }
+      if (!captureRequestedRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        await context.close().catch(() => undefined)
+        return
+      }
+
+      const source = context.createMediaStreamSource(stream)
+      const analyser = context.createAnalyser()
+      // 1024 bins give the log-spaced visualiser enough low-frequency detail to
+      // separate vowels; the smoothing below is done per bar instead.
+      analyser.fftSize = 1024
+      analyser.smoothingTimeConstant = 0.2
+      const recorderNode = new AudioWorkletNode(context, 'nova-pcm-recorder')
+      const silentGain = context.createGain()
+      silentGain.gain.value = 0
+
+      pcmChunksRef.current = []
+      streamedBytesRef.current = 0
+      recorderNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
+        const chunk = new Float32Array(event.data)
+        pcmChunksRef.current.push(chunk)
+        // Feed the STT server while the user is still speaking. Its VAD then
+        // finalises the segment on its own, so the decode is already done (or
+        // nearly done) by the time the recording stops.
+        const encoded = toPcm16(chunk)
+        streamedBytesRef.current += encoded.byteLength
+        window.electronAPI.sendPcmChunk(encoded.buffer as ArrayBuffer)
+      }
+
+      source.connect(analyser)
+      source.connect(recorderNode)
+      recorderNode.connect(silentGain)
+      silentGain.connect(context.destination)
 
       streamRef.current = stream
-      audioChunksRef.current = []
-
-      // Set up AudioContext + AnalyserNode for level visualization
-      const audioContext = new AudioContext({ sampleRate: 16000 })
-      // IMPORTANT: resume AudioContext (may be suspended by browser policy)
-      if (audioContext.state === 'suspended') {
-        await audioContext.resume()
-      }
-      console.log('[Recorder] AudioContext state:', audioContext.state)
-
-      const source = audioContext.createMediaStreamSource(stream)
-      const analyser = audioContext.createAnalyser()
-      analyser.fftSize = 512
-      analyser.smoothingTimeConstant = 0.3
-      source.connect(analyser)
-
-      audioContextRef.current = audioContext
+      audioContextRef.current = context
+      sourceRef.current = source
       analyserRef.current = analyser
+      recorderNodeRef.current = recorderNode
+      silentGainRef.current = silentGain
+      silenceStartRef.current = 0
+      hadSpeechRef.current = false
 
-      // Start audio level animation loop
-      const dataArray = new Uint8Array(analyser.frequencyBinCount)
-      let logCounter = 0
-
+      const levelData = new Uint8Array(analyser.fftSize)
+      const frequencyData = new Uint8Array(analyser.frequencyBinCount)
+      // 16 kHz capture over 1024 bins ≈ 15.6 Hz per bin. Bins 3–170 cover
+      // roughly 45 Hz – 2.7 kHz, where speech energy actually lives.
+      const minBin = 3
+      const maxBin = Math.min(analyser.frequencyBinCount - 1, 170)
+      const spectrum = spectrumRef.current
+      let frame = 0
       const updateLevel = () => {
         if (!analyserRef.current) return
-
-        // Use time-domain data for more responsive level detection
-        analyserRef.current.getByteTimeDomainData(dataArray)
-
-        // Calculate RMS (root mean square) for accurate volume level
+        analyserRef.current.getByteTimeDomainData(levelData)
         let sumSquares = 0
-        for (let i = 0; i < dataArray.length; i++) {
-          const normalized = (dataArray[i] - 128) / 128 // center around 0
+        for (let i = 0; i < levelData.length; i++) {
+          const normalized = (levelData[i] - 128) / 128
           sumSquares += normalized * normalized
         }
-        const rms = Math.sqrt(sumSquares / dataArray.length)
-
-        // Scale to 0-1 range with amplification for visibility
-        const level = Math.min(1, rms * 3.5)
-
+        const rms = Math.sqrt(sumSquares / levelData.length)
+        const level = Math.min(1, rms * 4)
         setAudioLevel(level)
 
-        // 2초 무음 자동 종료 — 말을 한 적 있고, 이후 2초 동안 무음이면 자동 중지
-        if (rms > 0.03) {
-          // 음성 감지됨
+        if (rms > 0.018) {
           hadSpeechRef.current = true
           silenceStartRef.current = 0
         } else if (hadSpeechRef.current) {
-          // 말한 후 무음 시작
-          if (silenceStartRef.current === 0) {
-            silenceStartRef.current = Date.now()
-          } else if (Date.now() - silenceStartRef.current >= SILENCE_TIMEOUT_MS) {
-            console.log('[Recorder] 2초 무음 감지 — 자동 종료')
-            // stopRecording을 직접 호출하면 의존성 문제 → IPC로 트리거
-            window.electronAPI?.stopRecording?.()
-            return // 더 이상 animation frame 불필요
+          if (!silenceStartRef.current) silenceStartRef.current = Date.now()
+          else if (Date.now() - silenceStartRef.current >= (settings?.silenceTimeoutMs ?? 900)) {
+            void window.electronAPI.stopRecording()
+            return
           }
         }
 
-        // Forward audio level to overlay via IPC (throttle to ~20fps to reduce overhead)
-        logCounter++
-        if (logCounter % 3 === 0 && window.electronAPI?.sendAudioLevel) {
-          window.electronAPI.sendAudioLevel(level)
+        frame++
+        if (frame % 2 === 0) {
+          analyserRef.current.getByteFrequencyData(frequencyData)
+          buildSpectrum(frequencyData, spectrum, minBin, maxBin)
+          setSpectrum(spectrum)
+          window.electronAPI.sendAudioSpectrum(spectrum)
         }
-
-        // Debug log every ~1 second
-        if (logCounter % 60 === 0) {
-          console.log(`[Recorder] Audio level: ${level.toFixed(3)} (rms: ${rms.toFixed(4)})`)
-        }
-
+        if (frame % 3 === 0) window.electronAPI.sendAudioLevel(level)
         animFrameRef.current = requestAnimationFrame(updateLevel)
       }
       animFrameRef.current = requestAnimationFrame(updateLevel)
 
-      // Start MediaRecorder
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : 'audio/webm'
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType,
-        audioBitsPerSecond: 128000,  // 128kbps (기본 32~64kbps보다 훨씬 선명)
-      })
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data)
-        }
-      }
-
-      mediaRecorder.onstop = async () => {
-        console.log('[Recorder] MediaRecorder stopped, chunks:', audioChunksRef.current.length)
-        if (audioChunksRef.current.length === 0) return
-
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
-        const arrayBuffer = await audioBlob.arrayBuffer()
-        console.log('[Recorder] Audio size:', (arrayBuffer.byteLength / 1024).toFixed(1), 'KB')
-
-        setIsTranscribing(true)
-        try {
-          await window.electronAPI.sendAudioData(arrayBuffer)
-        } catch (error) {
-          console.error('[Recorder] Transcription failed:', error)
-          setCurrentTranscription('음성 인식에 실패했어요. Whisper 모델 설정을 확인해주세요.')
-        }
-        setIsTranscribing(false)
-      }
-
-      mediaRecorder.start(100)
-      mediaRecorderRef.current = mediaRecorder
-      silenceStartRef.current = 0
-      hadSpeechRef.current = false
-
       setRecording(true)
-      const now = Date.now()
-
-      // Duration timer
+      const startedAt = Date.now()
       timerRef.current = setInterval(() => {
-        setRecordingDuration((Date.now() - now) / 1000)
+        setRecordingDuration((Date.now() - startedAt) / 1000)
       }, 100)
-
-      console.log('[Recorder] Recording started')
+      console.log(`[Recorder] PCM capture started at ${context.sampleRate}Hz`)
     } catch (error) {
-      await cleanupRecordingResources({
-        resetState: true,
-        discardRecorderHandlers: true,
-      })
-      const err = error as DOMException
-      let userMsg = '마이크 접근에 실패했어요.'
-      if (err.name === 'NotAllowedError') {
-        userMsg = '마이크 권한을 허용해주세요. 시스템 설정에서 확인해주세요.'
-      } else if (err.name === 'NotFoundError') {
-        userMsg = '연결된 마이크가 없어요.'
-      } else if (err.name === 'NotReadableError') {
-        userMsg = '마이크가 다른 앱에서 사용 중이에요.'
-      }
-      console.error('[Recorder] Failed to start:', err.name, err.message)
-      setCurrentTranscription(userMsg)
+      captureRequestedRef.current = false
+      pcmChunksRef.current = []
+      await releaseCapture(false)
+      const failure = error as DOMException
+      const message = failure.name === 'NotAllowedError'
+        ? '마이크 권한을 허용해주세요.'
+        : failure.name === 'NotFoundError'
+          ? '연결된 마이크가 없습니다.'
+          : '마이크를 시작하지 못했습니다.'
+      setCurrentTranscription(message)
+      console.error('[Recorder] Start failed:', failure)
+      // The main process optimistically enters the recording state before the
+      // renderer acquires a microphone stream. Roll it back on capture failure
+      // so the next shortcut/click is treated as a fresh start.
+      await window.electronAPI.cancelRecording().catch(() => undefined)
     }
-  }, [cleanupRecordingResources, setRecording, setRecordingDuration, setAudioLevel, setIsTranscribing, setCurrentTranscription])
+  }, [releaseCapture, setAudioLevel, setCurrentTranscription, setRecording, setRecordingDuration, setSpectrum, settings?.silenceTimeoutMs])
 
-  const stopRecording = useCallback(() => {
-    console.log('[Recorder] Stopping...')
-    void cleanupRecordingResources({ resetState: true })
-  }, [cleanupRecordingResources])
+  const stopRecording = useCallback(async () => {
+    captureRequestedRef.current = false
+    if (!streamRef.current || stoppingRef.current) return
+    stoppingRef.current = true
+    const sampleRate = audioContextRef.current?.sampleRate ?? 16000
+    let processing: Promise<void> | null = null
+    try {
+      await releaseCapture(true)
+      // Snapshot and clear the completed PCM synchronously before a queued
+      // recording can replace pcmChunksRef.current.
+      processing = sendCapturedPcm(sampleRate)
+    } finally {
+      stoppingRef.current = false
+      if (captureRequestedRef.current && !streamRef.current) {
+        console.log('[Recorder] Starting queued capture after teardown')
+        void startRecording()
+      }
+    }
+    await processing
+  }, [releaseCapture, sendCapturedPcm, startRecording])
 
-  const cancelRecording = useCallback(() => {
-    console.log('[Recorder] Cancelling...')
-    audioChunksRef.current = []
-    void cleanupRecordingResources({
-      resetState: true,
-      discardRecorderHandlers: true,
-    })
-  }, [cleanupRecordingResources])
+  const cancelRecording = useCallback(async () => {
+    captureRequestedRef.current = false
+    if (stoppingRef.current) {
+      // Cancels a queued restart. The active capture is already being released.
+      return
+    }
+    pcmChunksRef.current = []
+    await releaseCapture(false)
+  }, [releaseCapture])
 
-  return {
-    isRecording,
-    startRecording,
-    stopRecording,
-    cancelRecording
-  }
+  useEffect(() => () => {
+    captureRequestedRef.current = false
+    pcmChunksRef.current = []
+    void releaseCapture(false)
+  }, [releaseCapture])
+
+  return { isRecording, startRecording, stopRecording, cancelRecording }
 }

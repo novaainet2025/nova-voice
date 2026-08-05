@@ -2,8 +2,22 @@ import { Tray, Menu, nativeImage, app, BrowserWindow } from 'electron'
 import path from 'path'
 
 let tray: Tray | null = null
+let toggleRecordingHandler: (() => void) | null = null
 
-export function createTray(mainWindow: BrowserWindow): Tray {
+export function hideMainWindow(mainWindow: BrowserWindow): void {
+  mainWindow.hide()
+  if (process.platform === 'darwin') app.dock.hide()
+}
+
+export function showMainWindow(mainWindow: BrowserWindow): void {
+  if (process.platform === 'darwin') void app.dock.show()
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+export function createTray(mainWindow: BrowserWindow, onToggleRecording: () => void): Tray {
+  toggleRecordingHandler = onToggleRecording
   // Create a simple tray icon - use a template image on macOS for dark/light mode support
   const iconPath = path.join(__dirname, '../../resources/tray-icon.png')
   let icon: ReturnType<typeof nativeImage.createFromPath>
@@ -20,16 +34,15 @@ export function createTray(mainWindow: BrowserWindow): Tray {
   }
 
   tray = new Tray(icon)
-  tray.setToolTip('NOVA-VOICE - Voice to Text')
+  tray.setToolTip('NOVA VOICE · Whisper 받아쓰기')
 
   updateTrayMenu(mainWindow, false)
 
   tray.on('click', () => {
     if (mainWindow.isVisible()) {
-      mainWindow.hide()
+      hideMainWindow(mainWindow)
     } else {
-      mainWindow.show()
-      mainWindow.focus()
+      showMainWindow(mainWindow)
     }
   })
 
@@ -41,36 +54,34 @@ export function updateTrayMenu(mainWindow: BrowserWindow, isRecording: boolean):
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'NOVA-VOICE',
+      label: 'NOVA VOICE',
       enabled: false
     },
     { type: 'separator' },
     {
-      label: isRecording ? '⏹ Stop Recording' : '🎤 Start Recording',
+      label: isRecording ? '녹음 중지' : '녹음 시작',
       click: () => {
-        mainWindow.webContents.send(isRecording ? 'recording:stop' : 'recording:start')
+        toggleRecordingHandler?.()
       }
     },
     { type: 'separator' },
     {
-      label: 'Settings',
+      label: '설정 열기',
       click: () => {
-        mainWindow.show()
-        mainWindow.focus()
-        mainWindow.webContents.send('navigate', 'settings')
+        showMainWindow(mainWindow)
+        mainWindow.webContents.send('view:navigate', 'settings')
       }
     },
     {
-      label: 'History',
+      label: '기록 열기',
       click: () => {
-        mainWindow.show()
-        mainWindow.focus()
-        mainWindow.webContents.send('navigate', 'history')
+        showMainWindow(mainWindow)
+        mainWindow.webContents.send('view:navigate', 'history')
       }
     },
     { type: 'separator' },
     {
-      label: 'Quit NOVA-VOICE',
+      label: 'NOVA VOICE 종료',
       click: () => {
         app.quit()
       }
@@ -84,9 +95,9 @@ export function updateTrayIcon(recording: boolean): void {
   if (!tray) return
 
   if (recording) {
-    tray.setToolTip('NOVA-VOICE - Recording...')
+    tray.setToolTip('NOVA VOICE · 녹음 중')
   } else {
-    tray.setToolTip('NOVA-VOICE - Voice to Text')
+    tray.setToolTip('NOVA VOICE · Whisper 받아쓰기')
   }
 }
 
@@ -94,5 +105,6 @@ export function destroyTray(): void {
   if (tray) {
     tray.destroy()
     tray = null
+    toggleRecordingHandler = null
   }
 }

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NOVA VOICE Injection Target</title>
+    <style>
+      :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #090b12; color: #eef1ff; }
+      main { width: min(680px, calc(100vw - 64px)); padding: 40px; border: 1px solid #29304a; border-radius: 24px; background: #111522; box-shadow: 0 30px 90px #0008; }
+      p { color: #8e97b7; line-height: 1.6; }
+      form { display: flex; gap: 10px; margin-top: 28px; }
+      input { flex: 1; min-width: 0; padding: 14px 16px; border: 1px solid #46517b; border-radius: 12px; background: #090c16; color: white; font-size: 16px; outline: none; }
+      input:focus { border-color: #8b91ff; box-shadow: 0 0 0 4px #7d7fff1c; }
+      button { padding: 0 20px; border: 0; border-radius: 12px; background: #706cf0; color: white; font-weight: 700; }
+      #submitted { min-height: 26px; margin-top: 24px; padding: 16px; border-radius: 12px; background: #171c2c; color: #aef2cf; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>NOVA VOICE 자동 입력 검증</h1>
+      <p>이 페이지는 설치 앱의 실제 붙여넣기와 Enter 제출만 격리해서 확인하는 로컬 테스트 대상입니다.</p>
+      <form id="test-form">
+        <input id="target" name="target" autocomplete="off" autofocus aria-label="받아쓰기 입력 대상" />
+        <button type="submit">제출</button>
+      </form>
+      <div id="submitted" role="status" aria-live="polite">아직 제출되지 않음</div>
+    </main>
+    <script>
+      window.__submitCount = 0
+      window.__submitted = ''
+      document.querySelector('#test-form').addEventListener('submit', (event) => {
+        event.preventDefault()
+        window.__submitCount += 1
+        window.__submitted = document.querySelector('#target').value
+        document.querySelector('#submitted').textContent = window.__submitted
+        document.title = 'NOVA VOICE Injection Passed'
+      })
+    </script>
+  </body>
+</html>

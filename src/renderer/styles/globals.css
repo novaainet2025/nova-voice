@@ -2,6 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: dark;
+  --ink: #080a10;
+  --carbon: #10131c;
+  --panel: #171b27;
+  --panel-raised: #1d2230;
+  --line: rgba(205, 216, 255, 0.095);
+  --line-strong: rgba(205, 216, 255, 0.16);
+  --text: #f4f6ff;
+  --text-soft: rgba(231, 235, 255, 0.68);
+  --text-muted: rgba(218, 224, 255, 0.39);
+  --aurora: #6d8bff;
+  --aurora-bright: #8da4ff;
+  --lilac: #a78bfa;
+  --coral: #ff6b74;
+  --mint: #57d9b7;
+  --shadow-app: 0 30px 80px rgba(0, 0, 0, 0.42);
+}
+
 @layer base {
   * {
     margin: 0;
@@ -9,51 +28,361 @@
     box-sizing: border-box;
   }
 
+  html, body, #root {
+    width: 100%;
+    height: 100%;
+  }
+
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'SF Pro Display', Roboto, Helvetica, Arial, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    color: var(--text);
+    background: var(--ink);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overflow: hidden;
     user-select: none;
   }
 
-  /* Custom scrollbar */
-  ::-webkit-scrollbar {
-    width: 6px;
+  button, input, select, textarea {
+    font: inherit;
   }
 
-  ::-webkit-scrollbar-track {
-    background: transparent;
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid rgba(141, 164, 255, 0.95);
+    outline-offset: 2px;
   }
 
+  ::selection {
+    color: white;
+    background: rgba(109, 139, 255, 0.46);
+  }
+
+  ::-webkit-scrollbar { width: 7px; height: 7px; }
+  ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.15);
-    border-radius: 3px;
+    background: rgba(189, 200, 247, 0.16);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    border-radius: 999px;
   }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.25);
-  }
+  ::-webkit-scrollbar-thumb:hover { background-color: rgba(189, 200, 247, 0.28); }
 }
 
 @layer components {
-  .drag-region {
-    -webkit-app-region: drag;
+  .drag-region { -webkit-app-region: drag; }
+  .no-drag { -webkit-app-region: no-drag; }
+
+  .nova-app {
+    position: relative;
+    isolation: isolate;
+    background:
+      radial-gradient(72% 90% at 8% 0%, rgba(109, 139, 255, 0.10), transparent 58%),
+      radial-gradient(50% 70% at 100% 30%, rgba(167, 139, 250, 0.055), transparent 65%),
+      var(--ink);
   }
 
-  .no-drag {
-    -webkit-app-region: no-drag;
+  .nova-app::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: linear-gradient(rgba(255,255,255,.012) 1px, transparent 1px);
+    background-size: 100% 28px;
+    mask-image: linear-gradient(to right, black, transparent 65%);
   }
+
+  .nova-titlebar {
+    position: relative;
+    padding: 0 18px 0 0;
+    border-bottom: 1px solid rgba(205, 216, 255, 0.06);
+  }
+
+  .nova-traffic-space { width: 82px; flex: 0 0 82px; }
+
+  .nova-brand-lockup {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .nova-brand-mark { width: 30px; height: 30px; filter: drop-shadow(0 0 13px rgba(109, 139, 255, .2)); }
+  .nova-brand-mark rect { fill: rgba(19, 23, 35, .82); stroke: rgba(152, 171, 255, .28); }
+  .nova-brand-mark .nova-mark-orbit { stroke: url(#none); stroke: var(--lilac); stroke-width: 1.35; opacity: .68; }
+  .nova-brand-mark .nova-mark-wave { stroke: var(--aurora-bright); stroke-width: 1.45; }
+  .nova-brand-mark circle { fill: var(--coral); filter: drop-shadow(0 0 3px var(--coral)); }
+
+  .nova-wordmark {
+    font-size: 11px;
+    line-height: 1.1;
+    font-weight: 720;
+    letter-spacing: .14em;
+    color: rgba(246, 248, 255, .86);
+  }
+
+  .nova-brand-caption {
+    margin-top: 3px;
+    font-family: "SF Mono", ui-monospace, monospace;
+    font-size: 7px;
+    letter-spacing: .2em;
+    color: rgba(196, 207, 255, .28);
+  }
+
+  .nova-title-status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 9px;
+    border: 1px solid rgba(87, 217, 183, .12);
+    border-radius: 999px;
+    background: rgba(87, 217, 183, .045);
+    color: rgba(156, 237, 216, .64);
+    font: 9px/1 "SF Mono", ui-monospace, monospace;
+    letter-spacing: .06em;
+  }
+
+  .nova-status-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--mint);
+    box-shadow: 0 0 8px rgba(87, 217, 183, .65);
+  }
+
+  .nova-sidebar {
+    width: 84px;
+    padding: 17px 10px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .nova-nav-stack { display: flex; flex-direction: column; gap: 7px; }
+
+  .nova-nav-button {
+    position: relative;
+    display: flex;
+    min-height: 58px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    border: 1px solid transparent;
+    border-radius: 15px;
+    color: rgba(206, 215, 250, .36);
+    transition: color .18s ease, background .18s ease, border-color .18s ease, transform .18s ease;
+  }
+
+  .nova-nav-button svg { width: 20px; height: 20px; }
+  .nova-nav-button:hover { color: rgba(232, 236, 255, .74); background: rgba(255,255,255,.035); }
+  .nova-nav-button:active { transform: scale(.97); }
+  .nova-nav-button.is-active {
+    color: #e6ebff;
+    border-color: rgba(133, 157, 255, .14);
+    background: linear-gradient(145deg, rgba(109, 139, 255, .15), rgba(167, 139, 250, .055));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 8px 28px rgba(39, 51, 112, .14);
+  }
+
+  .nova-nav-indicator {
+    position: absolute;
+    left: -10px;
+    width: 2px;
+    height: 0;
+    border-radius: 999px;
+    background: linear-gradient(var(--aurora), var(--lilac));
+    box-shadow: 0 0 10px rgba(109, 139, 255, .7);
+    transition: height .2s ease;
+  }
+  .nova-nav-button.is-active .nova-nav-indicator { height: 24px; }
+
+  .nova-nav-label { font-size: 9px; font-weight: 600; letter-spacing: -.01em; }
+
+  .nova-sidebar-foot {
+    margin-top: auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 3px;
+    opacity: .48;
+  }
+
+  .nova-key {
+    min-width: 19px;
+    height: 18px;
+    padding: 0 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(210, 219, 255, .12);
+    border-bottom-color: rgba(210, 219, 255, .2);
+    border-radius: 5px;
+    background: rgba(255,255,255,.025);
+    color: rgba(220, 226, 255, .42);
+    font: 8px/1 "SF Mono", ui-monospace, monospace;
+  }
+  .nova-key-wide { flex-basis: 52px; }
+
+  .nova-workspace {
+    margin: 0 10px 10px 0;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: rgba(13, 16, 24, .86);
+    box-shadow: var(--shadow-app), inset 0 1px 0 rgba(255,255,255,.025);
+  }
+
+  .nova-unified { background: transparent !important; }
+  .nova-control-bar {
+    min-height: 46px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(17, 20, 30, .62);
+    backdrop-filter: blur(20px);
+  }
+
+  .nova-chip {
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,.035);
+    border-radius: 9px;
+  }
+
+  .nova-signal-welcome {
+    position: relative;
+    margin: 6px 0 18px;
+    padding: 24px 18px 20px;
+    overflow: hidden;
+    border: 1px solid rgba(138, 159, 255, .12);
+    border-radius: 18px;
+    background:
+      radial-gradient(90% 130% at 50% 110%, rgba(109,139,255,.12), transparent 55%),
+      rgba(255,255,255,.018);
+    text-align: center;
+  }
+
+  .nova-signal-welcome::before {
+    content: "";
+    position: absolute;
+    width: 260px;
+    height: 130px;
+    left: 50%;
+    top: 10px;
+    transform: translateX(-50%) rotate(-7deg);
+    border: 1px solid rgba(142, 162, 255, .13);
+    border-radius: 50%;
+  }
+
+  .nova-signal-bars {
+    position: relative;
+    z-index: 1;
+    height: 55px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+  }
+  .nova-signal-bars span {
+    width: 3px;
+    height: var(--bar-height, 12px);
+    border-radius: 999px;
+    background: linear-gradient(to bottom, var(--aurora-bright), var(--lilac));
+    opacity: .7;
+    box-shadow: 0 0 12px rgba(109,139,255,.28);
+    animation: nova-breathe 2.8s ease-in-out infinite;
+    animation-delay: calc(var(--bar-index, 0) * -90ms);
+  }
+  .nova-signal-bars span:nth-child(7) { background: var(--coral); box-shadow: 0 0 14px rgba(255,107,116,.45); }
+
+  .nova-signal-title { position: relative; z-index: 1; margin-top: 8px; font-size: 15px; font-weight: 650; }
+  .nova-signal-copy { position: relative; z-index: 1; margin-top: 5px; color: var(--text-muted); font-size: 11px; }
 
   .glass {
-    background: rgba(26, 26, 46, 0.85);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    background: rgba(16, 19, 28, .88);
+    backdrop-filter: blur(28px) saturate(1.2);
+    -webkit-backdrop-filter: blur(28px) saturate(1.2);
   }
 
   .glass-light {
-    background: rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: rgba(255, 255, 255, .035);
+    backdrop-filter: blur(15px);
+    -webkit-backdrop-filter: blur(15px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.025);
+  }
+
+  .settings-shell { padding: 28px clamp(18px, 4vw, 42px) 52px; }
+  .settings-shell section {
+    padding: 18px;
+    border: 1px solid var(--line);
+    border-radius: 17px;
+    background: rgba(255,255,255,.016);
+  }
+  .settings-shell section > h3,
+  .settings-shell section > div > h3 {
+    color: rgba(226, 232, 255, .5) !important;
+    font-size: 10px !important;
+    letter-spacing: .14em !important;
+  }
+
+  .nova-eyebrow {
+    color: rgba(143, 164, 255, .62);
+    font: 9px/1.2 "SF Mono", ui-monospace, monospace;
+    letter-spacing: .17em;
+    text-transform: uppercase;
+  }
+
+  .nova-page-title { margin-top: 6px; font-size: clamp(20px, 3vw, 28px); font-weight: 700; letter-spacing: -.035em; }
+  .nova-page-copy { margin-top: 5px; color: var(--text-muted); font-size: 11px; line-height: 1.55; }
+
+  .nova-overlay-card {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(148, 166, 255, .18);
+    background:
+      radial-gradient(90% 120% at 0 100%, rgba(109,139,255,.14), transparent 55%),
+      rgba(12, 15, 24, .9);
+  }
+  .nova-overlay-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.055);
+    border-radius: inherit;
+  }
+}
+
+@keyframes nova-breathe {
+  0%, 100% { transform: scaleY(.82); opacity: .46; }
+  50% { transform: scaleY(1.08); opacity: .92; }
+}
+
+@media (max-width: 700px) {
+  .nova-traffic-space { width: 72px; flex-basis: 72px; }
+  .nova-sidebar { width: 68px; padding-inline: 8px; }
+  .nova-nav-label { display: none; }
+  .nova-nav-button { min-height: 48px; }
+  .nova-sidebar-foot { display: none; }
+  .settings-shell { padding: 20px 14px 36px; }
+  .settings-shell section { padding: 14px; }
+  .nova-workspace { border-radius: 16px; margin-right: 7px; margin-bottom: 7px; }
+  .nova-control-bar > .absolute { display: none; }
+}
+
+@media (max-height: 520px) {
+  .nova-titlebar { height: 48px !important; }
+  .nova-brand-caption, .nova-title-status, .nova-sidebar-foot { display: none; }
+  .nova-sidebar { padding-top: 10px; }
+  .nova-signal-welcome { margin: 2px 0 10px; padding-block: 12px; }
+  .nova-signal-bars { height: 35px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
   }
 }
