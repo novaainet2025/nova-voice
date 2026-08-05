@@ -20,6 +20,13 @@ export interface TranscriptionResult {
   metaPromptProvider?: string
   processingDuration?: number
   metaPromptDuration?: number
+  /** Application the text was injected into — the context pattern learning needs. */
+  targetApp?: string
+  targetBundleId?: string
+  cliTarget?: boolean
+  isSlashCommand?: boolean
+  /** False when injection failed and the text only reached the clipboard. */
+  injected?: boolean
 }
 
 export interface RecordingState {

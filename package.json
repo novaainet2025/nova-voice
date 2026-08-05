@@ -20,7 +20,8 @@
     "package:win": "electron-builder --win",
     "package:linux": "electron-builder --linux",
     "verify:latch": "node scripts/verify-front-app-latch.mjs",
-    "verify:all": "npm run verify:core && npm run verify:latch && npm run verify:providers && npm run verify:stt"
+    "verify:all": "npm run verify:core && npm run verify:latch && npm run verify:learning && npm run verify:providers && npm run verify:stt",
+    "verify:learning": "ELECTRON_RUN_AS_NODE=1 electron scripts/verify-pattern-learning.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0",

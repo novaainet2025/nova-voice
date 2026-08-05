@@ -9,6 +9,7 @@ import {
 } from './nco-core-client'
 import type { JsonRecord } from './nco-core-client'
 import {
+  getLightModel,
   invalidateProviderSnapshot,
   rankProviders,
   recordProviderOutcome,
@@ -297,10 +298,15 @@ async function runNcoMetaPromptTask(
 ): Promise<MetaPromptRewriteResult> {
   let taskId = ''
   try {
+    // Rewriting one spoken sentence is a light task. Without an explicit model
+    // NCO applies the provider default, which for claude-code is a frontier
+    // model — needless cost and latency for this workload.
+    const model = await getLightModel(providerId)
     const submission = await requestJson('/api/task', {
       method: 'POST',
       body: JSON.stringify({
         ai: providerId,
+        ...(model ? { model } : {}),
         prompt: metaPromptInstruction(input, context),
         priority: 1,
         callerAgentId: 'nova-voice',
@@ -310,10 +316,11 @@ async function runNcoMetaPromptTask(
           queueWaitMaxMs: 10_000,
           projectDir,
           source: 'nova-voice',
-          purpose: 'meta-prompt-final-answer',
+          purpose: 'meta-prompt-rewrite',
         },
       }),
     }, SUBMIT_TIMEOUT_MS, signal)
+    logInfo('[MetaPrompt] Task submitted', { providerId, model: model ?? '(provider default)' })
 
     taskId = typeof submission.taskId === 'string' ? submission.taskId : ''
     if (!TASK_ID_PATTERN.test(taskId)) throw new Error('NCO did not return a valid task ID')

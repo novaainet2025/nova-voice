@@ -5,6 +5,7 @@ import path from 'path'
 import { getHistory, searchHistory, deleteTranscription, saveTranscription } from './db'
 import { injectText } from './injector'
 import { isCliTarget, routeVoicePrompt } from './cli-command-router'
+import { findLearnedCommand, getAppUsageHint, normalizePhrase, observeDictation } from './pattern-learning'
 import { getMetaCommandCandidates, getMetaToolCandidates } from './command-catalog'
 import { getNcoMetaPromptStatus, reconnectNcoProvider, rewriteMetaPrompt } from './nco-meta-prompt'
 import { logError, logInfo, logWarn } from './logger'
@@ -375,8 +376,27 @@ export function setupIPC(mainWindow: BrowserWindow): void {
       const targetAppName = getPreviousAppName() || undefined
       const targetBundleId = getPreviousBundleId() || undefined
       logInfo('[STT] Injection target resolved', { requestId, targetAppName, targetBundleId })
-      const routedPrompt = routeVoicePrompt(whisperResult.text, targetAppName, targetBundleId)
+      let routedPrompt = routeVoicePrompt(whisperResult.text, targetAppName, targetBundleId)
       const cliTarget = isCliTarget(targetAppName, targetBundleId)
+      if (!routedPrompt.isSlashCommand) {
+        // The static catalogue missed it. Fall back to what this user has
+        // actually been observed doing with this phrasing.
+        const learned = findLearnedCommand(whisperResult.text)
+        if (learned) {
+          const trailing = whisperResult.text.slice(learned.phrase.length).trim()
+          routedPrompt = {
+            text: trailing ? `${learned.command} ${trailing}` : learned.command,
+            isSlashCommand: true,
+            shouldExecuteInCli: cliTarget,
+          }
+          logInfo('[Learning] Routed via learned alias', {
+            requestId,
+            phrase: learned.phrase,
+            command: learned.command,
+            hits: learned.hits,
+          })
+        }
+      }
       if (routedPrompt.isSlashCommand) {
         logInfo('[VoiceRouter] Slash command routed', {
           requestId,
@@ -411,6 +431,7 @@ export function setupIPC(mainWindow: BrowserWindow): void {
               .map((item) => item.sourceText || item.text)
               .filter((value) => Boolean(value) && value !== routedPrompt.text)
               .slice(0, 3),
+            appUsage: getAppUsageHint(targetBundleId) ?? undefined,
           },
           controller.signal,
           {
@@ -437,6 +458,22 @@ export function setupIPC(mainWindow: BrowserWindow): void {
       }
 
       const processingDuration = (performance.now() - requestStartedAt) / 1000
+      let injected: boolean | undefined
+      if (requestSettings.autoInject) {
+        sendToWindows('transcription:stage', 'injecting')
+        // A Meta response is already the AI's final answer. Paste it into the
+        // focused app, but do not submit it as a second prompt. Explicit slash
+        // commands remain executable through shouldExecuteInCli.
+        const submitInjectedText = shouldExecuteInCli
+          || (requestSettings.inputMode !== 'meta' && requestSettings.submitAfterInject)
+        injected = await injectText(
+          finalText,
+          targetAppName,
+          targetBundleId,
+          submitInjectedText,
+        )
+      }
+
       const result: TranscriptionResult = {
         id: crypto.randomUUID(),
         text: finalText,
@@ -450,22 +487,28 @@ export function setupIPC(mainWindow: BrowserWindow): void {
         ...(requestSettings.inputMode === 'meta' ? { sourceText: whisperResult.text } : {}),
         ...(metaPromptOutcome ? { metaPromptOutcome } : {}),
         ...(metaPromptProvider ? { metaPromptProvider } : {}),
+        ...(targetAppName ? { targetApp: targetAppName } : {}),
+        ...(targetBundleId ? { targetBundleId } : {}),
+        cliTarget,
+        isSlashCommand: routedPrompt.isSlashCommand,
+        ...(injected === undefined ? {} : { injected }),
       }
+      // Saved after injection so the stored row records whether the text
+      // actually reached the application, which is the quality filter the
+      // learning below depends on.
       saveTranscription(result)
 
-      if (requestSettings.autoInject) {
-        sendToWindows('transcription:stage', 'injecting')
-        // A Meta response is already the AI's final answer. Paste it into the
-        // focused app, but do not submit it as a second prompt. Explicit slash
-        // commands remain executable through shouldExecuteInCli.
-        const submitInjectedText = shouldExecuteInCli
-          || (requestSettings.inputMode !== 'meta' && requestSettings.submitAfterInject)
-        await injectText(
-          result.text,
-          targetAppName,
-          targetBundleId,
-          submitInjectedText,
-        )
+      // Only utterances that reached an application are learned from: a failed
+      // injection says nothing about what the user meant to do.
+      if (injected !== false) {
+        observeDictation({
+          spokenText: whisperResult.text,
+          phrase: normalizePhrase(whisperResult.text),
+          ...(routedPrompt.isSlashCommand
+            ? { command: routedPrompt.text.split(/\s+/, 1)[0] }
+            : {}),
+          ...(targetBundleId ? { bundleId: targetBundleId } : {}),
+        })
       }
 
       // Publish completion only after optional injection/Enter has settled.

@@ -183,6 +183,10 @@ assert.match(metaRuntime, /decision\.ranked\.slice\(0, MAX_AUTO_PROVIDER_ATTEMPT
 assert.match(metaRuntime, /recordProviderOutcome\(/)
 assert.match(metaRuntime, /allowProviderFailover,/)
 assert.match(metaRuntime, /pollDelayMs\(Date\.now\(\) - startedAt\)/)
+// Meta mode rewrites one sentence; submitting without a model let NCO apply a
+// frontier default (claude-code → claude-opus-4-6) for that light workload.
+assert.match(metaRuntime, /const model = await getLightModel\(providerId\)/)
+assert.match(metaRuntime, /\.\.\.\(model \? \{ model \} : \{\}\)/)
 assert.match(metaRuntime, /requestJson\('\/api\/ai-providers'/)
 assert.match(metaRuntime, /reconnectNcoProvider/)
 assert.match(metaRuntime, /requestJsonWithRetry\('\/health'/)
@@ -200,6 +204,12 @@ assert.match(rankingRuntime, /providerHealthDimensions/)
 assert.match(rankingRuntime, /cooldownUntil/)
 assert.match(rankingRuntime, /export function buildProviderFacts/)
 assert.match(rankingRuntime, /export function scoreProviders/)
+assert.match(rankingRuntime, /lightModel/)
+assert.match(rankingRuntime, /model\.workload === 'light'/)
+// A provider whose queue is saturated is the direct cause of the
+// queue_wait_timeout failures seen in production; catalogue prestige must not
+// outrank live queue state.
+assert.match(rankingRuntime, /SATURATION_PENALTY/)
 // The ranking must stay runnable outside Electron so it can be verified
 // directly against a live NCO payload (scripts/verify-provider-ranking.mjs).
 assert.equal(rankingRuntime.includes("from 'electron'"), false, 'ranking logic pulled in an Electron dependency')
@@ -213,8 +223,11 @@ const localMetaRuntime = fs.readFileSync(path.join(projectDir, 'src', 'main', 'l
 assert.equal(localMetaRuntime.includes('intentGuidance'), false, 'regex-based prompt template routing is still present')
 assert.equal(localMetaRuntime.includes('버그 수정 요청:'), false, 'canned local AI bug workflow is still forced')
 assert.match(localMetaRuntime, /warmupLocalAiMetaPrompt/)
-assert.match(localMetaRuntime, /qwen3:14b/)
-assert.match(localMetaRuntime, /OLLAMA_CHAT_URL/)
+// The endpoint and model are now resolved per request: the smallest installed
+// candidate on a server that already holds it, instead of one hard-coded URL.
+assert.match(localMetaRuntime, /LOCAL_META_MODEL_CANDIDATES = \['qwen3:4b'/)
+assert.match(localMetaRuntime, /resolveLocalMetaTarget/)
+assert.match(localMetaRuntime, /\$\{target\.baseUrl\}\/api\/chat/)
 assert.match(localMetaRuntime, /forceRevision/)
 assert.match(localMetaRuntime, /const REQUEST_ENDING =/)
 assert.match(localMetaRuntime, /answered the request instead of turning it into a prompt/)

@@ -1,14 +1,27 @@
 import { spawn } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import fs from 'fs'
+import { logInfo } from './logger.ts'
 import { isAllowedMetaCommand } from './command-catalog.ts'
 import type { MetaCommandCandidate, MetaToolCandidate } from './command-catalog.ts'
 
 const LOCAL_OLLAMA_BASE = 'http://127.0.0.1:11435'
 const SHARED_OLLAMA_BASE = 'http://127.0.0.1:11434'
-const OLLAMA_GENERATE_URL = `${LOCAL_OLLAMA_BASE}/api/generate`
-const OLLAMA_CHAT_URL = `${LOCAL_OLLAMA_BASE}/api/chat`
-const LOCAL_META_MODEL = 'qwen3:14b'
+
+/**
+ * Candidate models in preference order, smallest first.
+ *
+ * Rewriting a spoken sentence into a prompt is a light task, and a smaller
+ * model answers sooner: qwen3:4b needs 2.5GB against 9.3GB for qwen3:14b. Size
+ * matters twice over here, because the machine was measured holding two copies
+ * of the 14B model (25.6GB of 48GB) with swap effectively full, which is what
+ * made inference latency swing between 3s and 27s.
+ *
+ * A larger model is still used when the small one is not installed, so removing
+ * qwen3:4b degrades quality rather than breaking meta mode.
+ */
+const LOCAL_META_MODEL_CANDIDATES = ['qwen3:4b', 'qwen3:14b'] as const
+const MODEL_RESOLUTION_TTL_MS = 60_000
 // A cold model switch can take well over 20 seconds when NCO previously kept
 // a larger Ollama model resident. Meta mode must wait for a real AI result
 // rather than silently substituting a deterministic template.
@@ -20,6 +33,12 @@ let warmupInFlight: Promise<boolean> | null = null
 let serverStartupInFlight: Promise<boolean> | null = null
 let localOllamaProcess: ChildProcess | null = null
 
+export interface AppUsageContext {
+  bundleId: string
+  commands: string[]
+  phrases: string[]
+}
+
 export interface MetaPromptContext {
   targetAppName?: string
   targetBundleId?: string
@@ -27,6 +46,8 @@ export interface MetaPromptContext {
   recentInputs?: string[]
   commandCandidates?: MetaCommandCandidate[]
   toolCandidates?: MetaToolCandidate[]
+  /** What this user has actually been observed asking for in this application. */
+  appUsage?: AppUsageContext
 }
 
 export interface LocalAiMetaPromptResult {
@@ -50,6 +71,121 @@ async function endpointReady(baseUrl: string, timeoutMs = 700): Promise<boolean>
 function resolveOllamaBinary(): string | undefined {
   return ['/opt/homebrew/bin/ollama', '/usr/local/bin/ollama', '/usr/bin/ollama']
     .find((candidate) => fs.existsSync(candidate))
+}
+
+/** Models a server has installed, or null when the server cannot be reached. */
+async function listModels(baseUrl: string, timeoutMs = 1_500): Promise<Set<string> | null> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(`${baseUrl}/api/tags`, { signal: controller.signal })
+    if (!response.ok) return null
+    const body = await response.json().catch(() => ({})) as {
+      models?: Array<{ name?: unknown; model?: unknown }>
+    }
+    const names = new Set<string>()
+    for (const item of body.models ?? []) {
+      if (typeof item.name === 'string') names.add(item.name)
+      if (typeof item.model === 'string') names.add(item.model)
+    }
+    return names
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+/** Models a server currently holds in memory. */
+async function listResidentModels(baseUrl: string, timeoutMs = 1_500): Promise<Set<string>> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(`${baseUrl}/api/ps`, { signal: controller.signal })
+    if (!response.ok) return new Set()
+    const body = await response.json().catch(() => ({})) as {
+      models?: Array<{ name?: unknown; model?: unknown }>
+    }
+    const names = new Set<string>()
+    for (const item of body.models ?? []) {
+      if (typeof item.name === 'string') names.add(item.name)
+      if (typeof item.model === 'string') names.add(item.model)
+    }
+    return names
+  } catch {
+    return new Set()
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export interface LocalMetaTarget {
+  baseUrl: string
+  model: string
+  /** True when the model was already in memory, so no load cost is paid. */
+  resident: boolean
+}
+
+let resolvedTarget: { target: LocalMetaTarget; at: number } | null = null
+
+/**
+ * Chooses which Ollama server and model to use.
+ *
+ * Prefers the smallest installed candidate, and prefers a server that already
+ * holds it. Reusing the shared server matters: NOVA VOICE used to always spawn
+ * its own instance on :11435 and keep a second copy of the same model resident
+ * alongside the shared one on :11434.
+ */
+async function resolveLocalMetaTarget(): Promise<LocalMetaTarget | null> {
+  const cached = resolvedTarget
+  if (cached && Date.now() - cached.at < MODEL_RESOLUTION_TTL_MS) return cached.target
+
+  const [sharedInstalled, dedicatedInstalled] = await Promise.all([
+    listModels(SHARED_OLLAMA_BASE),
+    listModels(LOCAL_OLLAMA_BASE),
+  ])
+  const [sharedResident, dedicatedResident] = await Promise.all([
+    sharedInstalled ? listResidentModels(SHARED_OLLAMA_BASE) : Promise.resolve(new Set<string>()),
+    dedicatedInstalled ? listResidentModels(LOCAL_OLLAMA_BASE) : Promise.resolve(new Set<string>()),
+  ])
+
+  const servers = [
+    { baseUrl: SHARED_OLLAMA_BASE, installed: sharedInstalled, resident: sharedResident },
+    { baseUrl: LOCAL_OLLAMA_BASE, installed: dedicatedInstalled, resident: dedicatedResident },
+  ].filter((server): server is { baseUrl: string; installed: Set<string>; resident: Set<string> } =>
+    server.installed !== null)
+
+  // A server already holding a candidate answers immediately; loading one costs
+  // 20-100s here, because a shared server has to evict whatever NCO left
+  // resident first. Measured: qwen3:4b cold load 101s, warm inference 1.6s.
+  for (const model of LOCAL_META_MODEL_CANDIDATES) {
+    const warm = servers.find((server) => server.resident.has(model))
+    if (!warm) continue
+    const target: LocalMetaTarget = { baseUrl: warm.baseUrl, model, resident: true }
+    resolvedTarget = { target, at: Date.now() }
+    logInfo('[LocalMeta] Model target resolved (warm)', target)
+    return target
+  }
+
+  // Nothing is warm, so a load is unavoidable. Prefer the dedicated server: the
+  // shared one is NCO's, and a model loaded there is evicted again by the next
+  // NCO task, which is what made every dictation pay the load cost anew.
+  for (const model of LOCAL_META_MODEL_CANDIDATES) {
+    const offering = servers.filter((server) => server.installed.has(model))
+    if (!offering.length) continue
+    const dedicated = offering.find((server) => server.baseUrl === LOCAL_OLLAMA_BASE)
+    const chosen = dedicated ?? offering[0]
+    const target: LocalMetaTarget = { baseUrl: chosen.baseUrl, model, resident: false }
+    resolvedTarget = { target, at: Date.now() }
+    logInfo('[LocalMeta] Model target resolved (cold)', target)
+    return target
+  }
+  return null
+}
+
+/** Forces the next request to re-read which server holds which model. */
+export function invalidateLocalMetaTarget(): void {
+  resolvedTarget = null
 }
 
 async function ensureLocalOllamaServer(): Promise<boolean> {
@@ -242,33 +378,22 @@ function buildContextMessage(input: string, context: MetaPromptContext): string 
         ].join('\n')
       : '',
     recent.length ? `직전 사용자 맥락:\n${recent.map((value, index) => `${index + 1}. ${value}`).join('\n')}` : '',
+    // Learned from this user's own history, so the prompt can match how they
+    // usually phrase requests in this particular application.
+    context.appUsage && (context.appUsage.commands.length || context.appUsage.phrases.length)
+      ? [
+          '이 앱에서 사용자가 반복해 온 요청 (참고용, 강제 아님):',
+          ...context.appUsage.commands.map((command) => `- 자주 쓰는 명령: ${command}`),
+          ...context.appUsage.phrases.slice(0, 3).map((phrase) => `- 자주 하는 요청: ${compact(phrase, 80)}`),
+        ].join('\n')
+      : '',
   ].filter((line) => line !== '')
   const request = compact(input, MAX_INPUT_LENGTH)
   return contextLines.length ? `${contextLines.join('\n')}\n\n${request}` : request
 }
 
-export async function isLocalAiMetaPromptAvailable(timeoutMs = 2_000): Promise<boolean> {
-  const hasModel = async (baseUrl: string): Promise<boolean> => {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), timeoutMs)
-    try {
-      const response = await fetch(`${baseUrl}/api/tags`, { signal: controller.signal })
-      if (!response.ok) return false
-      const body = await response.json().catch(() => ({})) as {
-        models?: Array<{ name?: unknown; model?: unknown }>
-      }
-      return (body.models ?? []).some((item) => item.name === LOCAL_META_MODEL || item.model === LOCAL_META_MODEL)
-    } catch {
-      return false
-    } finally {
-      clearTimeout(timeout)
-    }
-  }
-  const [dedicated, shared] = await Promise.all([
-    hasModel(LOCAL_OLLAMA_BASE),
-    hasModel(SHARED_OLLAMA_BASE),
-  ])
-  return dedicated || shared
+export async function isLocalAiMetaPromptAvailable(): Promise<boolean> {
+  return (await resolveLocalMetaTarget()) !== null
 }
 
 function systemInstruction(): string {
@@ -314,6 +439,7 @@ async function requestLocalRewrite(
   context: MetaPromptContext,
   signal: AbortSignal,
   revisionAttempt: number,
+  target: LocalMetaTarget,
   validationFailure = '',
 ): Promise<string> {
   const forceRevision = revisionAttempt > 0
@@ -331,11 +457,11 @@ async function requestLocalRewrite(
       : '',
   ].filter(Boolean).join('\n\n')
   const userMessage = buildContextMessage(input, context)
-  const response = await fetch(OLLAMA_CHAT_URL, {
+  const response = await fetch(`${target.baseUrl}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: LOCAL_META_MODEL,
+      model: target.model,
       messages: [
         { role: 'system', content: systemInstruction() },
         ...META_ANSWER_EXAMPLES,
@@ -377,12 +503,13 @@ export function warmupLocalAiMetaPrompt(): Promise<boolean> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(new Error('Local AI warmup timed out')), LOCAL_AI_TIMEOUT_MS)
     try {
-      if (!await ensureLocalOllamaServer()) return false
-      const response = await fetch(OLLAMA_GENERATE_URL, {
+      const target = await resolveLocalMetaTarget()
+      if (!target) return false
+      const response = await fetch(`${target.baseUrl}/api/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: LOCAL_META_MODEL,
+          model: target.model,
           prompt: '',
           stream: false,
           keep_alive: '30m',
@@ -429,7 +556,15 @@ export async function rewriteWithLocalAiMetaPrompt(
   signal?: AbortSignal,
 ): Promise<LocalAiMetaPromptResult> {
   await waitForWarmup(signal)
-  if (!await ensureLocalOllamaServer()) throw new Error('Local AI service is unavailable')
+  let target = await resolveLocalMetaTarget()
+  if (!target) {
+    // No reachable server already holds a candidate. Start the dedicated one,
+    // which is the only case where a second Ollama instance is justified.
+    if (!await ensureLocalOllamaServer()) throw new Error('Local AI service is unavailable')
+    invalidateLocalMetaTarget()
+    target = await resolveLocalMetaTarget()
+    if (!target) throw new Error('No local meta-prompt model is installed')
+  }
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(new Error('Local AI meta prompt timed out')), LOCAL_AI_TIMEOUT_MS)
   const abortFromParent = () => controller.abort(signal?.reason ?? new Error('Meta prompt cancelled'))
@@ -444,12 +579,13 @@ export async function rewriteWithLocalAiMetaPrompt(
         context,
         controller.signal,
         attempt,
+        target,
         validationFailure,
       )
       try {
         return {
           text: cleanOutput(content, input, context),
-          model: LOCAL_META_MODEL,
+          model: target.model,
         }
       } catch (error) {
         validationFailure = error instanceof Error ? error.message : String(error)

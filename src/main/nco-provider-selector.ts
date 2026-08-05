@@ -151,6 +151,15 @@ export function invalidateProviderSnapshot(): void {
   snapshot = null
 }
 
+/**
+ * The cheapest model a provider offers, or undefined when it publishes none.
+ * Returning undefined leaves NCO free to apply the provider's own default.
+ */
+export async function getLightModel(providerId: string): Promise<string | undefined> {
+  const current = await getSnapshot()
+  return current.facts.find((entry) => entry.id === providerId)?.lightModel
+}
+
 export async function rankProviders(): Promise<{ ranking: NcoProviderRanking[]; error?: string }> {
   const current = await getSnapshot()
   return {

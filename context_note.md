@@ -1,5 +1,67 @@
 # System Context Note — 최신 5개 세션 (전체 이력: context_history/)
-> 마지막 갱신: 2026-08-05 11:10 KST | 프로젝트: nova-voice
+> 마지막 갱신: 2026-08-05 22:06 KST | 프로젝트: nova-voice
+
+<!-- SESSION_START -->
+## 세션: 2026-08-05T22:06 | main | nova-voice
+
+---
+name: 자동 맥락 노트 2026-08-05
+description: git 데이터 기반 자동 생성 (AI 오프라인)
+type: project
+---
+
+- .gitignore
+- context_note.md
+- package.json
+- src/main/db.ts
+- src/main/ipc.ts
+
+최근 커밋: - perf: 패키지에서 빌드 전용 아이콘 제외 + 스트리밍 STT 지연 수치 교정 (90edba78)
+- fix: 종료 중 단축키 콜백이 파괴된 창을 건드려 예외가 나던 문제 (3a415a19)
+
+**Why:** AI 오프라인 — git 데이터 기반 자동 기록
+**How to apply:** Ollama 온라인 시 다음 세션에서 보완됨
+
+### 변경 파일
+- .gitignore
+- context_note.md
+- package.json
+- src/main/db.ts
+- src/main/ipc.ts
+- src/main/local-ai-meta-prompt.ts
+- src/shared/types.ts
+
+### 최근 커밋
+- perf: 패키지에서 빌드 전용 아이콘 제외 + 스트리밍 STT 지연 수치 교정 (90edba78)
+- fix: 종료 중 단축키 콜백이 파괴된 창을 건드려 예외가 나던 문제 (3a415a19)
+- fix: 녹음이 멈춰 있는 상태와 렌더러 사망에서 스스로 복구 + 클립보드 경합 제거 (681b73aa)
+<!-- SESSION_END -->
+
+<!-- SESSION_START -->
+## 세션: 2026-08-05T11:21 | main | nova-voice
+
+---
+name: 자동 맥락 노트 2026-08-05
+description: git 데이터 기반 자동 생성 (AI 오프라인)
+type: project
+---
+
+- 
+
+최근 커밋: - perf: 패키지에서 빌드 전용 아이콘 제외 + 스트리밍 STT 지연 수치 교정 (90edba78)
+- fix: 종료 중 단축키 콜백이 파괴된 창을 건드려 예외가 나던 문제 (3a415a19)
+
+**Why:** AI 오프라인 — git 데이터 기반 자동 기록
+**How to apply:** Ollama 온라인 시 다음 세션에서 보완됨
+
+### 변경 파일
+- 
+
+### 최근 커밋
+- perf: 패키지에서 빌드 전용 아이콘 제외 + 스트리밍 STT 지연 수치 교정 (90edba78)
+- fix: 종료 중 단축키 콜백이 파괴된 창을 건드려 예외가 나던 문제 (3a415a19)
+- fix: 녹음이 멈춰 있는 상태와 렌더러 사망에서 스스로 복구 + 클립보드 경합 제거 (681b73aa)
+<!-- SESSION_END -->
 
 <!-- SESSION_START -->
 ## 세션: 2026-08-05T11:10 | main | nova-voice
@@ -79,59 +141,8 @@ type: project
 - feat: STT 실시간 스트리밍·프로바이더 자동선택·스펙트럼 파형·모드별 단축키 (108ababd)
 <!-- SESSION_END -->
 
-<!-- SESSION_START -->
-## 세션: 2026-08-05T10:37 | main | nova-voice
-
----
-name: 자동 맥락 노트 2026-08-05
-description: git 데이터 기반 자동 생성 (AI 오프라인)
-type: project
----
-
-- 
-
-최근 커밋: - fix: 창을 닫아도 받아쓰기가 동작하도록 + 메타 프롬프트를 답변이 아닌 프롬프트로 (20d286ca)
-- feat: STT 실시간 스트리밍·프로바이더 자동선택·스펙트럼 파형·모드별 단축키 (108ababd)
-
-**Why:** AI 오프라인 — git 데이터 기반 자동 기록
-**How to apply:** Ollama 온라인 시 다음 세션에서 보완됨
-
-### 변경 파일
-- 
-
-### 최근 커밋
-- fix: 창을 닫아도 받아쓰기가 동작하도록 + 메타 프롬프트를 답변이 아닌 프롬프트로 (20d286ca)
-- feat: STT 실시간 스트리밍·프로바이더 자동선택·스펙트럼 파형·모드별 단축키 (108ababd)
-- refactor: TTS·PTY·내장 터미널 잔재 제거 및 개선 기록 반영 (a383d302)
-<!-- SESSION_END -->
-
-<!-- SESSION_START -->
-## 세션: 2026-08-05T10:23 | main | nova-voice
-
----
-name: 자동 맥락 노트 2026-08-05
-description: git 데이터 기반 자동 생성 (AI 오프라인)
-type: project
----
-
-- 
-
-최근 커밋: - feat: STT 실시간 스트리밍·프로바이더 자동선택·스펙트럼 파형·모드별 단축키 (108ababd)
-- refactor: TTS·PTY·내장 터미널 잔재 제거 및 개선 기록 반영 (a383d302)
-
-**Why:** AI 오프라인 — git 데이터 기반 자동 기록
-**How to apply:** Ollama 온라인 시 다음 세션에서 보완됨
-
-### 변경 파일
-- 
-
-### 최근 커밋
-- feat: STT 실시간 스트리밍·프로바이더 자동선택·스펙트럼 파형·모드별 단축키 (108ababd)
-- refactor: TTS·PTY·내장 터미널 잔재 제거 및 개선 기록 반영 (a383d302)
-- chore: .venv-tts 가상환경 추적 해제 + 세션 산출물 무시 (9a39913b)
-<!-- SESSION_END -->
-
 ## 5. 다음 세션 필수 인지
-- [반복학습] 거짓보고 게이트 누적 70회 — 보고 전 T1 선검증(pre-claim verify) 강화
+- [반복학습] 거짓보고 게이트 누적 527회 — 보고 전 T1 선검증(pre-claim verify) 강화
 - [반복학습] 보고 전 T1 선검증 + 영수증 5필드(변경/검증방법/등급/Gap/미검증) 준수
 - [학습] T3 ack(started/ok/queued)를 완료로 보고 금지 — 부작용 T1 확인 후 주장
+- [다음] 미검증 종결: (1) **qwen3:4b 실제 품질·지연** — 스왑 만재로 콜드 로드 120초 초과, 새 빌드 설치 후 재측정 필요 (2) 경량 모델 전환의 실제 지연 개선폭

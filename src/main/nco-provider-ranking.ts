@@ -20,6 +20,17 @@ export const EXPLORATION_BONUS = 20
 export const LATENCY_WEIGHT = 55
 /** Extra penalty for unreliability, on top of its effect on expected time. */
 export const RELIABILITY_WEIGHT = 25
+/**
+ * Cost of a saturated queue.
+ *
+ * Measured in production: claude-code was chosen first on every request while
+ * its queue was reported saturated, because a catalogue score of 95 dwarfed the
+ * old −18 penalty. Those requests then failed with `queue_wait_timeout: provider
+ * claude-code busy for 10000ms` and fell through to the next provider, so the
+ * user paid the full wait before any work started. Saturation is a direct
+ * predictor of that failure, so it has to outweigh catalogue prestige.
+ */
+export const SATURATION_PENALTY = 120
 /** Floor for the success rate so a fully failing provider stays comparable. */
 const MIN_SUCCESS_RATE = 0.1
 
@@ -46,6 +57,15 @@ export interface ProviderStat {
 export interface ProviderFacts {
   id: string
   name: string
+  /**
+   * Cheapest enabled model the provider offers.
+   *
+   * Meta mode rewrites one spoken sentence into a prompt. Left unspecified,
+   * NCO applies each provider's default, which for claude-code is a frontier
+   * model — far more capability, cost and latency than a sentence rewrite
+   * needs.
+   */
+  lightModel?: string
   catalogScore: number
   general: boolean
   enabled: boolean
@@ -96,9 +116,12 @@ export function buildProviderFacts(health: JsonRecord, catalog: JsonRecord): Pro
     const id = provider.id as string
     const routing = asRecord(provider.routing)
     const gate = gates.get(id)
+    const models = Array.isArray(provider.models) ? provider.models.map(asRecord) : []
+    const light = models.find((model) => model.workload === 'light' && model.enabled !== false)
     return {
       id,
       name: typeof provider.name === 'string' ? provider.name : id,
+      ...(typeof light?.id === 'string' ? { lightModel: light.id } : {}),
       catalogScore: Number.isFinite(Number(provider.score)) ? Number(provider.score) : 50,
       general: asStringArray(routing.taskTypes).includes('general'),
       enabled: provider.enabled !== false,
@@ -164,7 +187,7 @@ export function scoreProviders(
     let score = entry.catalogScore
     if (entry.general) score += 6
     if (entry.queueFree) score += 12
-    if (entry.queueSaturated) score -= 18
+    if (entry.queueSaturated) score -= SATURATION_PENALTY
     if (entry.heartbeatAlive) score += 8
 
     const effectiveMs = expectedSuccessMs(stat)
