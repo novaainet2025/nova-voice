@@ -162,6 +162,40 @@ assert.equal(missingApp.status, 'error', 'an unknown app name reported success')
 const slowest = Math.max(...classified.map((row) => row.ms))
 assert.ok(slowest < 5_000, `classification took ${slowest}ms; it gates every dictation`)
 
+// ── Demonstratives resolve through what is on screen ──────────────────────
+// "이거" carries no meaning on its own; the classifier has to read the Finder
+// selection to know what it points at. Without this the model could only guess.
+const { readScreenContext, describeScreenContext } = await import('../src/main/screen-context.ts')
+const contextFile = path.join(os.homedir(), `nova-ctx-verify-${Date.now()}.txt`)
+fs.writeFileSync(contextFile, 'context verification')
+let demonstrative = null
+let screenContext = {}
+try {
+  const { execFile } = await import('node:child_process')
+  const { promisify } = await import('node:util')
+  const run = promisify(execFile)
+  await run('osascript', ['-e', `tell application "Finder" to reveal POSIX file "${contextFile}"`])
+  await run('osascript', ['-e', 'tell application "Finder" to activate'])
+  await new Promise((resolve) => setTimeout(resolve, 2_500))
+
+  screenContext = await readScreenContext()
+  assert.equal(screenContext.bundleId, 'com.apple.finder', 'Finder did not come to the front')
+  assert.ok(
+    screenContext.selection?.some((item) => item.endsWith(path.basename(contextFile))),
+    'the Finder selection was not visible to the context reader',
+  )
+  assert.match(describeScreenContext(screenContext), /현재 상황/)
+
+  demonstrative = await classifyUtterance('이거 파인더에서 보여줘')
+  assert.ok(demonstrative, 'a demonstrative utterance was not classified at all')
+  assert.ok(
+    demonstrative.target?.includes(path.basename(contextFile)),
+    `"이거" did not resolve to the selected file: ${JSON.stringify(demonstrative)}`,
+  )
+} finally {
+  fs.rmSync(contextFile, { force: true })
+}
+
 console.log(JSON.stringify({
   passed: true,
   allowedActions: COMPUTER_ACTIONS.length,
@@ -170,6 +204,8 @@ console.log(JSON.stringify({
   imageModel: IMAGE_MODEL,
   classifier: { correct, of: classifierCases.length, slowestMs: slowest, cases: classified },
   fileSearch: search.message,
+  screenContext: { app: screenContext.appName, selection: screenContext.selection?.length ?? 0 },
+  demonstrative: { action: demonstrative?.action, target: demonstrative?.target },
   checks: [
     'allow-list rejects unknown and malformed intents',
     'shell metacharacters stay data',
@@ -181,5 +217,6 @@ console.log(JSON.stringify({
     'classifier separates control from dictation, fast enough to gate it',
     'no dictation is executed as a command (zero false positives)',
     'spoken Korean app names resolve to installed bundles',
+    'demonstratives resolve through the on-screen selection',
   ],
 }, null, 2))

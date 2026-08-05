@@ -20,6 +20,8 @@
 
 import { logInfo, logWarn } from './logger.ts'
 import { ensureDedicatedOllamaServer, warmModel } from './local-ai-meta-prompt.ts'
+import { basename } from 'path'
+import { describeScreenContext, readScreenContext } from './screen-context.ts'
 import { COMPUTER_ACTIONS, parseComputerIntent } from '../shared/computer-intent.ts'
 import type { ComputerIntent } from '../shared/computer-intent.ts'
 
@@ -47,6 +49,49 @@ const MIN_CONFIDENCE = 0.6
  * way a classifier can say no.
  */
 const NONE_ACTION = 'NONE'
+
+/** Actions that do nothing without something to act on. */
+const TARGET_REQUIRED: ReadonlySet<string> = new Set([
+  'OPEN_APP', 'FOCUS_APP', 'FIND_FILE', 'REVEAL_IN_FINDER', 'GENERATE_IMAGE', 'GENERATE_TABLE',
+])
+
+/** Words that point at the situation rather than naming it. */
+const DEMONSTRATIVE = /(?:이거|이것|이\s*파일|이\s*폴더|여기|저거|저것|그거|그것|선택한|선택된)/
+
+function hasDemonstrative(utterance: string): boolean {
+  return DEMONSTRATIVE.test(utterance)
+}
+
+/**
+ * Whether the user actually said this target.
+ *
+ * Compared without spaces or case because Korean speech-to-text moves word
+ * boundaries around, and an app name may be spoken in Korean but resolved to
+ * its English bundle name later.
+ */
+function mentionsTarget(utterance: string, target: string): boolean {
+  const flatten = (value: string) => value.toLowerCase().replace(/[\s.,!?]/g, '')
+  const flatUtterance = flatten(utterance)
+  const flatTarget = flatten(target)
+  if (!flatTarget) return false
+  if (flatUtterance.includes(flatTarget)) return true
+  // A resolved English name counts when its spoken form appears instead.
+  return SPOKEN_TARGET_ALIASES.some(([spoken, resolved]) =>
+    flatten(resolved) === flatTarget && flatUtterance.includes(flatten(spoken)))
+}
+
+/** Mirrors computer-os.ts's spoken-name map for the cases users actually say. */
+const SPOKEN_TARGET_ALIASES: Array<[string, string]> = [
+  ['파인더', 'Finder'],
+  ['사파리', 'Safari'],
+  ['크롬', 'Google Chrome'],
+  ['터미널', 'Terminal'],
+  ['노바 유즈', 'NOVA Use'],
+  ['노바 보이스', 'NOVA VOICE'],
+  ['메모', 'Notes'],
+  ['캘린더', 'Calendar'],
+  ['음악', 'Music'],
+]
 const MAX_INPUT_LENGTH = 1_000
 
 interface ClassifierTarget {
@@ -171,6 +216,8 @@ function systemInstruction(): string {
     '대상이 필요한 action(OPEN_APP, FOCUS_APP, FIND_FILE, REVEAL_IN_FINDER)은 원문에 대상이 있을 때만 쓴다. 대상이 없으면 NONE이다.',
     '"파인더 열어줘"처럼 앱을 열라는 말은 OPEN_APP이다. REVEAL_IN_FINDER는 특정 파일의 위치를 파인더에서 보여달라는 뜻이므로 대상 파일이 있을 때만 쓴다.',
     'args는 action 수행에 필요한 추가 값(예: TYPE의 입력 문자열)이 원문에서 명확할 때만 채우고, 없으면 비운다.',
+    '입력에 [현재 상황]이 있으면 그것을 근거로 판단한다. "이거", "여기", "이 파일" 같은 지시어는 그 상황이 가리키는 대상으로 해석하고, target에 실제 대상 이름을 채운다.',
+    '상황과 발화가 어울리지 않으면(예: 문서 편집 중인데 파일 검색 명령처럼 들림) 억지로 실행하지 말고 NONE으로 답한다.',
     '설명, 머리말, 코드펜스 없이 지정된 JSON 스키마 그대로만 출력한다.',
   ].join('\n')
 }
@@ -205,6 +252,14 @@ export async function classifyUtterance(text: string, signal?: AbortSignal): Pro
   const target = await resolveClassifierTarget()
   if (!target) return null
 
+  // What is on screen decides what a demonstrative refers to, and it also tells
+  // the model when an utterance does not fit the situation at all. Read before
+  // the deadline starts: the probe is bounded separately and a failed read
+  // simply yields no context.
+  const screenContext = await readScreenContext()
+  const contextBlock = describeScreenContext(screenContext)
+  const userMessage = contextBlock ? `${contextBlock}\n\n${trimmed}` : trimmed
+
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(new Error('Intent classification timed out')), CLASSIFY_TIMEOUT_MS)
   const abortFromParent = () => controller.abort(signal?.reason ?? new Error('Intent classification cancelled'))
@@ -220,7 +275,7 @@ export async function classifyUtterance(text: string, signal?: AbortSignal): Pro
         messages: [
           { role: 'system', content: systemInstruction() },
           ...INTENT_EXAMPLES,
-          { role: 'user', content: trimmed },
+          { role: 'user', content: userMessage },
         ],
         think: false,
         format: {
@@ -273,6 +328,37 @@ export async function classifyUtterance(text: string, signal?: AbortSignal): Pro
     }
 
     if (intent.confidence < MIN_CONFIDENCE) return null
+
+    // Some actions are meaningless without a target, yet the model returns them
+    // for vague utterances anyway: "그럼 열어" came back as OPEN_APP at 0.9, and
+    // with screen context available it even borrowed the front window's name as
+    // the target. Prompt wording did not stop it, so the rule is enforced here.
+    if (TARGET_REQUIRED.has(intent.action) && !intent.target?.trim()) {
+      logInfo('[IntentClassifier] Dropped a targetless action', { action: intent.action })
+      return null
+    }
+
+    // A demonstrative left in the target means the model echoed the pronoun
+    // instead of resolving it, so the executor would search for the literal
+    // word "이거". Resolve it from the selection here, or give up.
+    if (intent.target && DEMONSTRATIVE.test(intent.target)) {
+      const selected = screenContext.selection?.[0]
+      if (!selected) {
+        logInfo('[IntentClassifier] Demonstrative with nothing selected', { target: intent.target })
+        return null
+      }
+      intent.target = basename(selected)
+    }
+
+    // A target the user never said is a hallucination — most often the app or
+    // window name lifted straight out of the context block. Demonstratives are
+    // the deliberate exception: resolving them is the point of that block.
+    if (intent.target && !mentionsTarget(trimmed, intent.target) && !hasDemonstrative(trimmed)) {
+      logInfo('[IntentClassifier] Dropped an unstated target', {
+        action: intent.action, target: intent.target,
+      })
+      return null
+    }
 
     return intent
   } catch (error) {
