@@ -29,6 +29,15 @@ assert.equal(isCliTarget('', 'com.nova.nova-use'), true)
 assert.equal(shouldRememberFrontApp('NOVA VOICE', 'com.novavoice.app'), false)
 assert.equal(shouldRememberFrontApp('nova-voice', ''), false)
 assert.equal(shouldRememberFrontApp('NOVA Use', 'com.nova.nova-use'), true)
+// Every unpackaged Electron app reports the process name "Electron". Matching
+// on the name alone made NOVA VOICE treat other Electron apps as itself and
+// refuse to dictate into them, so the process id decides instead.
+assert.equal(shouldRememberFrontApp('Electron', 'com.github.Electron', 87772), true)
+assert.equal(shouldRememberFrontApp('Electron', 'com.github.Electron', process.pid), false)
+assert.equal(shouldRememberFrontApp('NOVA VOICE', 'com.novavoice.app', 4242), false)
+// Without a usable pid the ambiguous name list is the only safeguard left.
+assert.equal(shouldRememberFrontApp('Electron', 'com.github.Electron'), false)
+assert.equal(shouldRememberFrontApp('Electron', 'com.github.Electron', 0), false)
 assert.deepEqual(
   routeVoicePrompt('슬러시 클리어', 'Terminal', 'com.apple.Terminal'),
   { text: '/clear', isSlashCommand: true, shouldExecuteInCli: true },

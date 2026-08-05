@@ -71,11 +71,19 @@ export async function rememberFrontApp(options: { force?: boolean } = {}): Promi
         on error
           set bundleId to ""
         end try
-        return processName & "|" & bundleId
+        try
+          set frontPid to unix id of frontApp
+        on error
+          set frontPid to 0
+        end try
+        return processName & "|" & bundleId & "|" & frontPid
       end tell
     `])
-    const [processName = '', bundleId = ''] = stdout.trim().split('|')
-    if (shouldRememberFrontApp(processName, bundleId)) {
+    // The process id is what separates this app from other Electron apps, which
+    // all report the process name "Electron" when run unpackaged.
+    const [processName = '', bundleId = '', rawPid = ''] = stdout.trim().split('|')
+    const pid = Number.parseInt(rawPid.trim(), 10)
+    if (shouldRememberFrontApp(processName, bundleId, Number.isFinite(pid) ? pid : undefined)) {
       previousAppName = processName.trim()
       previousBundleId = bundleId.trim()
     }
