@@ -20,8 +20,20 @@ import {
 import { reregisterShortcuts } from './shortcuts'
 import { isSttServerRunning } from './stt-server'
 import { abortLiveCapture, finishLiveCapture, pushLiveAudio, transcribePcm } from './whisper'
+import { classifyUtterance } from './intent-classifier'
+// computer-os.ts (T2, docs/plans/computer-use-plan.md) does not exist yet — this
+// wiring assumes it will export `executeComputerIntent(intent, ctx) => Promise<ComputerExecutionResult>`
+// where ComputerExecutionResult is `{ status: 'ok' | 'refused' | 'error'; message: string }`.
+// 'refused' is the assumed outcome for an action computer-os.ts judges destructive
+// (delete/overwrite/quit): only it has the allow-list detail to make that call, so
+// it — not this file — declines to run the action and explains why in `message`.
+// There is no confirmation UI yet, so 'refused' is the only safe outcome for those
+// actions until one exists. `message` is assumed to already be user-facing Korean.
+import { executeComputerIntent } from './computer-os'
+import type { ComputerExecutionResult } from './computer-os'
 import { DEFAULT_SETTINGS, SILENCE_TIMEOUT_OPTIONS, STT_ENGINE_NAME } from '../shared/types'
 import type { AppSettings, SttStatus, TranscriptionResult, VoiceInputMode } from '../shared/types'
+import type { ComputerIntent } from '../shared/computer-intent'
 
 let settings: AppSettings = { ...DEFAULT_SETTINGS }
 let isRecording = false
@@ -154,6 +166,53 @@ function toBuffer(value: ArrayBuffer | ArrayBufferView): Buffer {
     return Buffer.from(value.buffer, value.byteOffset, value.byteLength)
   }
   return Buffer.from(value)
+}
+
+/**
+ * Turns a classified computer-control intent into the same TranscriptionResult
+ * shape dictation produces, so the existing transcription:result / overlay /
+ * history pipeline is what tells the user what happened — no second UI path
+ * for computer actions. Never throws: an executor failure becomes an 'error'
+ * status message here instead, mirroring how the dictation path already turns
+ * failures into results rather than rejections wherever it safely can.
+ */
+async function runComputerIntent(
+  intent: ComputerIntent,
+  whisperResult: { text: string; language: string; duration: number },
+  requestId: string,
+  requestStartedAt: number,
+  signal: AbortSignal,
+): Promise<TranscriptionResult> {
+  logInfo('[ComputerUse] Intent classified', {
+    requestId,
+    action: intent.action,
+    target: intent.target,
+    confidence: intent.confidence,
+  })
+
+  let outcome: ComputerExecutionResult
+  try {
+    outcome = await executeComputerIntent(intent, { requestId, signal })
+  } catch (error) {
+    outcome = { status: 'error', message: error instanceof Error ? error.message : String(error) }
+  }
+
+  logInfo('[ComputerUse] Execution finished', {
+    requestId,
+    action: intent.action,
+    status: outcome.status,
+  })
+
+  return {
+    id: crypto.randomUUID(),
+    text: outcome.message,
+    language: whisperResult.language,
+    duration: whisperResult.duration,
+    timestamp: Date.now(),
+    modelUsed: STT_ENGINE_NAME,
+    sourceText: whisperResult.text,
+    processingDuration: (performance.now() - requestStartedAt) / 1000,
+  }
 }
 
 export function cancelCurrentTranscription(): void {
@@ -369,6 +428,31 @@ export function setupIPC(mainWindow: BrowserWindow): void {
         sendToWindows('transcription:stage', 'idle')
         hideOverlay()
         return null
+      }
+
+      // Gates every utterance, ahead of the existing dictation/meta branching
+      // below — a computer-control utterance never reaches routeVoicePrompt or
+      // rewriteMetaPrompt. A null result (low confidence, classifier unreachable,
+      // parse failure) falls straight through to that existing code unchanged.
+      const computerIntent = await classifyUtterance(whisperResult.text, controller.signal)
+      if (controller.signal.aborted || transcriptionController !== controller) {
+        logWarn('[STT] PCM result discarded after cancellation', { requestId, stage: 'computer-intent' })
+        return null
+      }
+      if (computerIntent) {
+        sendToWindows('transcription:stage', 'injecting')
+        const result = await runComputerIntent(computerIntent, whisperResult, requestId, requestStartedAt, controller.signal)
+        sendToWindows('transcription:result', result)
+        sendToWindows('transcription:progress', 1)
+        sendToWindows('transcription:stage', 'idle')
+        logInfo('[STT] PCM request completed', {
+          requestId,
+          inputMode: 'computer',
+          action: computerIntent.action,
+          totalMs: Math.round(performance.now() - requestStartedAt),
+        })
+        setTimeout(() => hideOverlay(), 1200)
+        return result
       }
 
       // Latched when the recording started, so this is the app that was focused
