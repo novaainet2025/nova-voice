@@ -238,16 +238,21 @@ export async function finishLiveCapture(
 
   destroyLiveCapture(capture)
   const transcript = capture.finals.join(' ').trim()
+  // `duration` is what the UI shows as recognition latency, so it has to be the
+  // work left after the recording stopped — not the length of the recording.
+  // Streaming exists precisely to make those two numbers differ.
+  const finalizeMs = performance.now() - finishStartedAt
   logInfo('[Whisper] Live capture finished', {
     segments: capture.finals.length,
     textLength: transcript.length,
     bytes: capture.bytes,
-    elapsedMs: Math.round(performance.now() - capture.startedAt),
+    finalizeMs: Math.round(finalizeMs),
+    captureSpanMs: Math.round(performance.now() - capture.startedAt),
   })
   return {
     text: normalizeTranscript(filterHallucinations(transcript)),
     language: 'ko',
-    duration: (performance.now() - capture.startedAt) / 1000,
+    duration: finalizeMs / 1000,
   }
 }
 
@@ -413,10 +418,6 @@ export async function warmupWhisper(): Promise<boolean> {
       }
     })
   })
-}
-
-export function isReady(): boolean {
-  return whisperReady
 }
 
 function filterHallucinations(text: string): string {

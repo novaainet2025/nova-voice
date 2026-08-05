@@ -70,7 +70,8 @@
     },
     "files": [
       "out/**/*",
-      "resources/**/*"
+      "resources/command-catalog.json",
+      "resources/tray-icon.png"
     ]
   }
 }
