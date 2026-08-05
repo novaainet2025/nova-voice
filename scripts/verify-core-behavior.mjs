@@ -283,6 +283,11 @@ assert.match(mainRuntime, /keeps failing; giving up/)
 assert.match(mainRuntime, /captureWatchdog = setTimeout/)
 assert.match(mainRuntime, /getLastAudioChunkAt\(\) >= recordingStartTime/)
 assert.match(mainRuntime, /MAX_RECORDING_MS/)
+// Optional chaining does not guard a destroyed BrowserWindow, so a hotkey that
+// fired during teardown threw "Object has been destroyed".
+assert.match(mainRuntime, /function sendToWindow/)
+assert.match(mainRuntime, /win\.webContents\.isDestroyed\(\)/)
+assert.equal(mainRuntime.includes('overlayWindow?.webContents.send'), false, 'destroyed overlay can still be written to')
 
 const injectorRuntime = fs.readFileSync(path.join(projectDir, 'src', 'main', 'injector.ts'), 'utf8')
 // Two dictations in quick succession must not let the older restore timer

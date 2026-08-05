@@ -112,6 +112,21 @@ function attachRendererRecovery(win: BrowserWindow, label: string): void {
   })
 }
 
+/**
+ * Optional chaining only guards a null reference. A BrowserWindow that has been
+ * destroyed is still a live object, and touching its webContents throws
+ * "Object has been destroyed" — which happened when a global shortcut fired
+ * while the app was tearing down.
+ */
+function sendToWindow(win: BrowserWindow | null, channel: string, payload: unknown): void {
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
+  win.webContents.send(channel, payload)
+}
+
+function isLive(win: BrowserWindow | null): win is BrowserWindow {
+  return Boolean(win && !win.isDestroyed())
+}
+
 function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 900,
@@ -233,10 +248,10 @@ function finishRecording(cancelled = false): void {
     inputMode: activeRecordingMode,
     ...(cancelled ? { cancelled: true } : {}),
   }
-  mainWindow.webContents.send('recording:state', state)
-  overlayWindow?.webContents.send('recording:state', state)
-  if (cancelled) overlayWindow?.hide()
-  updateTrayMenu(mainWindow, false)
+  sendToWindow(mainWindow, 'recording:state', state)
+  sendToWindow(overlayWindow, 'recording:state', state)
+  if (cancelled && isLive(overlayWindow)) overlayWindow.hide()
+  if (isLive(mainWindow)) updateTrayMenu(mainWindow, false)
   updateTrayIcon(false)
 }
 
@@ -263,7 +278,7 @@ async function startRecording(mode?: VoiceInputMode): Promise<void> {
   activeRecordingMode = mode ?? getSettings().inputMode
   setActiveInputMode(activeRecordingMode)
   recordingStartTime = Date.now()
-  if (getSettings().showOverlay) overlayWindow?.showInactive()
+  if (getSettings().showOverlay && isLive(overlayWindow)) overlayWindow.showInactive()
 
   // Open the STT socket now so audio can stream while the user is still
   // talking; the server then finalises the segment on its own 0.7s silence
@@ -271,10 +286,10 @@ async function startRecording(mode?: VoiceInputMode): Promise<void> {
   beginLiveCapture()
 
   const state = { isRecording: true, duration: 0, inputMode: activeRecordingMode }
-  mainWindow.webContents.send('recording:state', state)
-  overlayWindow?.webContents.send('recording:state', state)
+  sendToWindow(mainWindow, 'recording:state', state)
+  sendToWindow(overlayWindow, 'recording:state', state)
   durationTimer = setInterval(() => {
-    overlayWindow?.webContents.send('recording:duration', (Date.now() - recordingStartTime) / 1000)
+    sendToWindow(overlayWindow, 'recording:duration', (Date.now() - recordingStartTime) / 1000)
   }, 100)
 
   clearRecordingTimers()
@@ -299,7 +314,7 @@ async function startRecording(mode?: VoiceInputMode): Promise<void> {
     finishRecording()
   }, MAX_RECORDING_MS)
 
-  updateTrayMenu(mainWindow, true)
+  if (isLive(mainWindow)) updateTrayMenu(mainWindow, true)
   updateTrayIcon(true)
 }
 
@@ -381,6 +396,10 @@ app.on('second-instance', () => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  // Stop hotkeys before any window is torn down; a callback that fires during
+  // teardown reaches destroyed windows.
+  unregisterAll()
+  clearRecordingTimers()
   logInfo('[Shutdown] before-quit')
 })
 
