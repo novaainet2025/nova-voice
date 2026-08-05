@@ -40,8 +40,8 @@ export function RecordingOverlay() {
             </div>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className={`rounded-full border px-2 py-1 text-[8px] font-mono tracking-wide ${inputMode === 'meta' ? 'border-violet-300/20 bg-violet-300/[0.08] text-violet-100/75' : 'border-white/[0.07] bg-white/[0.045] text-white/40'}`}>
-              {inputMode === 'meta' ? 'META AI' : 'NORMAL'}
+            <span className={`rounded-full border px-2 py-1 text-[8px] font-mono tracking-wide ${inputMode === 'meta' ? 'border-violet-300/20 bg-violet-300/[0.08] text-violet-100/75' : inputMode === 'computer' ? 'border-emerald-300/20 bg-emerald-300/[0.08] text-emerald-100/80' : 'border-white/[0.07] bg-white/[0.045] text-white/40'}`}>
+              {inputMode === 'meta' ? 'META AI' : inputMode === 'computer' ? 'CONTROL' : 'NORMAL'}
             </span>
             <span className="rounded-full border border-white/[0.07] bg-white/[0.045] px-2 py-1 text-[9px] text-white/40">MLX</span>
           </div>
@@ -54,7 +54,7 @@ export function RecordingOverlay() {
                 <span className="absolute inset-0 animate-ping rounded-full bg-red-400/25" />
                 <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
               </span>
-              <span className="text-xs font-medium text-white/72">{inputMode === 'meta' ? '메타 모드로 듣고 있습니다' : '일반 모드로 듣고 있습니다'}</span>
+              <span className="text-xs font-medium text-white/72">{inputMode === 'meta' ? '메타 모드로 듣고 있습니다' : inputMode === 'computer' ? '컴퓨터 제어 명령을 듣고 있습니다' : '일반 모드로 듣고 있습니다'}</span>
               <span className="ml-auto font-mono text-xs tabular-nums text-white/40">{duration}</span>
             </div>
             <div className="mb-2 h-14 w-full">
@@ -70,7 +70,7 @@ export function RecordingOverlay() {
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-400 border-t-transparent" />
               <span className="text-xs text-white/60">
                 {transcriptionStage === 'meta-prompting'
-                  ? 'AI가 프롬프트로 다듬는 중'
+                  ? (inputMode === 'computer' ? '명령을 실행하는 중' : 'AI가 프롬프트로 다듬는 중')
                   : transcriptionStage === 'injecting'
                     ? '포커스 위치에 입력 중'
                     : inputMode === 'meta'
@@ -105,6 +105,10 @@ export function RecordingOverlay() {
             <div>
               <kbd className="rounded-md border border-violet-300/15 bg-violet-300/[0.05] px-2 py-1 font-mono text-[10px] text-violet-100/60">⌃ ⇧ ⌥ Space</kbd>
               <span className="ml-2">메타 프롬프트</span>
+            </div>
+            <div>
+              <kbd className="rounded-md border border-emerald-300/15 bg-emerald-300/[0.05] px-2 py-1 font-mono text-[10px] text-emerald-100/65">⌃ ⌥ Space</kbd>
+              <span className="ml-2">컴퓨터 제어</span>
             </div>
           </div>
         )}

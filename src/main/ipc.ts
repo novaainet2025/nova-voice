@@ -73,14 +73,25 @@ function sanitizeSettings(value: unknown): AppSettings {
   const hasMetaShortcut = typeof raw.metaShortcut === 'string'
   const rawMetaShortcut = hasMetaShortcut ? (raw.metaShortcut as string).trim() : ''
   const defaultMetaShortcut = DEFAULT_SETTINGS.metaShortcut === shortcut ? '' : DEFAULT_SETTINGS.metaShortcut
+  const hasComputerShortcut = typeof raw.computerShortcut === 'string'
+  const rawComputerShortcut = hasComputerShortcut ? (raw.computerShortcut as string).trim() : ''
+  const metaShortcut = hasMetaShortcut
+    ? (rawMetaShortcut === shortcut ? '' : rawMetaShortcut)
+    : defaultMetaShortcut
+  const defaultComputerShortcut = [shortcut, metaShortcut].includes(DEFAULT_SETTINGS.computerShortcut)
+    ? ''
+    : DEFAULT_SETTINGS.computerShortcut
   return {
     shortcut,
     // An empty value deliberately disables the meta hotkey. A value identical to
     // the dictation hotkey would silently shadow it, so it disables too rather
     // than registering an ambiguous accelerator.
-    metaShortcut: hasMetaShortcut
-      ? (rawMetaShortcut === shortcut ? '' : rawMetaShortcut)
-      : defaultMetaShortcut,
+    metaShortcut,
+    // Each hotkey must be distinct: a duplicate would shadow whichever was
+    // registered first, leaving one mode silently unreachable.
+    computerShortcut: hasComputerShortcut
+      ? ([shortcut, metaShortcut].includes(rawComputerShortcut) ? '' : rawComputerShortcut)
+      : defaultComputerShortcut,
     autoInject: typeof raw.autoInject === 'boolean' ? raw.autoInject : DEFAULT_SETTINGS.autoInject,
     submitAfterInject: typeof raw.submitAfterInject === 'boolean'
       ? raw.submitAfterInject
@@ -246,19 +257,23 @@ export function setupIPC(mainWindow: BrowserWindow): void {
   ipcMain.handle('settings:set', (_event, patch: Partial<AppSettings>) => {
     const previousShortcut = settings.shortcut
     const previousMetaShortcut = settings.metaShortcut
+    const previousComputerShortcut = settings.computerShortcut
     const previousInputMode = settings.inputMode
     settings = sanitizeSettings({ ...settings, ...patch })
     const shortcutChanged = settings.shortcut !== previousShortcut
       || settings.metaShortcut !== previousMetaShortcut
+      || settings.computerShortcut !== previousComputerShortcut
     if (shortcutChanged && !reregisterShortcuts({
       shortcut: settings.shortcut,
       metaShortcut: settings.metaShortcut,
+      computerShortcut: settings.computerShortcut,
     })) {
       const rejected = patch.metaShortcut && settings.metaShortcut !== previousMetaShortcut
         ? patch.metaShortcut
         : patch.shortcut
       settings.shortcut = previousShortcut
       settings.metaShortcut = previousMetaShortcut
+      settings.computerShortcut = previousComputerShortcut
       throw new Error(`전역 단축키 ${rejected}를 등록할 수 없습니다.`)
     }
     if (typeof patch.launchAtLogin === 'boolean') applyLaunchAtLogin(settings.launchAtLogin)
@@ -434,7 +449,13 @@ export function setupIPC(mainWindow: BrowserWindow): void {
       // below — a computer-control utterance never reaches routeVoicePrompt or
       // rewriteMetaPrompt. A null result (low confidence, classifier unreachable,
       // parse failure) falls straight through to that existing code unchanged.
-      const computerIntent = await classifyUtterance(whisperResult.text, controller.signal)
+      // Computer control is entered by its own hotkey, so classification only
+      // runs for that mode. Classifying every dictation would put a model call
+      // in front of ordinary typing and risk executing something the user only
+      // meant to write down.
+      const computerIntent = requestSettings.inputMode === 'computer'
+        ? await classifyUtterance(whisperResult.text, controller.signal)
+        : null
       if (controller.signal.aborted || transcriptionController !== controller) {
         logWarn('[STT] PCM result discarded after cancellation', { requestId, stage: 'computer-intent' })
         return null

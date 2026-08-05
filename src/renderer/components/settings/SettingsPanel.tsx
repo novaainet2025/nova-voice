@@ -265,6 +265,18 @@ export function SettingsPanel() {
             </label>
 
             <label className="block">
+              <span className="text-sm text-white/68">컴퓨터 제어 단축키</span>
+              <p className="mt-1 text-xs text-white/32">말한 명령을 이해해 실제로 실행합니다. 비워 두면 사용하지 않습니다.</p>
+              <input
+                value={settings.computerShortcut}
+                onChange={(event) => setSettings({ ...settings, computerShortcut: event.target.value })}
+                onBlur={() => void persistShortcut({ computerShortcut: settings.computerShortcut })}
+                onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+                className="mt-2 h-10 w-full rounded-xl border border-emerald-300/12 bg-black/15 px-3.5 font-mono text-xs text-emerald-100/70 outline-none transition-colors focus:border-emerald-300/35"
+              />
+            </label>
+
+            <label className="block">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <span className="text-sm text-white/68">말이 끝난 뒤 자동 중지</span>

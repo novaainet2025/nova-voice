@@ -5,8 +5,10 @@ import type { VoiceInputMode } from '../shared/types'
 export interface ShortcutBindings {
   /** Plain dictation: the transcript is injected as-is. */
   shortcut: string
-  /** Meta prompt: the same capture is answered by an AI provider. */
+  /** Meta prompt: the same capture is rewritten into a prompt. */
   metaShortcut: string
+  /** Computer control: the utterance is classified and executed. */
+  computerShortcut: string
 }
 
 let registeredShortcuts: string[] = []
@@ -51,10 +53,19 @@ export function registerShortcuts(
   // Ctrl+Shift+Space dictates. Ctrl+Shift+Alt+Space records the same way but
   // routes that one utterance through the meta-prompt AI, so the saved default
   // mode never has to be toggled in the UI first.
-  registerToggle(bindings.shortcut, 'normal', onToggleRecording)
-  if (bindings.metaShortcut && bindings.metaShortcut !== bindings.shortcut) {
-    registerToggle(bindings.metaShortcut, 'meta', onToggleRecording)
+  // Each mode gets its own accelerator so the saved default never has to be
+  // toggled in the UI first. A binding equal to an earlier one is skipped
+  // rather than registered: the duplicate would shadow the first and make one
+  // mode unreachable with no visible cause.
+  const claimed = new Set<string>()
+  const claim = (accelerator: string, mode: VoiceInputMode) => {
+    if (!accelerator || claimed.has(accelerator)) return
+    claimed.add(accelerator)
+    registerToggle(accelerator, mode, onToggleRecording)
   }
+  claim(bindings.shortcut, 'normal')
+  claim(bindings.metaShortcut, 'meta')
+  claim(bindings.computerShortcut, 'computer')
   lastBindings = { ...bindings }
 
   // Cancel shortcut: Ctrl+Escape — 처리 중 작업 취소 (글로벌, 다른 앱 포커스 중에도 동작)
@@ -91,9 +102,8 @@ export function reregisterShortcuts(bindings: ShortcutBindings): boolean {
   const previousBindings = lastBindings
   registerShortcuts(lastMainWindow, bindings, lastOnToggleRecording, lastOnCancel)
   const applied = isShortcutRegistered(bindings.shortcut)
-    && (!bindings.metaShortcut
-      || bindings.metaShortcut === bindings.shortcut
-      || isShortcutRegistered(bindings.metaShortcut))
+    && [bindings.metaShortcut, bindings.computerShortcut].every((accelerator) =>
+      !accelerator || accelerator === bindings.shortcut || isShortcutRegistered(accelerator))
   if (applied) return true
 
   if (previousBindings) {

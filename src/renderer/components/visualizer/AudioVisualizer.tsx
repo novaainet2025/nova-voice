@@ -35,6 +35,11 @@ interface Palette {
   spine: string
 }
 
+/**
+ * One palette per mode, so the colour alone tells the user what this capture
+ * will do. Computer control is the only mode that acts on the machine, so it is
+ * given the warm, alerting end of the range rather than another cool hue.
+ */
 const PALETTES: Record<VoiceInputMode, Palette> = {
   normal: {
     stops: [
@@ -59,6 +64,18 @@ const PALETTES: Record<VoiceInputMode, Palette> = {
     glow: 'rgba(196, 149, 255, 0.7)',
     bloom: 'rgba(168, 120, 255, 0.24)',
     spine: 'rgba(214, 178, 255, 0.18)',
+  },
+  computer: {
+    stops: [
+      [0, 'rgba(253, 224, 71, 0.92)'],
+      [0.28, 'rgba(251, 146, 60, 0.98)'],
+      [0.5, 'rgba(52, 211, 153, 1)'],
+      [0.72, 'rgba(251, 146, 60, 0.98)'],
+      [1, 'rgba(253, 224, 71, 0.92)'],
+    ],
+    glow: 'rgba(52, 211, 153, 0.7)',
+    bloom: 'rgba(52, 211, 153, 0.24)',
+    spine: 'rgba(134, 239, 172, 0.20)',
   },
 }
 

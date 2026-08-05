@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { STT_ENGINE_NAME } from '../../../shared/types'
+import type { VoiceInputMode } from '../../../shared/types'
 import { AudioVisualizer } from '../visualizer/AudioVisualizer'
 import { useAppStore } from '../../stores/appStore'
 
@@ -31,7 +32,7 @@ export function UnifiedPanel() {
   const inputMode = activeInputMode ?? settings?.inputMode ?? 'normal'
   const latestLatency = history[0]?.processingDuration ?? history[0]?.duration
   const statusLabel = transcriptionStage === 'meta-prompting'
-    ? 'AI가 요청을 프롬프트로 다듬는 중입니다'
+    ? (inputMode === 'computer' ? '명령을 이해하는 중입니다' : 'AI가 요청을 프롬프트로 다듬는 중입니다')
     : transcriptionStage === 'injecting'
       ? '포커스 위치에 입력하는 중입니다'
       : isRecording
@@ -42,7 +43,9 @@ export function UnifiedPanel() {
         ? 'Whisper를 준비하고 있습니다'
         : inputMode === 'meta'
           ? '메타 모드 · 말한 요청을 프롬프트로 다듬을 준비가 됐습니다'
-          : '일반 모드 · 바로 받아쓸 준비가 됐습니다'
+          : inputMode === 'computer'
+            ? '컴퓨터 제어 모드 · 말한 대로 실행할 준비가 됐습니다'
+            : '일반 모드 · 바로 받아쓸 준비가 됐습니다'
   const latestResult = history[0]
 
   const toggleRecording = () => {
@@ -57,7 +60,7 @@ export function UnifiedPanel() {
     window.setTimeout(() => setCopied(false), 1200)
   }
 
-  const selectInputMode = async (mode: 'normal' | 'meta') => {
+  const selectInputMode = async (mode: VoiceInputMode) => {
     if (!settings || settings.inputMode === mode || isRecording || isTranscribing) return
     setModeSaveError('')
     setModeChanging(true)
@@ -87,7 +90,7 @@ export function UnifiedPanel() {
           </div>
         </header>
 
-        <div className="mt-5 grid gap-2 rounded-[20px] border border-white/[0.075] bg-black/15 p-1.5 sm:grid-cols-2" role="group" aria-label="받아쓰기 출력 모드">
+        <div className="mt-5 grid gap-2 rounded-[20px] border border-white/[0.075] bg-black/15 p-1.5 sm:grid-cols-3" role="group" aria-label="음성 입력 모드">
           <button
             type="button"
             onClick={() => void selectInputMode('normal')}
@@ -136,15 +139,37 @@ export function UnifiedPanel() {
               </span>
             </span>
           </button>
+          <button
+            type="button"
+            onClick={() => void selectInputMode('computer')}
+            disabled={!settings || isRecording || isTranscribing || modeChanging}
+            aria-pressed={inputMode === 'computer'}
+            className={`relative flex min-h-14 items-center gap-3 overflow-hidden rounded-[15px] px-4 text-left transition-all disabled:cursor-not-allowed disabled:opacity-55 ${
+              inputMode === 'computer'
+                ? 'border border-emerald-300/20 bg-[linear-gradient(110deg,rgba(52,211,153,.15),rgba(251,146,60,.09))] shadow-[0_12px_34px_rgba(16,140,100,.17)]'
+                : 'border border-transparent hover:bg-white/[0.035]'
+            }`}
+          >
+            {inputMode === 'computer' && <span className="pointer-events-none absolute inset-y-0 left-0 w-px bg-gradient-to-b from-transparent via-emerald-300/80 to-transparent" />}
+            <span className={`flex h-8 w-8 items-center justify-center rounded-xl border ${inputMode === 'computer' ? 'border-emerald-300/25 bg-emerald-300/10 text-emerald-100' : 'border-white/[0.07] text-white/28'}`} aria-hidden="true">
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-xs font-medium text-white/78">컴퓨터 제어</span>
+              <span className="mt-0.5 block truncate text-[10px] text-white/30">말한 명령을 실제로 실행</span>
+            </span>
+          </button>
         </div>
         {modeSaveError && <p role="alert" className="mt-2 text-[10px] text-red-200/70">{modeSaveError}</p>}
         {!modeSaveError && (
-          <p role="status" data-input-mode={inputMode} className={`mt-2 text-[10px] ${inputMode === 'meta' ? 'text-violet-200/65' : 'text-white/32'}`}>
+          <p role="status" data-input-mode={inputMode} className={`mt-2 text-[10px] ${inputMode === 'meta' ? 'text-violet-200/65' : inputMode === 'computer' ? 'text-emerald-200/70' : 'text-white/32'}`}>
             {modeChanging
               ? '출력 모드를 적용하는 중입니다…'
               : inputMode === 'meta'
                 ? '메타 모드 적용됨 · 말한 요청을 AI가 알아듣기 좋은 프롬프트로 다듬어 입력합니다.'
-                : '일반 모드 적용됨 · 다음 녹음은 Whisper 원문을 바로 입력합니다.'}
+                : inputMode === 'computer'
+                  ? '컴퓨터 제어 모드 · 말한 명령을 이해해 실제로 실행합니다.'
+                  : '일반 모드 적용됨 · 다음 녹음은 Whisper 원문을 바로 입력합니다.'}
           </p>
         )}
 
@@ -197,6 +222,10 @@ export function UnifiedPanel() {
                     <span className="flex items-center gap-2">
                       <kbd className="rounded-md border border-violet-300/15 bg-violet-300/[0.05] px-2 py-1 font-mono text-violet-100/60">⌃ ⇧ ⌥ Space</kbd>
                       메타 프롬프트
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <kbd className="rounded-md border border-emerald-300/15 bg-emerald-300/[0.05] px-2 py-1 font-mono text-emerald-100/65">⌃ ⌥ Space</kbd>
+                      컴퓨터 제어
                     </span>
                   </div>
                 )}

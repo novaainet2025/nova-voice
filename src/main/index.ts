@@ -364,10 +364,10 @@ app.whenReady().then(async () => {
   if (isE2eVerification) {
     logInfo('[Verification] Global shortcuts disabled for isolated E2E run')
   } else {
-    const { shortcut, metaShortcut } = getSettings()
+    const { shortcut, metaShortcut, computerShortcut } = getSettings()
     registerShortcuts(
       mainWindow,
-      { shortcut, metaShortcut },
+      { shortcut, metaShortcut, computerShortcut },
       (mode) => void toggleRecording(mode),
       () => {
         if (getRecordingState()) cancelRecording()

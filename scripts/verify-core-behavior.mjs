@@ -271,6 +271,10 @@ const rendererRuntime = [
 ].join('\n')
 assert.equal(rendererRuntime.includes('QWEN3:4B'), false, 'stale hard-coded Meta provider badge remains')
 assert.match(rendererRuntime, /메타 모드 적용됨 · 말한 요청을 AI가 알아듣기 좋은 프롬프트로 다듬어 입력합니다/)
+assert.match(rendererRuntime, /컴퓨터 제어 모드/)
+// Classification only runs for the mode entered by its own hotkey; doing it on
+// every dictation would put a model call in front of ordinary typing.
+assert.match(ipcRuntime, /requestSettings\.inputMode === 'computer'/)
 assert.match(rendererRuntime, /PROCESS LATENCY/)
 assert.match(localMetaRuntime, /127\.0\.0\.1:11435/)
 assert.match(localMetaRuntime, /shutdownLocalAiMetaPrompt/)
@@ -309,15 +313,20 @@ assert.match(injectorRuntime, /injectionGeneration/)
 assert.match(injectorRuntime, /generation !== injectionGeneration/)
 
 const shortcutRuntime = fs.readFileSync(path.join(projectDir, 'src', 'main', 'shortcuts.ts'), 'utf8')
-assert.match(shortcutRuntime, /registerToggle\(bindings\.shortcut, 'normal'/)
-assert.match(shortcutRuntime, /registerToggle\(bindings\.metaShortcut, 'meta'/)
-assert.match(shortcutRuntime, /bindings\.metaShortcut !== bindings\.shortcut/)
+assert.match(shortcutRuntime, /claim\(bindings\.shortcut, 'normal'\)/)
+assert.match(shortcutRuntime, /claim\(bindings\.metaShortcut, 'meta'\)/)
+assert.match(shortcutRuntime, /claim\(bindings\.computerShortcut, 'computer'\)/)
+// A duplicate accelerator would shadow the first registration and leave one
+// mode silently unreachable, so duplicates are skipped rather than registered.
+assert.match(shortcutRuntime, /claimed\.has\(accelerator\)/)
 // A packaged build has no stdout, so hotkey registration must reach the log file.
 assert.match(shortcutRuntime, /logInfo\('\[Shortcuts\] Global hotkey registered'/)
 assert.equal(shortcutRuntime.includes('console.'), false, 'shortcut diagnostics still go to stdout only')
 
 const sharedTypes = fs.readFileSync(path.join(projectDir, 'src', 'shared', 'types.ts'), 'utf8')
 assert.match(sharedTypes, /metaShortcut: 'Ctrl\+Shift\+Alt\+Space'/)
+assert.match(sharedTypes, /computerShortcut: 'Ctrl\+Alt\+Space'/)
+assert.match(sharedTypes, /VoiceInputMode = 'normal' \| 'meta' \| 'computer'/)
 assert.match(sharedTypes, /shortcut: 'Ctrl\+Shift\+Space'/)
 
 const whisperRuntime = fs.readFileSync(path.join(projectDir, 'src', 'main', 'whisper.ts'), 'utf8')

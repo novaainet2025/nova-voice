@@ -3,7 +3,13 @@ export const STT_ENGINE_NAME = 'Whisper large-v3-turbo · MLX'
 /** Number of log-spaced spectrum bands streamed from the recorder to the visualizer. */
 export const SPECTRUM_BANDS = 48
 
-export type VoiceInputMode = 'normal' | 'meta'
+/**
+ * What a capture does with what it hears.
+ *
+ * `computer` is hotkey-only: it is never a saved default, because a mode that
+ * silently executes actions should be entered deliberately each time.
+ */
+export type VoiceInputMode = 'normal' | 'meta' | 'computer'
 export type TranscriptionStage = 'idle' | 'transcribing' | 'meta-prompting' | 'injecting'
 export type MetaPromptOutcome = 'completed' | 'local-ai' | 'local' | 'fallback'
 
@@ -40,6 +46,8 @@ export interface AppSettings {
   shortcut: string
   /** Global hotkey that records straight into meta-prompt mode for one utterance. */
   metaShortcut: string
+  /** Global hotkey that records straight into computer-control mode. */
+  computerShortcut: string
   autoInject: boolean
   submitAfterInject: boolean
   showOverlay: boolean
@@ -127,6 +135,7 @@ export const SILENCE_TIMEOUT_OPTIONS = [700, 900, 1200, 1600, 2000] as const
 export const DEFAULT_SETTINGS: AppSettings = {
   shortcut: 'Ctrl+Shift+Space',
   metaShortcut: 'Ctrl+Shift+Alt+Space',
+  computerShortcut: 'Ctrl+Alt+Space',
   autoInject: true,
   submitAfterInject: true,
   showOverlay: true,
