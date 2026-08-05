@@ -4,9 +4,9 @@
  * Deliberately free of Electron, fs and network access so it can be exercised
  * directly against a captured `/health` + `/api/ai-providers` pair.
  */
-import { asRecord, asStringArray } from './nco-core-client'
-import type { JsonRecord } from './nco-core-client'
-import type { NcoProviderRanking } from '../shared/types'
+import { asRecord, asStringArray } from './nco-core-client.ts'
+import type { JsonRecord } from './nco-core-client.ts'
+import type { NcoProviderRanking } from '../shared/types.ts'
 
 export const LOCAL_FAILURE_COOLDOWN_MS = 90_000
 /** Providers with no measurement yet still get tried, otherwise the first one

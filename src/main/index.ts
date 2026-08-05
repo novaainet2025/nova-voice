@@ -9,8 +9,8 @@ import {
   releaseFrontAppLatch,
   startFrontAppPoller,
   stopFrontAppPoller,
-} from './appState'
-import { closeDB, initDB } from './db'
+} from './appState.ts'
+import { closeDB, initDB } from './db.ts'
 import {
   cancelCurrentTranscription,
   getLastAudioChunkAt,
@@ -19,15 +19,15 @@ import {
   setActiveInputMode,
   setRecordingState,
   setupIPC,
-} from './ipc'
-import { shutdownLocalAiMetaPrompt } from './local-ai-meta-prompt'
-import { getMainLogPath, logError, logInfo, logWarn } from './logger'
-import { registerShortcuts, unregisterAll } from './shortcuts'
-import { startSttServer, stopSttServer } from './stt-server'
-import { createTray, destroyTray, hideMainWindow, showMainWindow, updateTrayIcon, updateTrayMenu } from './tray'
-import { prepareIntentClassifier } from './intent-classifier'
-import { abortLiveCapture, beginLiveCapture, initWhisper, warmupWhisper } from './whisper'
-import type { VoiceInputMode } from '../shared/types'
+} from './ipc.ts'
+import { shutdownLocalAiMetaPrompt } from './local-ai-meta-prompt.ts'
+import { getMainLogPath, logError, logInfo, logWarn } from './logger.ts'
+import { registerShortcuts, unregisterAll } from './shortcuts.ts'
+import { startSttServer, stopSttServer } from './stt-server.ts'
+import { createTray, destroyTray, hideMainWindow, showMainWindow, updateTrayIcon, updateTrayMenu } from './tray.ts'
+import { prepareIntentClassifier } from './intent-classifier.ts'
+import { abortLiveCapture, beginLiveCapture, initWhisper, warmupWhisper } from './whisper.ts'
+import type { VoiceInputMode } from '../shared/types.ts'
 
 app.setName('nova-voice')
 app.setPath('userData', join(os.homedir(), 'Library', 'Application Support', 'nova-voice'))

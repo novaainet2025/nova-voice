@@ -183,6 +183,68 @@ async function resolveLocalMetaTarget(): Promise<LocalMetaTarget | null> {
   return null
 }
 
+/**
+ * Runs a prompt through the local model and returns the raw reply.
+ *
+ * Deliberately skips the meta-prompt validators: those require the output to
+ * read as an instruction for another AI, which is the opposite of what a spoken
+ * answer is. Reusing them here rejected every answer ("returned prose that does
+ * not read as a request").
+ */
+export async function askLocalModel(
+  prompt: string,
+  signal?: AbortSignal,
+  maxTokens = 220,
+  preferModel?: string,
+): Promise<{ text: string; model: string } | null> {
+  const target = preferModel
+    ? await resolveSpecificModel(preferModel) ?? await resolveLocalMetaTarget()
+    : await resolveLocalMetaTarget()
+  if (!target) return null
+  const response = await fetch(`${target.baseUrl}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: target.model,
+      messages: [{ role: 'user', content: prompt }],
+      think: false,
+      stream: false,
+      keep_alive: '30m',
+      options: { temperature: 0.3, num_predict: maxTokens },
+    }),
+    signal,
+  })
+  if (!response.ok) return null
+  const body = await response.json().catch(() => ({})) as { message?: { content?: unknown } }
+  const text = typeof body.message?.content === 'string' ? body.message.content.trim() : ''
+  return text ? { text, model: target.model } : null
+}
+
+/**
+ * Locates one named model, whichever server holds it.
+ *
+ * Used when a caller needs a specific model rather than the smallest available
+ * one — spoken answers need a model that follows `think: false`, and qwen3:4b
+ * does not: it narrates its reasoning ("Okay, the user is asking…") regardless.
+ */
+async function resolveSpecificModel(model: string): Promise<LocalMetaTarget | null> {
+  // Residency on the dedicated server beats residency on the shared one, and
+  // both beat a cold load. The shared server is NCO's: the same 14B answered in
+  // 8.2s on the dedicated instance and took 30-48s behind NCO's queue.
+  const dedicatedResident = await listResidentModels(LOCAL_OLLAMA_BASE)
+  if (dedicatedResident.has(model)) return { baseUrl: LOCAL_OLLAMA_BASE, model, resident: true }
+
+  const dedicatedInstalled = await listModels(LOCAL_OLLAMA_BASE)
+  if (dedicatedInstalled?.has(model)) return { baseUrl: LOCAL_OLLAMA_BASE, model, resident: false }
+
+  const sharedResident = await listResidentModels(SHARED_OLLAMA_BASE)
+  if (sharedResident.has(model)) return { baseUrl: SHARED_OLLAMA_BASE, model, resident: true }
+
+  const sharedInstalled = await listModels(SHARED_OLLAMA_BASE)
+  if (sharedInstalled?.has(model)) return { baseUrl: SHARED_OLLAMA_BASE, model, resident: false }
+  return null
+}
+
 /** Forces the next request to re-read which server holds which model. */
 export function invalidateLocalMetaTarget(): void {
   resolvedTarget = null

@@ -1,24 +1,24 @@
-import { isAllowedMetaCommand } from './command-catalog'
-import { isLocalAiMetaPromptAvailable, rewriteWithLocalAiMetaPrompt } from './local-ai-meta-prompt'
-import type { MetaPromptContext } from './local-ai-meta-prompt'
+import { isAllowedMetaCommand } from './command-catalog.ts'
+import { isLocalAiMetaPromptAvailable, rewriteWithLocalAiMetaPrompt } from './local-ai-meta-prompt.ts'
+import type { MetaPromptContext } from './local-ai-meta-prompt.ts'
 import {
   ncoRequestJson as requestJson,
   redactSecrets,
   resolveNcoBase,
   safeErrorMessage,
-} from './nco-core-client'
-import type { JsonRecord } from './nco-core-client'
+} from './nco-core-client.ts'
+import type { JsonRecord } from './nco-core-client.ts'
 import {
   getLightModel,
   invalidateProviderSnapshot,
   rankProviders,
   recordProviderOutcome,
   resolveAutoProvider,
-} from './nco-provider-selector'
-import { logInfo, logWarn } from './logger'
-import type { NcoProviderRanking } from '../shared/types'
+} from './nco-provider-selector.ts'
+import { logInfo, logWarn } from './logger.ts'
+import type { NcoProviderRanking } from '../shared/types.ts'
 
-export type { MetaPromptContext } from './local-ai-meta-prompt'
+export type { MetaPromptContext } from './local-ai-meta-prompt.ts'
 
 const TASK_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
 const TERMINAL_FAILURES = new Set([

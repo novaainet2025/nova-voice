@@ -1,7 +1,7 @@
 import { BrowserWindow } from 'electron'
 import { execFile as execFileCallback } from 'child_process'
 import { promisify } from 'util'
-import { shouldRememberFrontApp } from './front-app-policy'
+import { shouldRememberFrontApp } from './front-app-policy.ts'
 
 const execFile = promisify(execFileCallback)
 

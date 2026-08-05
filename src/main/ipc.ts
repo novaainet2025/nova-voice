@@ -2,25 +2,25 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { getHistory, searchHistory, deleteTranscription, saveTranscription } from './db'
-import { injectText } from './injector'
-import { isCliTarget, routeVoicePrompt } from './cli-command-router'
-import { findLearnedCommand, getAppUsageHint, normalizePhrase, observeDictation } from './pattern-learning'
-import { getMetaCommandCandidates, getMetaToolCandidates } from './command-catalog'
-import { getNcoMetaPromptStatus, reconnectNcoProvider, rewriteMetaPrompt } from './nco-meta-prompt'
-import { logError, logInfo, logWarn } from './logger'
-import { normalizeTranscript } from './transcript-normalizer'
+import { getHistory, searchHistory, deleteTranscription, saveTranscription } from './db.ts'
+import { injectText } from './injector.ts'
+import { isCliTarget, routeVoicePrompt } from './cli-command-router.ts'
+import { findLearnedCommand, getAppUsageHint, normalizePhrase, observeDictation } from './pattern-learning.ts'
+import { getMetaCommandCandidates, getMetaToolCandidates } from './command-catalog.ts'
+import { getNcoMetaPromptStatus, reconnectNcoProvider, rewriteMetaPrompt } from './nco-meta-prompt.ts'
+import { logError, logInfo, logWarn } from './logger.ts'
+import { normalizeTranscript } from './transcript-normalizer.ts'
 import {
   getOverlayWindow,
   getPreviousAppName,
   getPreviousBundleId,
   hideOverlay,
   releaseFrontAppLatch,
-} from './appState'
-import { reregisterShortcuts } from './shortcuts'
-import { isSttServerRunning } from './stt-server'
-import { abortLiveCapture, finishLiveCapture, pushLiveAudio, transcribePcm } from './whisper'
-import { classifyUtterance } from './intent-classifier'
+} from './appState.ts'
+import { reregisterShortcuts } from './shortcuts.ts'
+import { isSttServerRunning } from './stt-server.ts'
+import { abortLiveCapture, finishLiveCapture, pushLiveAudio, transcribePcm } from './whisper.ts'
+import { classifyUtterance } from './intent-classifier.ts'
 // computer-os.ts (T2, docs/plans/computer-use-plan.md) does not exist yet — this
 // wiring assumes it will export `executeComputerIntent(intent, ctx) => Promise<ComputerExecutionResult>`
 // where ComputerExecutionResult is `{ status: 'ok' | 'refused' | 'error'; message: string }`.
@@ -29,11 +29,11 @@ import { classifyUtterance } from './intent-classifier'
 // it — not this file — declines to run the action and explains why in `message`.
 // There is no confirmation UI yet, so 'refused' is the only safe outcome for those
 // actions until one exists. `message` is assumed to already be user-facing Korean.
-import { executeComputerIntent } from './computer-os'
-import type { ComputerExecutionResult } from './computer-os'
-import { DEFAULT_SETTINGS, SILENCE_TIMEOUT_OPTIONS, STT_ENGINE_NAME } from '../shared/types'
-import type { AppSettings, SttStatus, TranscriptionResult, VoiceInputMode } from '../shared/types'
-import type { ComputerPlan } from '../shared/computer-intent'
+import { executeComputerIntent } from './computer-os.ts'
+import type { ComputerExecutionResult } from './computer-os.ts'
+import { DEFAULT_SETTINGS, SILENCE_TIMEOUT_OPTIONS, STT_ENGINE_NAME } from '../shared/types.ts'
+import type { AppSettings, SttStatus, TranscriptionResult, VoiceInputMode } from '../shared/types.ts'
+import type { ComputerPlan } from '../shared/computer-intent.ts'
 
 let settings: AppSettings = { ...DEFAULT_SETTINGS }
 let isRecording = false

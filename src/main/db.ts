@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 import path from 'path'
-import type { TranscriptionResult } from '../shared/types'
+import type { TranscriptionResult } from '../shared/types.ts'
 
 let db: Database.Database
 

@@ -1,6 +1,6 @@
 import { globalShortcut, BrowserWindow } from 'electron'
-import { logError, logInfo, logWarn } from './logger'
-import type { VoiceInputMode } from '../shared/types'
+import { logError, logInfo, logWarn } from './logger.ts'
+import type { VoiceInputMode } from '../shared/types.ts'
 
 export interface ShortcutBindings {
   /** Plain dictation: the transcript is injected as-is. */

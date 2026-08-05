@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import { SPECTRUM_BANDS } from '../../shared/types'
-import type { AppSettings, MetaPromptStatus, SttStatus, TranscriptionResult, TranscriptionStage, VoiceInputMode } from '../../shared/types'
+import { SPECTRUM_BANDS } from '../../shared/types.ts'
+import type { AppSettings, MetaPromptStatus, SttStatus, TranscriptionResult, TranscriptionStage, VoiceInputMode } from '../../shared/types.ts'
 
 type View = 'home' | 'settings' | 'history'
 

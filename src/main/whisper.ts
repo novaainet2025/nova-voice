@@ -1,7 +1,7 @@
 import WebSocket from 'ws'
-import { logInfo, logWarn } from './logger'
-import { ensureSttServerReady, restartSttServer } from './stt-server'
-import { normalizeTranscript } from './transcript-normalizer'
+import { logInfo, logWarn } from './logger.ts'
+import { ensureSttServerReady, restartSttServer } from './stt-server.ts'
+import { normalizeTranscript } from './transcript-normalizer.ts'
 
 export interface WhisperOptions {
   signal?: AbortSignal

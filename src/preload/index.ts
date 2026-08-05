@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AppSettings, MetaPromptStatus, SttStatus, TranscriptionResult, TranscriptionStage, VoiceInputMode } from '../shared/types'
+import type { AppSettings, MetaPromptStatus, SttStatus, TranscriptionResult, TranscriptionStage, VoiceInputMode } from '../shared/types.ts'
 
 const api = {
   startRecording: (mode?: VoiceInputMode) => ipcRenderer.invoke('recording:start', mode),

@@ -14,12 +14,12 @@
 import { app } from 'electron'
 import fs from 'fs'
 import path from 'path'
-import { asRecord, ncoRequestJson, safeErrorMessage } from './nco-core-client'
-import type { JsonRecord } from './nco-core-client'
-import { buildProviderFacts, scoreProviders } from './nco-provider-ranking'
-import type { ProviderFacts, ProviderStat } from './nco-provider-ranking'
-import { logInfo, logWarn } from './logger'
-import type { NcoProviderRanking } from '../shared/types'
+import { asRecord, ncoRequestJson, safeErrorMessage } from './nco-core-client.ts'
+import type { JsonRecord } from './nco-core-client.ts'
+import { buildProviderFacts, scoreProviders } from './nco-provider-ranking.ts'
+import type { ProviderFacts, ProviderStat } from './nco-provider-ranking.ts'
+import { logInfo, logWarn } from './logger.ts'
+import type { NcoProviderRanking } from '../shared/types.ts'
 
 const SNAPSHOT_TTL_MS = 5_000
 const SNAPSHOT_TIMEOUT_MS = 2_500

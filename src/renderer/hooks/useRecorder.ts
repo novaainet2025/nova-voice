@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { SPECTRUM_BANDS } from '../../shared/types'
-import type { AppSettings, MetaPromptStatus, SttStatus, TranscriptionResult, TranscriptionStage, VoiceInputMode } from '../../shared/types'
-import { useAppStore } from '../stores/appStore'
+import { SPECTRUM_BANDS } from '../../shared/types.ts'
+import type { AppSettings, MetaPromptStatus, SttStatus, TranscriptionResult, TranscriptionStage, VoiceInputMode } from '../../shared/types.ts'
+import { useAppStore } from '../stores/appStore.ts'
 
 declare global {
   interface Window {

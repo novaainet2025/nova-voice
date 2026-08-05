@@ -17,9 +17,9 @@
  * survives restarts without a second source of truth, and deleting a history
  * entry also removes what was learned from it.
  */
-import { getPatternStats, recordPatternObservation } from './db'
-import type { PatternObservation } from './db'
-import { logInfo } from './logger'
+import { getPatternStats, recordPatternObservation } from './db.ts'
+import type { PatternObservation } from './db.ts'
+import { logInfo } from './logger.ts'
 
 /** How often a phrase must lead to the same command before it counts as one. */
 export const ALIAS_CONFIDENCE_THRESHOLD = 3
