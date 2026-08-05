@@ -31,7 +31,7 @@ export function UnifiedPanel() {
   const inputMode = activeInputMode ?? settings?.inputMode ?? 'normal'
   const latestLatency = history[0]?.processingDuration ?? history[0]?.duration
   const statusLabel = transcriptionStage === 'meta-prompting'
-    ? 'AI가 요청을 분석해 최종 답변을 작성하는 중입니다'
+    ? 'AI가 요청을 프롬프트로 다듬는 중입니다'
     : transcriptionStage === 'injecting'
       ? '포커스 위치에 입력하는 중입니다'
       : isRecording
@@ -41,7 +41,7 @@ export function UnifiedPanel() {
       : sttStatus?.ready === false
         ? 'Whisper를 준비하고 있습니다'
         : inputMode === 'meta'
-          ? '메타 모드 · AI가 직접 답변할 준비가 됐습니다'
+          ? '메타 모드 · 말한 요청을 프롬프트로 다듬을 준비가 됐습니다'
           : '일반 모드 · 바로 받아쓸 준비가 됐습니다'
   const latestResult = history[0]
 
@@ -143,7 +143,7 @@ export function UnifiedPanel() {
             {modeChanging
               ? '출력 모드를 적용하는 중입니다…'
               : inputMode === 'meta'
-                ? '메타 모드 적용됨 · 요청을 내부에서 재구성한 뒤 AI 최종 답변만 출력합니다.'
+                ? '메타 모드 적용됨 · 말한 요청을 AI가 알아듣기 좋은 프롬프트로 다듬어 입력합니다.'
                 : '일반 모드 적용됨 · 다음 녹음은 Whisper 원문을 바로 입력합니다.'}
           </p>
         )}

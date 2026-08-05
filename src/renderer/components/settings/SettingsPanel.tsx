@@ -145,7 +145,7 @@ export function SettingsPanel() {
             <div>
               <p className="text-[10px] font-mono tracking-[0.14em] text-violet-200/35">META PROMPT AI</p>
               <h3 className="mt-2 text-sm font-medium text-white/78">NCO 연결</h3>
-              <p className="mt-1.5 text-xs leading-5 text-white/35">NCO Core 또는 전용 로컬 AI가 요청을 내부 재구성한 뒤 사용자가 바로 읽을 최종 답변을 작성합니다.</p>
+              <p className="mt-1.5 text-xs leading-5 text-white/35">NCO Core 또는 전용 로컬 AI가 말한 요청을 다른 AI가 알아듣기 좋은 프롬프트로 다듬어 커서 위치에 입력합니다.</p>
             </div>
             <span className={`mt-0.5 rounded-full border px-2.5 py-1 text-[9px] ${metaStatus?.ncoConnected ? 'border-emerald-300/15 bg-emerald-300/[0.055] text-emerald-200' : 'border-amber-300/15 bg-amber-300/[0.055] text-amber-200'}`}>
               {metaStatus?.ncoConnected ? 'NCO 연결됨' : 'NCO 오프라인'}

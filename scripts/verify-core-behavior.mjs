@@ -152,6 +152,15 @@ assert.equal(metaRuntime.includes("provider: 'Local Prompt Compiler'"), false, '
 assert.match(metaRuntime, /META_PROMPT_AI_UNAVAILABLE/)
 assert.match(metaRuntime, /TOTAL_TIMEOUT_MS = 120_000/)
 assert.match(metaRuntime, /Promise\.any\(candidates\)/)
+// Meta mode enriches the spoken request into a prompt for another AI. Output
+// that reads as a finished answer is the failure this mode exists to avoid.
+assert.match(metaRuntime, /answered the request instead of turning it into a prompt/)
+assert.match(metaRuntime, /does not read as a request/)
+assert.match(metaRuntime, /adds nothing to the transcript/)
+assert.match(metaRuntime, /const REQUEST_ENDING =/)
+assert.equal(metaRuntime.includes('downstream instruction instead of the final answer'), false, 'meta mode still rejects prompt-shaped output')
+assert.equal(metaRuntime.includes('최종 답변만 출력한다'), false, 'meta instruction still asks for an answer')
+assert.match(metaRuntime, /요청을 수행하지 말고, 요청을 수행할 AI가 받을 프롬프트를 작성한다/)
 // 'auto' no longer means a hard-coded codex submit. It resolves through the
 // provider selector and walks a ranked fallback list within the same request.
 assert.equal(
@@ -195,11 +204,13 @@ const localMetaRuntime = fs.readFileSync(path.join(projectDir, 'src', 'main', 'l
 assert.equal(localMetaRuntime.includes('intentGuidance'), false, 'regex-based prompt template routing is still present')
 assert.equal(localMetaRuntime.includes('버그 수정 요청:'), false, 'canned local AI bug workflow is still forced')
 assert.match(localMetaRuntime, /warmupLocalAiMetaPrompt/)
-assert.match(localMetaRuntime, /returned a fixed prompt template instead of an answer/)
 assert.match(localMetaRuntime, /qwen3:14b/)
 assert.match(localMetaRuntime, /OLLAMA_CHAT_URL/)
 assert.match(localMetaRuntime, /forceRevision/)
-assert.match(localMetaRuntime, /final answer/)
+assert.match(localMetaRuntime, /const REQUEST_ENDING =/)
+assert.match(localMetaRuntime, /answered the request instead of turning it into a prompt/)
+assert.equal(localMetaRuntime.includes('downstream instruction instead of the final answer'), false, 'local meta still rejects prompt-shaped output')
+assert.match(localMetaRuntime, /메타 프롬프트 작성 엔진/)
 assert.match(ipcRuntime, /settings:changed/)
 assert.match(ipcRuntime, /getMetaCommandCandidates\(routedPrompt\.text\)/)
 assert.match(ipcRuntime, /getMetaToolCandidates\(routedPrompt\.text\)/)
@@ -237,7 +248,7 @@ const rendererRuntime = [
   fs.readFileSync(path.join(projectDir, 'src', 'renderer', 'components', 'history', 'HistoryPanel.tsx'), 'utf8'),
 ].join('\n')
 assert.equal(rendererRuntime.includes('QWEN3:4B'), false, 'stale hard-coded Meta provider badge remains')
-assert.match(rendererRuntime, /메타 모드 적용됨/)
+assert.match(rendererRuntime, /메타 모드 적용됨 · 말한 요청을 AI가 알아듣기 좋은 프롬프트로 다듬어 입력합니다/)
 assert.match(rendererRuntime, /PROCESS LATENCY/)
 assert.match(localMetaRuntime, /127\.0\.0\.1:11435/)
 assert.match(localMetaRuntime, /shutdownLocalAiMetaPrompt/)
@@ -250,6 +261,10 @@ assert.match(mainRuntime, /if \(!getRecordingState\(\)\) \{\s*\n\s*await startRe
 assert.match(mainRuntime, /await rememberFrontApp\(\{ force: true \}\)/)
 assert.match(mainRuntime, /latchFrontApp\(\)/)
 assert.match(mainRuntime, /beginLiveCapture\(\)/)
+// A hidden window stops requestAnimationFrame outright (measured 120Hz -> 0Hz)
+// and throttles timers to 1Hz, which freezes the capture loop that decides
+// when speech ended. Closing the window must not break dictation.
+assert.equal((mainRuntime.match(/backgroundThrottling: false/g) || []).length, 2, 'both windows must opt out of background throttling')
 
 const shortcutRuntime = fs.readFileSync(path.join(projectDir, 'src', 'main', 'shortcuts.ts'), 'utf8')
 assert.match(shortcutRuntime, /registerToggle\(bindings\.shortcut, 'normal'/)

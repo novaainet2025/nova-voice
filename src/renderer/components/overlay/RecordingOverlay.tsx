@@ -70,11 +70,11 @@ export function RecordingOverlay() {
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-400 border-t-transparent" />
               <span className="text-xs text-white/60">
                 {transcriptionStage === 'meta-prompting'
-                  ? 'AI 최종 답변 생성 중'
+                  ? 'AI가 프롬프트로 다듬는 중'
                   : transcriptionStage === 'injecting'
                     ? '포커스 위치에 입력 중'
                     : inputMode === 'meta'
-                      ? 'Whisper 인식 후 AI가 직접 답변'
+                      ? 'Whisper 인식 후 프롬프트로 다듬기'
                       : 'Whisper 음성 인식 중'}
               </span>
             </div>

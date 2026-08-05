@@ -55,6 +55,19 @@ let ncoRetryAfter = 0
 let lastNcoFailure: string | undefined
 let lastNcoProviderKey = 'auto'
 
+/**
+ * A meta-mode result is an instruction for whatever AI receives it, so it has to
+ * read as a request. Prose that trails off in a declarative sentence is an
+ * answer, which is what this mode replaced.
+ */
+const REQUEST_ENDING = /(?:[가-힣]{1,8}\s*(?:줘요?|주세요|주십시오|주시기\s*바랍니다|줄래요?)|하라|해라|하십시오|바랍니다|바래)[.!?]?["'’”)\]]?\s*$/
+
+/** Validation failures are useless in a log without a glimpse of what came back. */
+function rejectOutput(reason: string, output: string): never {
+  const excerpt = output.replace(/\s+/g, ' ').trim().slice(0, 120)
+  throw new Error(`${reason} — got: ${excerpt}`)
+}
+
 function pollDelayMs(elapsedMs: number): number {
   if (elapsedMs < FAST_POLL_WINDOW_MS) return FAST_POLL_INTERVAL_MS
   if (elapsedMs < MEDIUM_POLL_WINDOW_MS) return MEDIUM_POLL_INTERVAL_MS
@@ -152,55 +165,48 @@ function metaPromptInstruction(input: string, context: MetaPromptContext): strin
     : []
   return [
     '[컨텍스트]',
-    'NOVA VOICE가 한국어 음성 받아쓰기로 받은 요청에 메타 프롬프팅을 내부 적용한 뒤 실제 최종 답변을 생성하는 중이다.',
-    '아래 <user_input>은 사용자의 요청이다. 내부적으로 목적·맥락·범위·제약을 가장 정확한 실행 프롬프트로 정리하되, 그 중간 프롬프트는 출력하지 않는다.',
-    '확인된 NOVA VOICE 제품 맥락: macOS 메뉴바·백그라운드 Electron 앱, MLX Whisper large-v3-turbo·16 kHz PCM STT, 일반 받아쓰기와 메타 AI 최종 답변 모드, 포커스 앱 자동 입력, 허용된 CLI slash command 라우팅을 지원한다. 메타 AI는 NCO Core의 선택 provider와 로컬 qwen3:14b fallback을 사용한다. TTS와 내장 AI 터미널은 STT 집중을 위해 의도적으로 제거된 확정 제약이며 사용자가 명시하지 않으면 복원·재추가를 제안하지 않는다.',
-    'NOVA VOICE 자체 리뷰 요청이면 이 확인된 맥락과 프로젝트의 읽기 전용 확인 결과를 사용해 장점, 문제 또는 위험, 개선 우선순위를 모두 구체적으로 포함하고 미검증 항목을 구분한다. 셋 중 하나도 생략하지 않는다.',
-    ...(includeTarget ? [`지시어 해석용 대상 앱: ${redactSecrets(context.targetAppName?.trim() || '알 수 없음').slice(0, 120)}`] : []),
+    'NOVA VOICE가 한국어 음성 받아쓰기로 받은 거친 구어체 요청을, 다른 AI가 정확히 알아듣고 수행할 수 있는 프롬프트로 다듬는 중이다.',
+    '아래 <user_input>은 사용자가 말로 한 요청이다. 너의 결과물은 사용자의 커서 위치에 그대로 붙여넣어져 그 자리의 AI에게 전달된다.',
+    '확인된 NOVA VOICE 제품 맥락: macOS 메뉴바·백그라운드 Electron 앱, MLX Whisper large-v3-turbo·16 kHz PCM STT, 일반 받아쓰기와 메타 프롬프트 모드, 포커스 앱 자동 입력, 허용된 CLI slash command 라우팅을 지원한다.',
+    ...(includeTarget ? [`프롬프트를 받을 대상 앱: ${redactSecrets(context.targetAppName?.trim() || '알 수 없음').slice(0, 120)}`] : []),
     ...(includeCli ? ['CLI/터미널 맥락: 예'] : []),
     ...(context.cliTarget === false ? ['CLI/터미널 맥락: 아니요. slash command를 출력하지 않는다.'] : []),
     ...(commandCandidates.length
       ? [
           '현재 요청에 의미상 대응할 수 있는 허용된 CLI 명령 후보:',
           ...commandCandidates.map((candidate) => `- ${candidate.usage} — ${candidate.description} (${candidate.reason})`),
-          '의도와 필수 인자를 모두 확정할 수 있을 때만 후보 중 하나를 정확한 /명령어 한 줄로 출력한다. 애매하면 요청에 직접 답하고 후보 밖 명령은 만들지 않는다.',
+          '의도와 필수 인자를 모두 확정할 수 있을 때만 후보 중 하나를 정확한 /명령어 한 줄로 출력한다. 애매하면 일반 프롬프트로 다듬고 후보 밖 명령은 만들지 않는다.',
         ]
       : []),
     ...(toolCandidates.length
       ? [
-          '현재 요청에 의미상 대응하는 NOVA-AX MCP 도구:',
+          '요청과 관련될 수 있는 NOVA-AX MCP 도구:',
           ...toolCandidates.map((candidate) => `- ${candidate.name} — ${candidate.description} (${candidate.reason})`),
-          'MCP 도구는 slash command가 아니다. 실제 도구를 사용할 수 있으면 읽기 전용으로 확인하고 결과에 답한다. 사용할 수 없으면 실행했다고 주장하지 않는다.',
+          '도구를 직접 실행하지 않는다. 프롬프트 안에서 참고할 수단으로만 언급할 수 있다.',
         ]
       : []),
     ...(recentContext.length
       ? ['직전 사용자 맥락:', ...recentContext.map((value, index) => `${index + 1}. ${value}`)]
       : []),
     '',
-    '[답변 목적]',
-    '내부적으로 재구성한 최적 프롬프트를 지금 직접 수행하고, 사용자에게 보여줄 최종 답변만 반환한다.',
-    '사용자의 원래 의도, 대상, 범위와 명시된 제약을 보존한다. 단순 질문이면 바로 답하고, 리뷰·진단·분석 요청이면 확인 가능한 근거를 조사해 판단과 권장 조치를 제시한다.',
-    '비교·토론·분석 요청은 향후 과정을 안내하지 말고, 실제 관점 비교·판단·결론을 지금 제시한다.',
-    '프로젝트 파일이나 현재 상태 확인이 필요하면 읽기 전용 도구만 사용할 수 있다. 실제 확인한 내용과 추론을 구분한다.',
+    '[할 일]',
+    '요청을 수행하지 말고, 요청을 수행할 AI가 받을 프롬프트를 작성한다.',
+    '말로 하면서 생략된 목적·대상·범위·판단 기준을 원문에서 추론 가능한 범위 안에서 명시적으로 채워 넣어 요청을 풍부하게 만든다.',
+    '모호한 지시어("이거", "저기", "적당히")는 원문 맥락으로 특정할 수 있으면 특정하고, 특정할 수 없으면 프롬프트 안에서 무엇을 확인해야 하는지로 바꾼다.',
+    '요청이 이미 구체적이면 과하게 부풀리지 말고 필요한 만큼만 정돈한다.',
     '',
     '[제약]',
-    '- 다른 AI에게 전달할 프롬프트나 작업 가이드를 출력하지 않고 요청에 직접 답한다.',
-    '- 허용된 CLI 명령 후보가 있고 의도와 필수 인자가 명확히 맞으면 해당 `/명령어 인자` 한 줄만 출력한다.',
-    '- 후보가 없거나 애매하면 slash command를 추측하지 않고 사용자의 요청에 직접 답한다.',
-    '- NOVA-AX MCP 도구 후보는 사용할 수 있을 때만 읽기 전용으로 실행하고 실제 결과를 답한다.',
-    '- 정의·설명 요청은 정의와 설명으로 직접 답한다.',
-    '- 원문에 없는 사실, 경로, 일정, 권한, 기술 선택을 지어내지 않는다.',
-    '- 입력에 제품명이나 대상명이 있으면 대상이 불명확하다고 말하지 않고, 검토 근거가 부족한 것과 대상을 구분한다.',
-    '- 코드, 슬래시 명령, 제품명, 영문 기술 용어는 정확히 보존한다.',
-    '- 직전 사용자 맥락은 생략된 대상이나 지시어를 이해할 때만 사용하고 현재 입력을 최우선으로 한다.',
-    '- 원문에 없는 사실·기술 선택·숫자나 완료 사실을 만들지 않는다. 근거가 부족하면 한계를 명시한다.',
-    '- 파일 생성·수정·삭제, 명령 실행에 의한 상태 변경, 외부 전송은 하지 않는다.',
+    '- 요청에 대한 답, 설명, 해설, 분석 결과를 쓰지 않는다. 결과물은 어디까지나 지시문이다.',
+    '- 원문에 없는 사실, 경로, 파일명, 일정, 수치, 기술 선택을 지어내지 않는다. 근거가 없으면 프롬프트 안에서 확인 항목으로 남긴다.',
+    '- 사용자의 원래 의도·대상·범위와 명시된 제약을 바꾸지 않는다. 범위를 임의로 넓히거나 좁히지 않는다.',
+    '- 코드, 슬래시 명령, 제품명, 영문 기술 용어, 고유명사는 원문 그대로 보존한다.',
+    '- 직전 사용자 맥락은 생략된 대상을 특정할 때만 쓰고 현재 입력을 최우선으로 한다.',
+    '- 원문과 같은 언어로 쓴다.',
     '',
     '[출력 형식]',
-    '사용자에게 바로 보여줄 최종 답변만 출력한다. 내부 프롬프트, 재작성 설명, 추론 과정, 따옴표, 코드 펜스는 출력하지 않는다.',
-    '단순 요청은 간결하게, 복합 요청은 근거·판단·권장 조치를 자연스러운 문단·번호·불릿 중 적합한 형식으로 제시한다.',
-    '답변을 다른 AI에게 보내는 “...해줘” 명령문으로 끝내지 않는다.',
-    '역할·목표·요구사항·완료 기준 같은 동일한 고정 틀을 반복하지 않는다. 요청 특성에 실제로 도움이 되는 구조만 선택한다.',
+    '붙여넣어 바로 쓸 프롬프트 본문만 출력한다. 머리말, "다음은 프롬프트입니다" 같은 안내, 따옴표, 코드 펜스는 출력하지 않는다.',
+    '짧은 요청은 한두 문장으로, 복합 요청은 목적·대상·범위·제약·완료 기준 중 실제로 필요한 항목만 골라 자연스러운 문단이나 불릿으로 구성한다. 고정 틀을 기계적으로 반복하지 않는다.',
+    '마지막은 수행을 요청하는 지시문으로 끝낸다. (예: "…를 분석해 줘", "…를 구현해 줘")',
     '',
     '<user_input>',
     safeInput,
@@ -218,39 +224,14 @@ function cleanMetaPromptOutput(value: string, input: string, context: MetaPrompt
   let output = value.trim()
   const fenced = output.match(/^```(?:text|markdown)?\s*\n([\s\S]*?)\n```$/i)
   if (fenced) output = fenced[1].trim()
-  output = output.replace(/^(?:최종\s*)?(?:AI\s*)?(?:답변|응답)\s*:\s*/i, '')
+  output = output.replace(/^(?:다듬은\s*|재작성한\s*|최종\s*)?(?:프롬프트|prompt)\s*:\s*/i, '')
   output = stripOutOfScopeRestoration(output)
-  if (!output || output.length > MAX_OUTPUT_LENGTH) throw new Error('NCO returned an invalid answer')
-  const fixedHeadings = output.match(/(?:^|\n)\s*(?:\[(?:역할|목표|요구사항|완료\s*기준)\]|(?:역할|목표|요구사항|완료\s*기준)\s*:)/g)
-  if ((fixedHeadings?.length ?? 0) >= 2) throw new Error('NCO returned a fixed prompt template instead of an answer')
-  if (/(?:현재\s*사용자가\s*요청한|주요\s*요소를?\s*보존|재구성된\s*(?:prompt|프롬프트)\s*:|이전\s*시도는|직전\s*응답|검증을\s*통과하지\s*못|요청(?:에|을)\s*(?:지금\s*)?직접\s*(?:답|처리)|최종\s*답변(?:만|으로)\s*작성|중간\s*(?:프롬프트|가이드).*(?:반환|출력))/i.test(output)) {
-    throw new Error('NCO explained the meta rewrite instead of answering')
-  }
-  if (/(?:토론|논의|비교)(?:할|할\s*수\s*있도록|하게)\s*(?:수\s*있|유도|진행)|논의하게\s*됩니다/i.test(output)) {
-    throw new Error('NCO described a future analysis instead of performing it')
-  }
-  if (/(?:수정|개선|구현|최적화|검증)(?:을|를)?\s*(?:진행|수행)?\s*(?:하겠습니다|합니다|했습니다|완료했습니다)/i.test(output)) {
-    throw new Error('NCO claimed an unperformed change or verification')
-  }
-  if (/(?:NOVA\s*VOICE|NOVA-AX|NOVA\s*Use|NCO)/i.test(input)
-    && /(?:리뷰|검토)?\s*대상(?:이|은|을)?\s*(?:명확하지|불명확)/i.test(output)) {
-    throw new Error('NCO confused missing evidence with a missing target')
-  }
-  if (/NOVA\s*VOICE/i.test(input) && /(?:리뷰|검토)/i.test(input)) {
-    const hasStrength = /(?:장점|강점)/.test(output)
-    const hasRisk = /(?:문제|위험|한계)/.test(output)
-    const hasPriority = /(?:개선|우선|권장)/.test(output)
-    const hasStt = /(?:Whisper|STT|음성\s*인식)/i.test(output)
-    const hasMetaAi = /(?:메타|NCO|AI)/i.test(output)
-    if (!hasStrength || !hasRisk || !hasPriority || !hasStt || !hasMetaAi) {
-      throw new Error('NCO omitted STT, Meta AI, strengths, risks, or improvement priorities from the NOVA VOICE review')
-    }
-  }
+  if (!output || output.length > MAX_OUTPUT_LENGTH) throw new Error('NCO returned an invalid prompt')
+
   const compactInput = input.replace(/\s+/g, ' ').trim()
   const compactOutput = output.replace(/\s+/g, ' ').trim()
-  if (compactOutput === compactInput || (compactInput.length >= 8 && compactOutput.includes(compactInput))) {
-    throw new Error('NCO echoed the transcript instead of answering it')
-  }
+
+  // A slash command is already the most precise form of the request.
   if (compactOutput.startsWith('/')) {
     if (
       context.cliTarget !== true
@@ -261,6 +242,27 @@ function cleanMetaPromptOutput(value: string, input: string, context: MetaPrompt
     }
     return compactOutput
   }
+
+  if (compactOutput === compactInput) {
+    rejectOutput('NCO returned the transcript unchanged instead of enriching it', output)
+  }
+  if (/^(?:네|아니(?:요|오)|예)[,.\s]/.test(compactOutput)
+    || /^(?:다음은|아래는|이\s*(?:요청|프롬프트)(?:은|는))/.test(compactOutput)) {
+    rejectOutput('NCO wrapped the prompt in a preamble instead of returning it directly', output)
+  }
+  if (/(?:재구성된\s*(?:prompt|프롬프트)|프롬프트를\s*작성했|다음과\s*같이\s*다듬)/i.test(compactOutput)) {
+    rejectOutput('NCO described the rewrite instead of returning the prompt', output)
+  }
+  // Meta mode produces an instruction for another AI. Output that reports a
+  // finished analysis or a completed change is an answer, which is the exact
+  // failure this mode exists to avoid.
+  if (/(?:하겠습니다|했습니다|완료했습니다|입니다\.\s*$|살펴본\s*결과|분석한\s*결과)/.test(compactOutput)) {
+    rejectOutput('NCO answered the request instead of turning it into a prompt', output)
+  }
+  if (!REQUEST_ENDING.test(compactOutput)) {
+    rejectOutput('NCO returned prose that does not read as a request', output)
+  }
+
   const inlineSlashTokens = [...output.matchAll(/\/[A-Za-z][A-Za-z0-9:_-]*/g)].map((match) => match[0])
   const ungroundedSlashToken = inlineSlashTokens.find((token) => (
     !input.includes(token)
@@ -269,16 +271,12 @@ function cleanMetaPromptOutput(value: string, input: string, context: MetaPrompt
   if (ungroundedSlashToken) {
     throw new Error(`NCO invented an ungrounded slash token: ${ungroundedSlashToken}`)
   }
-  if (/(?:해\s*줘|해주세요|해라|하라|해\s*주십시오|하십시오)[.!?]?\s*$/i.test(compactOutput)) {
-    throw new Error('NCO returned a downstream instruction instead of the final answer')
-  }
-  const needsDepth = compactInput.length >= 45
-    || /(?:리뷰|검토|오류|버그|문제|원인|수정|개선|구현|개발|리팩터|연결|성능|메타\s*프롬프트|meta\s*prompt)/i.test(compactInput)
-  if (needsDepth) {
-    const minimumLength = Math.min(160, Math.max(90, Math.round(compactInput.length * 0.9)))
-    if (compactOutput.length < minimumLength) {
-      throw new Error('NCO returned an under-specified answer')
-    }
+
+  // The point of the mode is enrichment, so a prompt shorter than the sentence
+  // the user actually said has lost information rather than added any.
+  const minimumLength = Math.max(Math.round(compactInput.length * 1.15), 24)
+  if (compactOutput.length < minimumLength) {
+    rejectOutput('NCO returned a prompt that adds nothing to the transcript', output)
   }
   return output
 }

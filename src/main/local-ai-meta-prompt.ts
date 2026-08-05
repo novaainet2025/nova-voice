@@ -108,6 +108,19 @@ function stripOutOfScopeRestoration(value: string): string {
     .trim()
 }
 
+/**
+ * A meta-mode result is an instruction for whatever AI receives it, so it has to
+ * read as a request. Prose that trails off in a declarative sentence is an
+ * answer, which is what this mode replaced.
+ */
+const REQUEST_ENDING = /(?:[가-힣]{1,8}\s*(?:줘요?|주세요|주십시오|주시기\s*바랍니다|줄래요?)|하라|해라|하십시오|바랍니다|바래)[.!?]?["'’”)\]]?\s*$/
+
+/** Validation failures are useless in a log without a glimpse of what came back. */
+function rejectOutput(reason: string, output: string): never {
+  const excerpt = output.replace(/\s+/g, ' ').trim().slice(0, 120)
+  throw new Error(`${reason} — got: ${excerpt}`)
+}
+
 function needsExecutionDepth(input: string): boolean {
   const normalized = compact(input, MAX_INPUT_LENGTH)
   return normalized.length >= 45
@@ -126,47 +139,12 @@ function cleanOutput(value: string, input: string, context: MetaPromptContext): 
   }
   const fenced = output.match(/^```(?:text|markdown)?\s*\n([\s\S]*?)\n```$/i)
   if (fenced) output = fenced[1].trim()
-  output = output.replace(/^(?:최종\s*)?(?:AI\s*)?(?:답변|응답)\s*:\s*/i, '')
+  output = output.replace(/^(?:다듬은\s*|재작성한\s*|최종\s*)?(?:프롬프트|prompt)\s*:\s*/i, '')
   output = stripOutOfScopeRestoration(output)
-  if (!output || output.length > MAX_OUTPUT_LENGTH) throw new Error('Local AI returned an invalid answer')
+  if (!output || output.length > MAX_OUTPUT_LENGTH) throw new Error('Local AI returned an invalid prompt')
   const compactOutput = compact(output, MAX_OUTPUT_LENGTH)
   const compactInput = compact(input, MAX_INPUT_LENGTH)
-  if (compactOutput === compactInput) {
-    throw new Error('Local AI echoed the transcript instead of answering')
-  }
-  if (compactInput.length >= 8 && compactOutput.includes(compactInput)) {
-    throw new Error('Local AI quoted the transcript instead of answering it')
-  }
-  const fixedHeadings = output.match(/(?:^|\n)\s*(?:\[(?:역할|목표|요구사항|완료\s*기준)\]|(?:역할|목표|요구사항|완료\s*기준)\s*:)/g)
-  if ((fixedHeadings?.length ?? 0) >= 2) {
-    throw new Error('Local AI returned a fixed prompt template instead of an answer')
-  }
-  if (/^(?:Okay|We need|Let's|The user|I need)\b/i.test(output)) {
-    throw new Error('Local AI exposed its reasoning instead of a final answer')
-  }
-  if (/(?:현재\s*사용자가\s*요청한|주요\s*요소를?\s*보존|재구성된\s*(?:prompt|프롬프트)\s*:|음성\s*입력\s*['‘“]|이전\s*시도는|직전\s*응답|검증을\s*통과하지\s*못|요청(?:에|을)\s*(?:지금\s*)?직접\s*(?:답|처리)|최종\s*답변(?:만|으로)\s*작성|중간\s*(?:프롬프트|가이드).*(?:반환|출력))/i.test(output)) {
-    throw new Error('Local AI explained the meta rewrite instead of answering')
-  }
-  if (/(?:토론|논의|비교)(?:할|할\s*수\s*있도록|하게)\s*(?:수\s*있|유도|진행)|논의하게\s*됩니다/i.test(output)) {
-    throw new Error('Local AI described a future analysis instead of performing it')
-  }
-  if (/(?:수정|개선|구현|최적화|검증)(?:을|를)?\s*(?:진행|수행)?\s*(?:하겠습니다|합니다|했습니다|완료했습니다)/i.test(output)) {
-    throw new Error('Local AI claimed an unperformed change or verification')
-  }
-  if (/(?:NOVA\s*VOICE|NOVA-AX|NOVA\s*Use|NCO)/i.test(input)
-    && /(?:리뷰|검토)?\s*대상(?:이|은|을)?\s*(?:명확하지|불명확)/i.test(output)) {
-    throw new Error('Local AI confused missing evidence with a missing target')
-  }
-  if (/NOVA\s*VOICE/i.test(input) && /(?:리뷰|검토)/i.test(input)) {
-    const hasStrength = /(?:장점|강점)/.test(output)
-    const hasRisk = /(?:문제|위험|한계)/.test(output)
-    const hasPriority = /(?:개선|우선|권장)/.test(output)
-    const hasStt = /(?:Whisper|STT|음성\s*인식)/i.test(output)
-    const hasMetaAi = /(?:메타|NCO|AI)/i.test(output)
-    if (!hasStrength || !hasRisk || !hasPriority || !hasStt || !hasMetaAi) {
-      throw new Error('Local AI omitted STT, Meta AI, strengths, risks, or improvement priorities from the NOVA VOICE review')
-    }
-  }
+
   if (compactOutput.startsWith('/')) {
     if (
       context.cliTarget !== true
@@ -177,6 +155,30 @@ function cleanOutput(value: string, input: string, context: MetaPromptContext): 
     }
     return compactOutput
   }
+
+  if (compactOutput === compactInput) {
+    rejectOutput('Local AI returned the transcript unchanged instead of enriching it', output)
+  }
+  if (/^(?:Okay|We need|Let's|The user|I need)\b/i.test(output)) {
+    rejectOutput('Local AI exposed its reasoning instead of the prompt', output)
+  }
+  if (/^(?:네|아니(?:요|오)|예)[,.\s]/.test(compactOutput)
+    || /^(?:다음은|아래는|이\s*(?:요청|프롬프트)(?:은|는))/.test(compactOutput)) {
+    rejectOutput('Local AI wrapped the prompt in a preamble instead of returning it directly', output)
+  }
+  if (/(?:재구성된\s*(?:prompt|프롬프트)|프롬프트를\s*작성했|다음과\s*같이\s*다듬)/i.test(compactOutput)) {
+    rejectOutput('Local AI described the rewrite instead of returning the prompt', output)
+  }
+  // Meta mode produces an instruction for another AI. Output that reports a
+  // finished analysis or a completed change is an answer, which is the exact
+  // failure this mode exists to avoid.
+  if (/(?:하겠습니다|했습니다|완료했습니다|입니다\.\s*$|살펴본\s*결과|분석한\s*결과)/.test(compactOutput)) {
+    rejectOutput('Local AI answered the request instead of turning it into a prompt', output)
+  }
+  if (!REQUEST_ENDING.test(compactOutput)) {
+    rejectOutput('Local AI returned prose that does not read as a request', output)
+  }
+
   const inlineSlashTokens = [...output.matchAll(/\/[A-Za-z][A-Za-z0-9:_-]*/g)].map((match) => match[0])
   const ungroundedSlashToken = inlineSlashTokens.find((token) => (
     !input.includes(token)
@@ -185,14 +187,12 @@ function cleanOutput(value: string, input: string, context: MetaPromptContext): 
   if (ungroundedSlashToken) {
     throw new Error(`Local AI invented an ungrounded slash token: ${ungroundedSlashToken}`)
   }
-  if (/(?:해\s*줘|해주세요|해라|하라|해\s*주십시오|하십시오)[.!?]?\s*$/i.test(compactOutput)) {
-    throw new Error('Local AI returned a downstream instruction instead of the final answer')
-  }
-  if (needsExecutionDepth(input)) {
-    const minimumLength = Math.min(160, Math.max(90, Math.round(compactInput.length * 0.9)))
-    if (compactOutput.length < minimumLength) {
-      throw new Error('Local AI returned an under-specified answer')
-    }
+
+  // The point of the mode is enrichment, so a prompt shorter than the sentence
+  // the user actually said has lost information rather than added any.
+  const minimumLength = Math.max(Math.round(compactInput.length * 1.15), 24)
+  if (compactOutput.length < minimumLength) {
+    rejectOutput('Local AI returned a prompt that adds nothing to the transcript', output)
   }
   return output
 }
@@ -273,41 +273,38 @@ export async function isLocalAiMetaPromptAvailable(timeoutMs = 2_000): Promise<b
 
 function systemInstruction(): string {
   return [
-    '너는 NOVA VOICE의 메타 프롬프트 답변 엔진이다.',
-    '사용자의 음성 요청을 내부적으로 가장 정확한 실행 프롬프트로 재구성한 다음, 그 프롬프트를 네가 즉시 수행하여 최종 답변만 반환한다.',
-    '확인된 NOVA VOICE 제품 맥락: macOS 메뉴바·백그라운드 Electron 앱이며, MLX Whisper large-v3-turbo와 16 kHz PCM으로 STT를 수행한다. 일반 모드는 받아쓴 원문을 입력하고, 메타 모드는 NCO Core의 선택 provider 또는 로컬 qwen3:14b가 최종 답변을 만든다. 포커스 앱 자동 입력과 허용된 CLI slash command 라우팅을 지원한다. TTS와 내장 AI 터미널은 STT 집중을 위해 의도적으로 제거된 확정 제약이므로 사용자가 명시적으로 요청하지 않는 한 복원이나 재추가를 제안하지 않는다.',
-    'NOVA VOICE 자체를 리뷰하라는 요청에는 위에서 확인된 제품 맥락을 근거로 장점, 문제 또는 위험, 개선 우선순위를 모두 구체적으로 포함한다. 셋 중 하나도 생략하지 않는다. 실행 로그가 없는 상태를 실제 실행 검증 완료로 표현하지 않는다.',
-    '원래 의도, 대상, 범위, 제품명, 명령어, 경로와 명시된 제약을 모두 보존한다.',
-    '먼저 단순 질문인지, 분석·리뷰·진단·작성처럼 여러 판단이 필요한 요청인지 이해하고 그 복잡도에 맞는 유용한 답을 작성한다.',
-    '비교·토론·분석 요청은 향후 과정을 안내하거나 “도움이 될 수 있다”고 설명하지 말고, 실제 관점 비교·판단·결론을 지금 제시한다.',
-    '제공된 정보만 근거로 사용한다. 확인하지 않은 파일, 실행 결과, 시스템 상태, 숫자 또는 완료 사실을 지어내지 않는다.',
-    '정보가 부족해 실제 검토나 실행을 완료할 수 없으면 아는 범위의 판단을 먼저 제시하고, 부족한 근거와 다음 확인 항목을 짧게 밝힌다.',
-    '입력에 제품명이나 대상명이 있으면 대상이 불명확하다고 말하지 않는다. 검토 자료가 부족한 것과 대상 자체가 없는 것을 구분한다.',
-    '내부 재구성 과정이나 “원문의 의도를 보존해 프롬프트로 변환해줘”, “후속 AI가 수행해줘” 같은 중간 가이드를 절대 출력하지 않는다.',
+    '너는 NOVA VOICE의 메타 프롬프트 작성 엔진이다.',
+    '사용자가 말로 한 거친 요청을, 다른 AI가 정확히 알아듣고 수행할 수 있는 프롬프트로 다듬는다. 요청을 대신 수행하지 않는다.',
+    '너의 결과물은 사용자의 커서 위치에 그대로 붙여넣어져 그 자리의 AI에게 전달된다.',
+    '확인된 NOVA VOICE 제품 맥락: macOS 메뉴바·백그라운드 Electron 앱이며, MLX Whisper large-v3-turbo와 16 kHz PCM으로 STT를 수행한다. 일반 모드는 받아쓴 원문을 그대로 입력하고, 메타 모드는 다듬은 프롬프트를 입력한다. 포커스 앱 자동 입력과 허용된 CLI slash command 라우팅을 지원한다.',
+    '말하면서 생략된 목적·대상·범위·판단 기준을 원문에서 추론 가능한 범위 안에서 명시적으로 채워 요청을 풍부하게 만든다.',
+    '모호한 지시어("이거", "저기", "적당히")는 원문 맥락으로 특정할 수 있으면 특정하고, 특정할 수 없으면 프롬프트 안에서 무엇을 확인해야 하는지로 바꾼다.',
+    '요청이 이미 구체적이면 과하게 부풀리지 말고 필요한 만큼만 정돈한다.',
+    '원래 의도, 대상, 범위, 제품명, 명령어, 경로와 명시된 제약을 모두 보존한다. 범위를 임의로 넓히거나 좁히지 않는다.',
+    '요청에 대한 답, 설명, 해설, 분석 결과를 쓰지 않는다. 결과물은 어디까지나 지시문이다.',
+    '원문에 없는 사실, 경로, 파일명, 일정, 수치, 기술 선택을 지어내지 않는다. 근거가 없으면 프롬프트 안에서 확인 항목으로 남긴다.',
     '입력에 “허용된 CLI 명령 후보”가 제공되고 사용자 의도와 필수 인자가 명확히 일치하면, 설명 없이 해당 `/명령어 인자` 한 줄만 출력한다.',
-    '후보가 없거나 애매하면 slash command를 추측하지 말고 요청에 직접 답한다.',
-    'NOVA-AX MCP 도구 후보가 있어도 도구 실행 결과가 제공되지 않았다면 실행했다고 주장하지 않는다.',
-    '원문과 같은 언어를 사용한다. 단순 질문은 간결하게, 복합 분석은 근거·판단·권장 조치를 자연스러운 문단이나 필요한 항목으로 제시한다.',
-    '답변을 다른 AI에게 보내는 명령문인 “...해줘”로 끝내지 않는다.',
-    '항상 같은 역할·목표·요구사항·완료 기준 틀을 반복하지 않는다.',
-    '추론 과정, 머리말, 따옴표, 코드 펜스는 출력하지 않는다.',
-    '응답은 사용자에게 보여줄 최종 답변 하나를 담은 {"answer":"..."} JSON 객체로만 출력한다.',
+    '후보가 없거나 애매하면 slash command를 추측하지 말고 일반 프롬프트로 다듬는다.',
+    'NOVA-AX MCP 도구 후보가 있어도 직접 실행하지 않는다. 프롬프트 안에서 참고할 수단으로만 언급할 수 있다.',
+    '원문과 같은 언어를 사용한다.',
+    '짧은 요청은 한두 문장으로, 복합 요청은 목적·대상·범위·제약·완료 기준 중 실제로 필요한 항목만 골라 자연스러운 문단이나 불릿으로 구성한다. 고정 틀을 기계적으로 반복하지 않는다.',
+    '마지막은 수행을 요청하는 지시문으로 끝낸다. 예: “…를 분석해 줘”, “…를 구현해 줘”.',
+    '머리말, “다음은 프롬프트입니다” 같은 안내, 추론 과정, 따옴표, 코드 펜스는 출력하지 않는다.',
+    '응답은 다듬은 프롬프트 하나를 담은 {"answer":"..."} JSON 객체로만 출력한다.',
   ].join('\n')
 }
 
 const META_ANSWER_EXAMPLES = [
-  { role: 'user', content: 'STT 전용 음성 앱을 리뷰해줘. 확인된 기능은 오프라인 음성 인식, 포커스 위치 자동 입력과 선택형 메타 AI 답변이야.' },
-  { role: 'assistant', content: '{"answer":"장점은 음성이 외부로 전송되지 않는 STT 처리, 별도 복사 과정이 없는 자동 입력과 필요할 때 쓰는 메타 AI 답변입니다. 문제 또는 위험은 긴 음성의 처리 지연, 인식 실패 뒤 복구, 잘못된 포커스에 입력될 가능성과 일반 받아쓰기·AI 답변의 구분 혼동입니다. 개선 우선순위는 연속 녹음 안정성과 실패 복구를 먼저 검증하고, 그다음 모드 표시, 지연 시간과 입력 대상을 개선하는 것입니다. 실제 정확도와 자원 사용량은 실행 측정이 추가로 필요합니다."}' },
+  { role: 'user', content: '지금 실행하고 있는 앱 리뷰한다' },
+  { role: 'assistant', content: '{"answer":"지금 실행 중인 앱을 리뷰해 줘. 먼저 어떤 앱이고 어떤 상태로 떠 있는지 확인한 뒤, 실제로 동작을 확인할 수 있는 부분과 코드만 보고 판단한 부분을 구분해서 정리해 줘. 잘 만들어진 점, 문제나 위험이 될 만한 점, 고친다면 어떤 순서로 손대는 게 좋을지를 각각 근거와 함께 짚어 줘. 확인하지 못한 항목은 추측하지 말고 무엇을 더 봐야 하는지로 남겨 줘."}' },
   { role: 'user', content: '버그 고쳐줘. 기존 기능은 깨지면 안 돼.' },
-  { role: 'assistant', content: '{"answer":"오류 현상, 재현 절차와 관련 로그가 없어 지금 바로 안전하게 수정할 근거가 부족합니다. 해당 정보를 확인한 뒤 원인을 특정하고 필요한 범위만 변경해야 하며, 같은 시나리오와 기존 기능 회귀 테스트를 함께 통과해야 수정 완료로 판단할 수 있습니다."}' },
-  { role: 'user', content: '앱의 AI 답변 기능이 제대로 작동하지 않아.' },
-  { role: 'assistant', content: '{"answer":"현재 확인되는 증상만으로는 원인을 특정할 수 없습니다. 먼저 실제 모델 호출 여부와 선택된 provider, 원문·최종 응답, 요청 시간, 실패 로그를 한 요청 단위로 확인해야 합니다. 모델 응답 대신 고정 가이드가 반환된다면 응답 파싱 또는 fallback 경로가 중간 지시를 최종 결과로 취급하는지 점검하고, 실제 답변만 통과시키는 검증을 추가해야 합니다."}' },
-  { role: 'user', content: '메타 프롬프트가 뭐야?' },
-  { role: 'assistant', content: '{"answer":"메타 프롬프트는 사용자의 원래 요청을 모델이 더 정확히 이해하고 수행하도록 목적, 맥락과 제약을 내부적으로 정리하는 지침입니다. NOVA VOICE의 메타 모드에서는 이 중간 지침을 노출하지 않고, 정리된 요청을 AI가 수행한 최종 답변만 사용자에게 보여주는 것이 올바른 동작입니다."}' },
-  { role: 'user', content: '이 문장의 오탈자를 자연스럽게 고쳐줘' },
-  { role: 'assistant', content: '{"answer":"교정할 원문이 제공되지 않았습니다. 수정할 문장을 함께 입력하면 의미와 말투를 유지하면서 오탈자를 자연스럽게 바로잡을 수 있습니다."}' },
-  { role: 'user', content: 'CLI/터미널 맥락: 아니요. slash command를 출력하지 않는다.\n\nREST와 GraphQL 중 무엇이 이 서비스에 적합한지 토론해' },
-  { role: 'assistant', content: '{"answer":"REST는 리소스 중심 구조가 단순하고 HTTP 캐시·관측 도구를 활용하기 쉬워 요구가 안정적인 API에 적합합니다. GraphQL은 클라이언트가 필요한 필드만 조회할 수 있어 화면별 데이터 요구가 크게 다를 때 유리하지만, 스키마 운영과 캐시·권한 복잡도가 커집니다. 서비스 요구가 제시되지 않은 현재 기준에서는 운영 단순성이 높은 REST를 기본으로 선택하고, 여러 클라이언트의 조회 형태가 실제로 복잡할 때 GraphQL을 검토하는 판단이 안전합니다."}' },
+  { role: 'assistant', content: '{"answer":"발생한 버그를 수정해 줘. 먼저 증상과 재현 절차, 관련 로그를 확인해서 원인을 특정하고, 원인에 해당하는 최소 범위만 변경해 줘. 기존 동작이 깨지지 않는 것이 조건이니 수정 후에는 같은 시나리오 재현 테스트와 주변 기능 회귀 확인까지 함께 해 줘."}' },
+  { role: 'user', content: '이거 왜 느린지 좀 봐줘' },
+  { role: 'assistant', content: '{"answer":"지금 느리게 동작하는 부분의 원인을 분석해 줘. 어디서 시간이 실제로 소모되는지 측정으로 확인하고, 추측이 아니라 측정값을 근거로 병목을 특정해 줘. 병목을 찾으면 개선 방안을 비용과 효과를 비교해 제시하고, 측정하지 못한 구간은 따로 밝혀 줘."}' },
+  { role: 'user', content: '로그인 화면 좀 만들어줘' },
+  { role: 'assistant', content: '{"answer":"로그인 화면을 구현해 줘. 프로젝트에 이미 있는 화면 구조와 스타일 규칙을 먼저 확인하고 그 방식에 맞춰 작성해 줘. 입력값 검증과 실패했을 때 사용자에게 보여줄 상태 처리까지 포함하고, 인증 방식이나 연동할 API가 코드에서 확인되지 않으면 임의로 정하지 말고 무엇을 정해야 하는지 알려 줘."}' },
+  { role: 'user', content: 'CLI/터미널 맥락: 아니요. slash command를 출력하지 않는다.\n\nREST랑 GraphQL 중에 뭐가 나은지 토론해' },
+  { role: 'assistant', content: '{"answer":"REST와 GraphQL 중 이 서비스에 무엇이 더 적합한지 비교해 줘. 데이터 요구가 화면마다 얼마나 다른지, 캐시와 권한 처리가 얼마나 중요한지, 운영 복잡도를 감당할 수 있는지를 기준으로 양쪽 장단점을 짚고, 현재 확인 가능한 조건에서 어느 쪽을 택할지 결론까지 내려 줘. 판단에 필요한데 확인되지 않은 조건이 있으면 그것도 함께 밝혀 줘."}' },
   { role: 'user', content: 'CLI/터미널 맥락: 예\n현재 요청에 의미상 대응할 수 있는 허용된 CLI 명령 후보:\n- /nco-discussion <토론 주제> — 멀티 AI 토론을 시작합니다.\n\n여러 AI가 REST와 GraphQL 중 무엇이 적합한지 토론하게 해줘' },
   { role: 'assistant', content: '{"answer":"/nco-discussion REST와 GraphQL 중 현재 요구사항에 더 적합한 API 방식을 토론해줘"}' },
 ] as const
@@ -323,14 +320,14 @@ async function requestLocalRewrite(
   const revisionInstruction = [
     forceRevision
       ? needsExecutionDepth(input)
-        ? '직전 응답은 결과물이 아니었다. 원래 요청에 대한 구체적인 판단·설명·결과만 제시하고, 확인하지 않은 사실은 한계로 밝힌다.'
-        : '직전 응답은 결과물이 아니었다. 원래 질문에 직접 답하되 다른 AI에게 보낼 지시문을 만들지 않는다.'
+        ? '직전 응답은 프롬프트가 아니었다. 요청에 답하지 말고, 요청을 수행할 AI가 받을 지시문을 목적·대상·범위·확인 항목이 드러나게 다시 작성한다.'
+        : '직전 응답은 프롬프트가 아니었다. 요청에 답하지 말고 요청을 수행할 AI에게 보낼 지시문 한두 문장으로 다시 작성한다.'
       : '',
     forceRevision && validationFailure
       ? `직전 결과의 검증 실패: ${compact(validationFailure, 240)}. 같은 문장이나 구조를 반복하지 말고 이 실패를 직접 교정한다.`
       : '',
     revisionAttempt >= 2
-      ? '원문 전체를 인용하지 않는다. “변환해줘”, “재구성해줘”, “후속 AI가 수행해줘” 같은 지시문을 출력하지 말고 사용자에게 바로 전달할 답변을 작성한다.'
+      ? '원문을 그대로 인용하지 않는다. 메타 작업 자체를 설명하지 말고, 사용자가 원한 일을 수행하라는 지시문만 작성한다.'
       : '',
   ].filter(Boolean).join('\n\n')
   const userMessage = buildContextMessage(input, context)

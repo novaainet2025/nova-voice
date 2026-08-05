@@ -66,6 +66,12 @@ function createMainWindow(): BrowserWindow {
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
+      // This window owns the microphone. Closing it only hides it to the menu
+      // bar, and a hidden window stops requestAnimationFrame entirely (measured:
+      // 120Hz → 0Hz) while timers drop to 1Hz. The capture loop that computes
+      // the level, the spectrum and the end-of-speech decision lives there, so
+      // throttling it silently breaks dictation whenever the window is closed.
+      backgroundThrottling: false,
     },
   })
 
@@ -125,6 +131,9 @@ function createOverlayWindow(): BrowserWindow {
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
+      // The overlay is hidden between dictations; its canvas has to resume at
+      // full rate the moment it is shown again.
+      backgroundThrottling: false,
     },
   })
 
