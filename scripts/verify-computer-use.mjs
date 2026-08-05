@@ -101,6 +101,25 @@ assert.match(viaIntent.message, /\| 이름 \| 수량 \|/)
 const emptyTable = await executeComputerIntent({ action: 'GENERATE_TABLE', target: '', confidence: 1 })
 assert.equal(emptyTable.status, 'error', 'an empty table request reported success')
 
+// ── A chained utterance yields ordered steps ──────────────────────────────
+// "크롬 열고 네이버 접속해" is two actions in one breath. Collapsing it into one
+// would silently drop half of what the user asked for.
+const chained = await classifyUtterance('크롬 열고 네이버 접속해')
+assert.ok(chained, 'a chained utterance was not classified')
+assert.ok(chained.steps.length >= 2, `chained utterance produced ${chained.steps.length} step(s)`)
+assert.equal(chained.steps[0].action, 'OPEN_APP', 'the browser was not opened first')
+assert.equal(chained.steps[1].action, 'OPEN_URL', 'the site was not opened second')
+
+// Spoken site names resolve without the model having to invent a URL.
+for (const [spoken, expected] of [['네이버', 'naver'], ['구글드라이브', 'drive.google'], ['지메일', 'mail.google']]) {
+  const opened = await executeComputerIntent({ action: 'OPEN_URL', target: spoken, confidence: 0.9 })
+  assert.equal(opened.status, 'ok', `${spoken} did not resolve to a URL`)
+  assert.match(String(opened.data?.url), new RegExp(expected), `${spoken} resolved to the wrong site`)
+}
+// Only http(s) may be reached by speaking a string.
+const badScheme = await executeComputerIntent({ action: 'OPEN_URL', target: 'file:///etc/passwd', confidence: 1 })
+assert.equal(badScheme.status, 'error', 'a non-http scheme was opened')
+
 // ── Image generation refuses an empty description without spending a call ──
 const emptyImage = await executeComputerIntent({ action: 'GENERATE_IMAGE', target: '', confidence: 1 })
 assert.equal(emptyImage.status, 'error')
@@ -114,6 +133,9 @@ const { classifyUtterance } = await import('../src/main/intent-classifier.ts')
 // executed — "너 이름이 뭐야" came back as FOCUS_INPUT at 0.85 confidence and
 // moved the caret. Misfiring on a question is worse than missing a command.
 const classifierCases = [
+  // A chained utterance must produce ordered steps, not one action.
+  ['크롬 열고 네이버 접속해', true],
+  ['구글드라이브 접속하고 지메일도 열어줘', true],
   ['파인더 열어줘', true],
   ['노바 유즈 실행해줘', true],
   ['이력서 파일 찾아줘', true],
@@ -128,12 +150,13 @@ const classifierCases = [
 const classified = []
 for (const [utterance, expectControl] of classifierCases) {
   const startedAt = Date.now()
-  const intent = await classifyUtterance(utterance)
+  const plan = await classifyUtterance(utterance)
   classified.push({
     utterance,
-    action: intent?.action ?? null,
+    action: plan ? plan.steps.map((step) => step.action).join(' → ') : null,
+    steps: plan?.steps.length ?? 0,
     ms: Date.now() - startedAt,
-    correct: Boolean(intent) === expectControl,
+    correct: Boolean(plan) === expectControl,
   })
 }
 const correct = classified.filter((row) => row.correct).length
@@ -186,8 +209,9 @@ try {
   )
   assert.match(describeScreenContext(screenContext), /현재 상황/)
 
-  demonstrative = await classifyUtterance('이거 파인더에서 보여줘')
-  assert.ok(demonstrative, 'a demonstrative utterance was not classified at all')
+  const demonstrativePlan = await classifyUtterance('이거 파인더에서 보여줘')
+  assert.ok(demonstrativePlan, 'a demonstrative utterance was not classified at all')
+  demonstrative = demonstrativePlan.steps[0]
   assert.ok(
     demonstrative.target?.includes(path.basename(contextFile)),
     `"이거" did not resolve to the selected file: ${JSON.stringify(demonstrative)}`,
@@ -218,5 +242,7 @@ console.log(JSON.stringify({
     'no dictation is executed as a command (zero false positives)',
     'spoken Korean app names resolve to installed bundles',
     'demonstratives resolve through the on-screen selection',
+    'chained utterances produce ordered steps',
+    'spoken site names resolve; non-http schemes are refused',
   ],
 }, null, 2))

@@ -20,6 +20,9 @@ export const COMPUTER_ACTIONS = [
   'SCREENSHOT',
   'GENERATE_IMAGE',
   'GENERATE_TABLE',
+  // Opening a site is the step every "브라우저 열고 … 접속해" chain is made of,
+  // and `open` resolves a URL without driving the browser's UI.
+  'OPEN_URL',
 ] as const
 
 export type ComputerAction = typeof COMPUTER_ACTIONS[number]
@@ -31,6 +34,48 @@ export interface ComputerIntent {
   target?: string
   args?: Record<string, string>
   confidence: number
+}
+
+/**
+ * An ordered run of actions from one utterance.
+ *
+ * People chain requests in a single breath — "크롬 열고 네이버 접속해" is two
+ * steps, not two sentences. Steps run in order and stop at the first failure:
+ * continuing after a failed step would act on a state the user never reached.
+ */
+export interface ComputerPlan {
+  steps: ComputerIntent[]
+  confidence: number
+}
+
+/** Beyond this a spoken sentence is more likely misparsed than genuinely long. */
+const MAX_PLAN_STEPS = 6
+
+export function parseComputerPlan(raw: unknown): ComputerPlan | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const record = raw as Record<string, unknown>
+
+  // A single-action answer stays valid: the model may legitimately return one
+  // step, and older prompts do.
+  if (!Array.isArray(record.steps)) {
+    const single = parseComputerIntent(raw)
+    return single ? { steps: [single], confidence: single.confidence } : null
+  }
+
+  if (!record.steps.length || record.steps.length > MAX_PLAN_STEPS) return null
+  const steps: ComputerIntent[] = []
+  for (const candidate of record.steps) {
+    const step = parseComputerIntent(candidate)
+    // One unparseable step invalidates the whole plan. Running the rest would
+    // execute a fragment of what the user asked for.
+    if (!step) return null
+    steps.push(step)
+  }
+
+  const confidence = typeof record.confidence === 'number' && Number.isFinite(record.confidence)
+    ? Math.min(1, Math.max(0, record.confidence))
+    : Math.min(...steps.map((step) => step.confidence))
+  return { steps, confidence }
 }
 
 // Defensive caps on an LLM-produced object: a runaway or adversarial
@@ -83,9 +128,13 @@ export function parseComputerIntent(raw: unknown): ComputerIntent | null {
 
   if (typeof action !== 'string' || !COMPUTER_ACTION_SET.has(action)) return null
 
+  // An empty string means "this action has no target". The classifier's JSON
+  // schema requires the field, because leaving it optional made the model omit
+  // it even for utterances that clearly named a target, so actions like
+  // SCREENSHOT legitimately send "". Absent and empty are the same thing here.
   if (
     target !== undefined
-    && (typeof target !== 'string' || target.length === 0 || target.length > MAX_TARGET_LENGTH)
+    && (typeof target !== 'string' || target.length > MAX_TARGET_LENGTH)
   ) {
     return null
   }
@@ -101,7 +150,7 @@ export function parseComputerIntent(raw: unknown): ComputerIntent | null {
     action: action as ComputerAction,
     confidence,
   }
-  if (target !== undefined) intent.target = target as string
+  if (typeof target === 'string' && target.trim()) intent.target = target.trim()
   if (parsedArgs !== undefined) intent.args = parsedArgs
   return intent
 }

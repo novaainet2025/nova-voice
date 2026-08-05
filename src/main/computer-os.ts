@@ -18,6 +18,7 @@ import path from 'path'
 import { promisify } from 'util'
 import { logInfo, logWarn } from './logger.ts'
 import { discardGeneratedImage, generateImage, generateTable } from './image-generation.ts'
+import { resolveApp } from './app-catalog.ts'
 import type { ComputerIntent } from '../shared/computer-intent.ts'
 
 const execFile = promisify(execFileCallback)
@@ -89,11 +90,7 @@ function isSafeAppName(value: string): boolean {
  */
 async function resolveAppName(spoken: string): Promise<string> {
   if (await appExists(spoken)) return spoken
-  const normalized = spoken.toLowerCase().replace(/\s+/g, '')
-  for (const [pattern, actual] of SPOKEN_APP_NAMES) {
-    if (pattern.test(normalized) && await appExists(actual)) return actual
-  }
-  return spoken
+  return resolveApp(spoken)?.name ?? spoken
 }
 
 /** True when macOS can resolve this name to an installed application. */
@@ -107,26 +104,25 @@ async function appExists(name: string): Promise<boolean> {
   }
 }
 
-/**
- * Korean speech-to-text renders application names phonetically, so the spoken
- * form never matches the bundle name. Kept small and explicit: a fuzzy matcher
- * here would eventually launch the wrong application.
- */
-const SPOKEN_APP_NAMES: Array<[RegExp, string]> = [
-  [/^(노바유즈|노바유스|novause)$/, 'NOVA Use'],
-  [/^(노바보이스|novavoice)$/, 'NOVA VOICE'],
-  [/^(파인더|finder)$/, 'Finder'],
-  [/^(사파리|safari)$/, 'Safari'],
-  [/^(크롬|구글크롬|chrome)$/, 'Google Chrome'],
-  [/^(터미널|terminal)$/, 'Terminal'],
-  [/^(설정|시스템설정|systemsettings)$/, 'System Settings'],
-  [/^(메모|notes)$/, 'Notes'],
-  [/^(캘린더|달력|calendar)$/, 'Calendar'],
-  [/^(음악|music)$/, 'Music'],
-]
 
 async function openApp(spoken: string): Promise<ComputerExecutionResult> {
-  const name = await resolveAppName(spoken)
+  // An exact bundle name is used as spoken; otherwise the catalogue decides.
+  const exact = await appExists(spoken)
+  const match = exact ? { name: spoken, alternatives: [] as string[] } : resolveApp(spoken)
+  if (!match) {
+    return { status: 'error', message: `"${spoken}"에 해당하는 앱을 찾지 못했습니다.` }
+  }
+  // Two apps this close means the name did not identify one of them. Guessing
+  // launches the wrong program half the time, so the user is asked instead.
+  if (match.alternatives.length) {
+    const options = [match.name, ...match.alternatives].join(', ')
+    return {
+      status: 'refused',
+      message: `어떤 앱을 열까요? ${options} 중에서 말씀해주세요.`,
+      data: { candidates: [match.name, ...match.alternatives] },
+    }
+  }
+  const name = match.name
   if (!isSafeAppName(name)) {
     return { status: 'error', message: `앱 이름을 이해하지 못했습니다: ${spoken}` }
   }
@@ -318,6 +314,71 @@ async function generateImageIntent(
   }
 }
 
+/**
+ * Well-known sites, so "네이버 접속해" does not depend on the model inventing a
+ * correct URL. Only the destinations users actually name are listed; anything
+ * else has to arrive as an explicit address.
+ */
+const SPOKEN_SITES: Array<[RegExp, string]> = [
+  [/^(네이버|naver)$/, 'https://www.naver.com'],
+  [/^(다음|daum)$/, 'https://www.daum.net'],
+  [/^(구글|google)$/, 'https://www.google.com'],
+  [/^(유튜브|youtube)$/, 'https://www.youtube.com'],
+  [/^(구글드라이브|드라이브|googledrive|drive)$/, 'https://drive.google.com'],
+  [/^(지메일|이메일|메일|gmail)$/, 'https://mail.google.com'],
+  [/^(깃허브|github)$/, 'https://github.com'],
+  [/^(챗지피티|chatgpt)$/, 'https://chatgpt.com'],
+  [/^(노션|notion)$/, 'https://www.notion.so'],
+  [/^(카카오톡|카톡|kakao)$/, 'https://www.kakaocorp.com'],
+]
+
+/**
+ * Resolves a spoken destination to a URL.
+ *
+ * Only http and https are allowed. Other schemes reach handlers that can launch
+ * arbitrary applications, which is not something a dictation should be able to
+ * do by naming a string.
+ */
+function resolveUrl(spoken: string): string | null {
+  const trimmed = spoken.trim()
+  if (!trimmed) return null
+
+  const normalized = trimmed.toLowerCase().replace(/\s+/g, '')
+  for (const [pattern, url] of SPOKEN_SITES) {
+    if (pattern.test(normalized)) return url
+  }
+
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+  try {
+    const parsed = new URL(withScheme)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+    // A hostname with no dot is a word the user said, not an address.
+    if (!parsed.hostname.includes('.')) return null
+    return parsed.toString()
+  } catch {
+    return null
+  }
+}
+
+async function openUrl(spoken: string, browser?: string): Promise<ComputerExecutionResult> {
+  const url = resolveUrl(spoken)
+  if (!url) return { status: 'error', message: `주소를 알아듣지 못했습니다: ${spoken}` }
+  try {
+    // Naming a browser routes the URL there; otherwise the default handles it.
+    const resolvedBrowser = browser ? await resolveAppName(browser) : ''
+    const args = resolvedBrowser && await appExists(resolvedBrowser)
+      ? ['-a', resolvedBrowser, url]
+      : [url]
+    await execFile('open', args, { timeout: COMMAND_TIMEOUT_MS })
+    logInfo('[ComputerUse] Opened URL', { url, browser: resolvedBrowser || 'default' })
+    return { status: 'ok', message: `${url}을(를) 열었습니다.`, data: { url } }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    logWarn('[ComputerUse] Failed to open URL', { url, detail })
+    return { status: 'error', message: '주소를 열지 못했습니다.' }
+  }
+}
+
 /** Actions this module handles; anything else belongs to another executor. */
 export const OS_ACTIONS: ReadonlySet<string> = new Set([
   'OPEN_APP', 'FOCUS_APP', 'FIND_FILE', 'REVEAL_IN_FINDER', 'FOCUS_INPUT',
@@ -359,6 +420,8 @@ export async function executeComputerIntent(
     case 'FOCUS_INPUT':
       return focusInput()
 
+    case 'OPEN_URL':
+      return openUrl(target, intent.args?.browser)
     case 'GENERATE_TABLE':
       return generateTableIntent(intent)
     case 'GENERATE_IMAGE':

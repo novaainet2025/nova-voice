@@ -33,7 +33,7 @@ import { executeComputerIntent } from './computer-os'
 import type { ComputerExecutionResult } from './computer-os'
 import { DEFAULT_SETTINGS, SILENCE_TIMEOUT_OPTIONS, STT_ENGINE_NAME } from '../shared/types'
 import type { AppSettings, SttStatus, TranscriptionResult, VoiceInputMode } from '../shared/types'
-import type { ComputerIntent } from '../shared/computer-intent'
+import type { ComputerPlan } from '../shared/computer-intent'
 
 let settings: AppSettings = { ...DEFAULT_SETTINGS }
 let isRecording = false
@@ -42,6 +42,9 @@ let settingsPath: string | null = null
 let verificationPcmDelayMs = 0
 let activeInputMode: VoiceInputMode | null = null
 let lastAudioChunkAt = 0
+
+/** Pause after launching an app so the next step finds a window to act on. */
+const STEP_SETTLE_MS = 900
 
 /**
  * When the last streamed PCM chunk arrived. The recording watchdog uses this to
@@ -187,36 +190,68 @@ function toBuffer(value: ArrayBuffer | ArrayBufferView): Buffer {
  * status message here instead, mirroring how the dictation path already turns
  * failures into results rather than rejections wherever it safely can.
  */
-async function runComputerIntent(
-  intent: ComputerIntent,
+async function runComputerPlan(
+  plan: ComputerPlan,
   whisperResult: { text: string; language: string; duration: number },
   requestId: string,
   requestStartedAt: number,
   signal: AbortSignal,
 ): Promise<TranscriptionResult> {
-  logInfo('[ComputerUse] Intent classified', {
+  logInfo('[ComputerUse] Plan classified', {
     requestId,
-    action: intent.action,
-    target: intent.target,
-    confidence: intent.confidence,
+    steps: plan.steps.map((step) => `${step.action}:${step.target ?? '-'}`),
+    confidence: plan.confidence,
   })
 
-  let outcome: ComputerExecutionResult
-  try {
-    outcome = await executeComputerIntent(intent, { requestId, signal })
-  } catch (error) {
-    outcome = { status: 'error', message: error instanceof Error ? error.message : String(error) }
+  const messages: string[] = []
+  let executed = 0
+  for (const [index, step] of plan.steps.entries()) {
+    if (signal.aborted) break
+
+    let outcome: ComputerExecutionResult
+    try {
+      outcome = await executeComputerIntent(step, { requestId, signal })
+    } catch (error) {
+      outcome = { status: 'error', message: error instanceof Error ? error.message : String(error) }
+    }
+
+    logInfo('[ComputerUse] Step finished', {
+      requestId,
+      step: index + 1,
+      of: plan.steps.length,
+      action: step.action,
+      status: outcome.status,
+    })
+    messages.push(outcome.message)
+
+    if (outcome.status !== 'ok') {
+      // Later steps assume the earlier ones landed — "크롬 열고 네이버 접속해"
+      // has nowhere to navigate if the browser never opened. Stopping is more
+      // honest than acting on a state the user never reached.
+      if (plan.steps.length > 1) {
+        messages.push(`${index + 1}번째 동작에서 멈췄습니다. 남은 ${plan.steps.length - index - 1}개는 실행하지 않았습니다.`)
+      }
+      break
+    }
+    executed += 1
+
+    // A newly launched application needs a moment before the next step can act
+    // on it; without this the URL arrives before the browser has a window.
+    if (index < plan.steps.length - 1 && (step.action === 'OPEN_APP' || step.action === 'FOCUS_APP')) {
+      await new Promise((resolve) => setTimeout(resolve, STEP_SETTLE_MS))
+    }
   }
 
-  logInfo('[ComputerUse] Execution finished', {
+  logInfo('[ComputerUse] Plan finished', {
     requestId,
-    action: intent.action,
-    status: outcome.status,
+    executed,
+    of: plan.steps.length,
+    totalMs: Math.round(performance.now() - requestStartedAt),
   })
 
   return {
     id: crypto.randomUUID(),
-    text: outcome.message,
+    text: messages.join('\n'),
     language: whisperResult.language,
     duration: whisperResult.duration,
     timestamp: Date.now(),
@@ -462,14 +497,14 @@ export function setupIPC(mainWindow: BrowserWindow): void {
       }
       if (computerIntent) {
         sendToWindows('transcription:stage', 'injecting')
-        const result = await runComputerIntent(computerIntent, whisperResult, requestId, requestStartedAt, controller.signal)
+        const result = await runComputerPlan(computerIntent, whisperResult, requestId, requestStartedAt, controller.signal)
         sendToWindows('transcription:result', result)
         sendToWindows('transcription:progress', 1)
         sendToWindows('transcription:stage', 'idle')
         logInfo('[STT] PCM request completed', {
           requestId,
           inputMode: 'computer',
-          action: computerIntent.action,
+          steps: computerIntent.steps.length,
           totalMs: Math.round(performance.now() - requestStartedAt),
         })
         setTimeout(() => hideOverlay(), 1200)
