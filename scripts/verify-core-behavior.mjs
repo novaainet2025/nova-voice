@@ -144,14 +144,19 @@ for (const fileName of ['README.md', 'NCO.md', 'NOVA Use.md', 'NOVA-AX.md', 'com
 }
 
 const sourceFiles = fs.readdirSync(path.join(projectDir, 'src', 'main'))
-assert.equal(sourceFiles.some((name) => /tts|terminal|pty/i.test(name)), false)
+// PTY and the embedded terminal stay removed. TTS came back deliberately as a
+// spoken-answer mode, so it is no longer part of this exclusion — but it must
+// remain a separate module rather than creeping back into the dictation path.
+assert.equal(sourceFiles.some((name) => /terminal|pty/i.test(name)), false)
+assert.ok(sourceFiles.includes('tts-client.ts'), 'the spoken-answer TTS client is missing')
+assert.ok(sourceFiles.includes('voice-answer.ts'), 'the spoken-answer provider is missing')
 
 const ipcRuntime = fs.readFileSync(path.join(projectDir, 'src', 'main', 'ipc.ts'), 'utf8')
 const sourceText = [
   ipcRuntime,
   fs.readFileSync(path.join(projectDir, 'src', 'preload', 'index.ts'), 'utf8'),
 ].join('\n')
-for (const removedSurface of ["'tts:", "'pty:", "'ai:process", 'smartSpeak', 'node-pty']) {
+for (const removedSurface of ["'pty:", "'ai:process", 'smartSpeak', 'node-pty']) {
   assert.equal(sourceText.includes(removedSurface), false, `removed surface returned: ${removedSurface}`)
 }
 
@@ -257,6 +262,23 @@ const appStateRuntime = fs.readFileSync(path.join(projectDir, 'src', 'main', 'ap
 assert.match(appStateRuntime, /export function latchFrontApp/)
 assert.match(appStateRuntime, /export function releaseFrontAppLatch/)
 assert.match(appStateRuntime, /if \(!options\.force && isFrontAppLatched\(\)\) return/)
+
+// Spoken answers are heard, not read, which is why they use a larger model than
+// the classifier and a dedicated Ollama instance.
+const ttsRuntime = fs.readFileSync(path.join(projectDir, 'src', 'main', 'tts-client.ts'), 'utf8')
+assert.match(ttsRuntime, /edge_tts/)
+assert.match(ttsRuntime, /127\.0\.0\.1:7861/)
+assert.match(ttsRuntime, /export function toSpeakableText/)
+
+const answerRuntime = fs.readFileSync(path.join(projectDir, 'src', 'main', 'voice-answer.ts'), 'utf8')
+assert.match(answerRuntime, /ANSWER_MODEL = 'qwen3:14b'/)
+assert.match(answerRuntime, /askLocalModel\(/)
+// The meta-prompt validators demand instruction-shaped output and rejected
+// every spoken answer, so this path must not route through them.
+assert.equal(
+  answerRuntime.includes('rewriteWithLocalAiMetaPrompt'), false,
+  'spoken answers still run through the meta-prompt validators',
+)
 
 const recorderRuntime = fs.readFileSync(path.join(projectDir, 'src', 'renderer', 'hooks', 'useRecorder.ts'), 'utf8')
 assert.match(recorderRuntime, /Capture start queued until teardown completes/)
