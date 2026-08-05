@@ -1,8 +1,16 @@
 node_modules/
 out/
 dist/
+output/
 *.log
 .DS_Store
 models/*.bin
 models/*.ggml
 .aider*
+
+# Python virtualenv for the removed TTS stack — never belonged in git
+.venv-tts/
+
+# Session/tooling artifacts
+context_history/
+.playwright-cli/
