@@ -38,6 +38,15 @@ const MODEL_RESOLUTION_TTL_MS = 60_000
 // local-ai-meta-prompt.ts — a cold load is skipped entirely (see below).
 const CLASSIFY_TIMEOUT_MS = 8_000
 const MIN_CONFIDENCE = 0.6
+/**
+ * Explicit "this is not a command" answer.
+ *
+ * Without it the model had to pick the nearest action from the list and then
+ * reported high confidence in that forced choice: "너 이름이 뭐야" came back as
+ * FOCUS_INPUT at 0.85 and actually moved the caret. A refusal token is the only
+ * way a classifier can say no.
+ */
+const NONE_ACTION = 'NONE'
 const MAX_INPUT_LENGTH = 1_000
 
 interface ClassifierTarget {
@@ -140,6 +149,10 @@ function prepareDedicatedClassifier(): Promise<void> {
   return preparing
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
 function compact(value: string, maxLength: number): string {
   return value.replace(/\u0000/g, '').replace(/\s+/g, ' ').trim().slice(0, maxLength)
 }
@@ -148,11 +161,15 @@ function systemInstruction(): string {
   return [
     '너는 NOVA VOICE의 컴퓨터 제어 의도 분류기다.',
     '사용자가 말로 한 발화 하나를 받아, 그것이 컴퓨터를 조작하려는 명령인지 판정한다.',
-    `action은 다음 목록 중 하나만 쓸 수 있다: ${COMPUTER_ACTIONS.join(', ')}.`,
+    `action은 다음 목록 중 하나이거나, 컴퓨터 제어가 아니면 ${NONE_ACTION}이다: ${COMPUTER_ACTIONS.join(', ')}.`,
     '각 action의 의미: OPEN_APP=앱 실행, FOCUS_APP=이미 떠 있는 앱으로 전환, FIND_FILE=파일 검색, REVEAL_IN_FINDER=파인더에서 위치 표시, FOCUS_INPUT=입력창에 포커스, CLICK=화면 요소 클릭, TYPE=텍스트 입력, SCREENSHOT=화면 캡처, GENERATE_IMAGE=이미지 생성, GENERATE_TABLE=표 생성.',
     '발화가 이 action 중 하나에 명확히 해당하면 target에 대상(앱 이름, 파일명, 검색어 등 원문에서 확인되는 것만)을 채운다. 원문에 없는 대상을 지어내지 않는다.',
-    '발화가 받아쓰기(문서 작성, 대화, 질문, 지시문 등 컴퓨터 제어가 아닌 모든 것)이면 confidence를 0.3 이하로 낮게 준다. 이때도 action은 목록 중 형식상 가장 근접한 것을 채우되, 낮은 confidence가 이 값을 무시하라는 신호다.',
-    'confidence는 0과 1 사이의 숫자로, 이 발화가 실제로 해당 action을 의미할 확신도를 정직하게 반영한다. 애매하면 낮게 준다.',
+    '컴퓨터 제어가 아니면 action을 NONE으로 답한다. 목록에서 억지로 고르지 않는다.',
+    'NONE을 써야 하는 경우: 질문("오늘 며칠이야", "너 이름이 뭐야"), 인사, 대화, 문서에 적을 문장, 다른 AI에게 시키는 요청, 대상이 없는 막연한 지시("그럼 열어").',
+    '판단 기준은 하나다 — 이 발화를 이 컴퓨터에서 지금 실행했을 때 사용자가 의도한 결과가 나오는가. 아니면 NONE이다.',
+    'confidence는 0과 1 사이의 숫자로, 이 발화가 실제로 해당 action을 의미할 확신도를 정직하게 반영한다. 애매하면 NONE을 고르고 낮게 준다.',
+    '대상이 필요한 action(OPEN_APP, FOCUS_APP, FIND_FILE, REVEAL_IN_FINDER)은 원문에 대상이 있을 때만 쓴다. 대상이 없으면 NONE이다.',
+    '"파인더 열어줘"처럼 앱을 열라는 말은 OPEN_APP이다. REVEAL_IN_FINDER는 특정 파일의 위치를 파인더에서 보여달라는 뜻이므로 대상 파일이 있을 때만 쓴다.',
     'args는 action 수행에 필요한 추가 값(예: TYPE의 입력 문자열)이 원문에서 명확할 때만 채우고, 없으면 비운다.',
     '설명, 머리말, 코드펜스 없이 지정된 JSON 스키마 그대로만 출력한다.',
   ].join('\n')
@@ -209,7 +226,7 @@ export async function classifyUtterance(text: string, signal?: AbortSignal): Pro
         format: {
           type: 'object',
           properties: {
-            action: { type: 'string', enum: COMPUTER_ACTIONS },
+            action: { type: 'string', enum: [...COMPUTER_ACTIONS, NONE_ACTION] },
             target: { type: 'string' },
             args: { type: 'object' },
             confidence: { type: 'number' },
@@ -240,6 +257,12 @@ export async function classifyUtterance(text: string, signal?: AbortSignal): Pro
       parsedJson = JSON.parse(content)
     } catch {
       logInfo('[IntentClassifier] Model returned non-JSON output', content.slice(0, 200))
+      return null
+    }
+
+    // NONE is not an executable action, so it never reaches the parser.
+    if (isRecord(parsedJson) && parsedJson.action === NONE_ACTION) {
+      logInfo('[IntentClassifier] Not a computer command', { utterance: trimmed.slice(0, 60) })
       return null
     }
 

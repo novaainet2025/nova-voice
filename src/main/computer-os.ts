@@ -78,9 +78,57 @@ function isSafeAppName(value: string): boolean {
   return /^[\p{L}\p{N} .&'()+-]{1,64}$/u.test(value)
 }
 
-async function openApp(name: string): Promise<ComputerExecutionResult> {
+/**
+ * Maps a spoken app name onto one macOS can actually launch.
+ *
+ * `open -a` matches the bundle's display name, so a name transliterated by STT
+ * fails: "노바 유즈" and "파인더" are what the user says, but the bundles are
+ * "NOVA Use" and "Finder". Only names confirmed to exist on this machine are
+ * returned, so a wrong guess surfaces as "not found" rather than launching
+ * something unintended.
+ */
+async function resolveAppName(spoken: string): Promise<string> {
+  if (await appExists(spoken)) return spoken
+  const normalized = spoken.toLowerCase().replace(/\s+/g, '')
+  for (const [pattern, actual] of SPOKEN_APP_NAMES) {
+    if (pattern.test(normalized) && await appExists(actual)) return actual
+  }
+  return spoken
+}
+
+/** True when macOS can resolve this name to an installed application. */
+async function appExists(name: string): Promise<boolean> {
+  if (!isSafeAppName(name)) return false
+  try {
+    await execFile('open', ['-Ra', name], { timeout: COMMAND_TIMEOUT_MS })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Korean speech-to-text renders application names phonetically, so the spoken
+ * form never matches the bundle name. Kept small and explicit: a fuzzy matcher
+ * here would eventually launch the wrong application.
+ */
+const SPOKEN_APP_NAMES: Array<[RegExp, string]> = [
+  [/^(노바유즈|노바유스|novause)$/, 'NOVA Use'],
+  [/^(노바보이스|novavoice)$/, 'NOVA VOICE'],
+  [/^(파인더|finder)$/, 'Finder'],
+  [/^(사파리|safari)$/, 'Safari'],
+  [/^(크롬|구글크롬|chrome)$/, 'Google Chrome'],
+  [/^(터미널|terminal)$/, 'Terminal'],
+  [/^(설정|시스템설정|systemsettings)$/, 'System Settings'],
+  [/^(메모|notes)$/, 'Notes'],
+  [/^(캘린더|달력|calendar)$/, 'Calendar'],
+  [/^(음악|music)$/, 'Music'],
+]
+
+async function openApp(spoken: string): Promise<ComputerExecutionResult> {
+  const name = await resolveAppName(spoken)
   if (!isSafeAppName(name)) {
-    return { status: 'error', message: `앱 이름을 이해하지 못했습니다: ${name}` }
+    return { status: 'error', message: `앱 이름을 이해하지 못했습니다: ${spoken}` }
   }
   try {
     // `open -a` resolves by display name and launches or raises the app. It is
@@ -91,14 +139,15 @@ async function openApp(name: string): Promise<ComputerExecutionResult> {
     return { status: 'ok', message: `${name}을(를) 열었습니다.` }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
-    logWarn('[ComputerUse] Failed to open app', { name, detail })
-    return { status: 'error', message: `${name}을(를) 열지 못했습니다.` }
+    logWarn('[ComputerUse] Failed to open app', { spoken, name, detail })
+    return { status: 'error', message: `${spoken}을(를) 찾지 못했습니다.` }
   }
 }
 
-async function focusApp(name: string): Promise<ComputerExecutionResult> {
+async function focusApp(spoken: string): Promise<ComputerExecutionResult> {
+  const name = await resolveAppName(spoken)
   if (!isSafeAppName(name)) {
-    return { status: 'error', message: `앱 이름을 이해하지 못했습니다: ${name}` }
+    return { status: 'error', message: `앱 이름을 이해하지 못했습니다: ${spoken}` }
   }
   try {
     await execFile('osascript', [
@@ -112,7 +161,7 @@ async function focusApp(name: string): Promise<ComputerExecutionResult> {
   } catch {
     // The process may not be running under that exact name; launching is the
     // behaviour a user means by "switch to X" when X is not open.
-    return openApp(name)
+    return openApp(spoken)
   }
 }
 

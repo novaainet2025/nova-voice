@@ -109,12 +109,20 @@ assert.equal(emptyImage.status, 'error')
 // This gates the whole feature: it was silently timing out on every utterance,
 // so the executor below was never reached. Measured, not assumed.
 const { classifyUtterance } = await import('../src/main/intent-classifier.ts')
+// The dictation cases are the phrases this user actually repeats most often
+// (from their own history). Each one was previously classified as a command and
+// executed — "너 이름이 뭐야" came back as FOCUS_INPUT at 0.85 confidence and
+// moved the caret. Misfiring on a question is worse than missing a command.
 const classifierCases = [
   ['파인더 열어줘', true],
   ['노바 유즈 실행해줘', true],
   ['이력서 파일 찾아줘', true],
   ['입력창에 포커스', true],
-  ['안녕 오늘 날씨 어때', false],
+  ['화면 캡처해줘', true],
+  ['안녕 만나서 반가워', false],
+  ['너 이름이 뭐야', false],
+  ['오늘 며칠인지 알려줘', false],
+  ['그럼 열어', false],
   ['이 버그 왜 나는지 분석해줘', false],
 ]
 const classified = []
@@ -133,6 +141,23 @@ assert.ok(
   correct >= classifierCases.length - 1,
   `classifier accuracy too low: ${correct}/${classifierCases.length} — ${JSON.stringify(classified)}`,
 )
+// A missed command is an inconvenience; a dictation executed as a command is
+// not, so false positives are held to zero rather than to the accuracy budget.
+const falsePositives = classified.filter((row, index) => !classifierCases[index][1] && row.action)
+assert.equal(
+  falsePositives.length, 0,
+  `dictation was classified as a command: ${JSON.stringify(falsePositives)}`,
+)
+
+// Spoken Korean app names must resolve to installed bundles.
+const openedByKoreanName = await executeComputerIntent({
+  action: 'OPEN_APP', target: '파인더', confidence: 0.9,
+})
+assert.equal(openedByKoreanName.status, 'ok', 'a spoken Korean app name did not resolve')
+const missingApp = await executeComputerIntent({
+  action: 'OPEN_APP', target: '없는앱이름', confidence: 0.9,
+})
+assert.equal(missingApp.status, 'error', 'an unknown app name reported success')
 // A gate in front of dictation has to be fast, not merely correct.
 const slowest = Math.max(...classified.map((row) => row.ms))
 assert.ok(slowest < 5_000, `classification took ${slowest}ms; it gates every dictation`)
@@ -154,5 +179,7 @@ console.log(JSON.stringify({
     'tables are deterministic and escape pipes',
     'empty requests are refused before any external call',
     'classifier separates control from dictation, fast enough to gate it',
+    'no dictation is executed as a command (zero false positives)',
+    'spoken Korean app names resolve to installed bundles',
   ],
 }, null, 2))
