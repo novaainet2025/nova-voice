@@ -25,6 +25,7 @@ import { getMainLogPath, logError, logInfo, logWarn } from './logger'
 import { registerShortcuts, unregisterAll } from './shortcuts'
 import { startSttServer, stopSttServer } from './stt-server'
 import { createTray, destroyTray, hideMainWindow, showMainWindow, updateTrayIcon, updateTrayMenu } from './tray'
+import { prepareIntentClassifier } from './intent-classifier'
 import { abortLiveCapture, beginLiveCapture, initWhisper, warmupWhisper } from './whisper'
 import type { VoiceInputMode } from '../shared/types'
 
@@ -374,6 +375,10 @@ app.whenReady().then(async () => {
       },
     )
   }
+
+  // The classifier gates every utterance and cannot pay a cold load inline, so
+  // its dedicated model is brought up here instead of on the first dictation.
+  void prepareIntentClassifier()
 
   void (async () => {
     const serverReady = await startSttServer()

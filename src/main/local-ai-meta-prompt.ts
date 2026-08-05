@@ -188,6 +188,31 @@ export function invalidateLocalMetaTarget(): void {
   resolvedTarget = null
 }
 
+/** Exposed so the intent classifier can share this one dedicated instance. */
+export async function ensureDedicatedOllamaServer(): Promise<boolean> {
+  return ensureLocalOllamaServer()
+}
+
+/**
+ * Loads a model into a server without producing output.
+ *
+ * An empty prompt makes Ollama resident-load the weights and return, which is
+ * the cheapest way to pay a cold load deliberately instead of inside a request
+ * that has a deadline.
+ */
+export async function warmModel(baseUrl: string, model: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${baseUrl}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, prompt: '', stream: false, keep_alive: '30m' }),
+    })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
 async function ensureLocalOllamaServer(): Promise<boolean> {
   if (await endpointReady(LOCAL_OLLAMA_BASE)) return true
   if (serverStartupInFlight) return serverStartupInFlight

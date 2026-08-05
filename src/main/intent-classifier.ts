@@ -18,11 +18,11 @@
  * behavior is untouched by this module; it is purely additive.
  */
 
-import { logInfo } from './logger.ts'
+import { logInfo, logWarn } from './logger.ts'
+import { ensureDedicatedOllamaServer, warmModel } from './local-ai-meta-prompt.ts'
 import { COMPUTER_ACTIONS, parseComputerIntent } from '../shared/computer-intent.ts'
 import type { ComputerIntent } from '../shared/computer-intent.ts'
 
-const SHARED_OLLAMA_BASE = 'http://127.0.0.1:11434'
 const LOCAL_OLLAMA_BASE = 'http://127.0.0.1:11435'
 
 // Same candidates, same preference order as local-ai-meta-prompt.ts's
@@ -80,14 +80,13 @@ async function resolveClassifierTarget(): Promise<ClassifierTarget | null> {
   const cached = resolvedTarget
   if (cached && Date.now() - cached.at < MODEL_RESOLUTION_TTL_MS) return cached.target
 
-  const [sharedResident, dedicatedResident] = await Promise.all([
-    listResidentModels(SHARED_OLLAMA_BASE),
-    listResidentModels(LOCAL_OLLAMA_BASE),
-  ])
-  const servers = [
-    { baseUrl: SHARED_OLLAMA_BASE, resident: sharedResident },
-    { baseUrl: LOCAL_OLLAMA_BASE, resident: dedicatedResident },
-  ]
+  // Only the dedicated server is considered. The shared one is NCO's: measured
+  // there, a request needing 2.0s of inference took 53s wall-clock behind NCO's
+  // queue, and a run of nine utterances timed out on five of them. No deadline
+  // in front of a dictation can absorb that, so classification either runs
+  // uncontended or falls back to dictation.
+  const dedicatedResident = await listResidentModels(LOCAL_OLLAMA_BASE)
+  const servers = [{ baseUrl: LOCAL_OLLAMA_BASE, resident: dedicatedResident }]
 
   for (const model of INTENT_MODEL_CANDIDATES) {
     const warm = servers.find((server) => server.resident.has(model))
@@ -97,8 +96,48 @@ async function resolveClassifierTarget(): Promise<ClassifierTarget | null> {
     return target
   }
 
+  // Nothing is warm anywhere. Start the dedicated server and warm the smallest
+  // candidate in the background so the *next* utterance can be classified; this
+  // one falls back to dictation rather than waiting out a cold load.
+  void prepareDedicatedClassifier()
   resolvedTarget = { target: null, at: Date.now() }
   return null
+}
+
+let preparing: Promise<void> | null = null
+
+/**
+ * Brings the dedicated classifier model up out of band.
+ *
+ * A cold load costs tens of seconds here, far past any deadline that belongs in
+ * front of a dictation, so this never blocks a classification — it only makes
+ * the following ones possible.
+ */
+export function prepareIntentClassifier(): Promise<void> {
+  return prepareDedicatedClassifier()
+}
+
+function prepareDedicatedClassifier(): Promise<void> {
+  if (preparing) return preparing
+  preparing = (async () => {
+    try {
+      if (!await ensureDedicatedOllamaServer()) return
+      const model = INTENT_MODEL_CANDIDATES[0]
+      const warmed = await warmModel(LOCAL_OLLAMA_BASE, model)
+      if (warmed) {
+        // Force the next call to re-read residency rather than wait out the TTL.
+        resolvedTarget = null
+        logInfo('[IntentClassifier] Dedicated model warmed', { model })
+      }
+    } catch (error) {
+      logWarn('[IntentClassifier] Could not warm the dedicated model', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      preparing = null
+    }
+  })()
+  return preparing
 }
 
 function compact(value: string, maxLength: number): string {

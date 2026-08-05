@@ -105,12 +105,45 @@ assert.equal(emptyTable.status, 'error', 'an empty table request reported succes
 const emptyImage = await executeComputerIntent({ action: 'GENERATE_IMAGE', target: '', confidence: 1 })
 assert.equal(emptyImage.status, 'error')
 
+// ── The classifier actually classifies ────────────────────────────────────
+// This gates the whole feature: it was silently timing out on every utterance,
+// so the executor below was never reached. Measured, not assumed.
+const { classifyUtterance } = await import('../src/main/intent-classifier.ts')
+const classifierCases = [
+  ['파인더 열어줘', true],
+  ['노바 유즈 실행해줘', true],
+  ['이력서 파일 찾아줘', true],
+  ['입력창에 포커스', true],
+  ['안녕 오늘 날씨 어때', false],
+  ['이 버그 왜 나는지 분석해줘', false],
+]
+const classified = []
+for (const [utterance, expectControl] of classifierCases) {
+  const startedAt = Date.now()
+  const intent = await classifyUtterance(utterance)
+  classified.push({
+    utterance,
+    action: intent?.action ?? null,
+    ms: Date.now() - startedAt,
+    correct: Boolean(intent) === expectControl,
+  })
+}
+const correct = classified.filter((row) => row.correct).length
+assert.ok(
+  correct >= classifierCases.length - 1,
+  `classifier accuracy too low: ${correct}/${classifierCases.length} — ${JSON.stringify(classified)}`,
+)
+// A gate in front of dictation has to be fast, not merely correct.
+const slowest = Math.max(...classified.map((row) => row.ms))
+assert.ok(slowest < 5_000, `classification took ${slowest}ms; it gates every dictation`)
+
 console.log(JSON.stringify({
   passed: true,
   allowedActions: COMPUTER_ACTIONS.length,
   rejectedInputs: rejected.length,
   confirmationRequired: [...CONFIRMATION_REQUIRED],
   imageModel: IMAGE_MODEL,
+  classifier: { correct, of: classifierCases.length, slowestMs: slowest, cases: classified },
   fileSearch: search.message,
   checks: [
     'allow-list rejects unknown and malformed intents',
@@ -120,5 +153,6 @@ console.log(JSON.stringify({
     'unimplemented actions are reported',
     'tables are deterministic and escape pipes',
     'empty requests are refused before any external call',
+    'classifier separates control from dictation, fast enough to gate it',
   ],
 }, null, 2))
