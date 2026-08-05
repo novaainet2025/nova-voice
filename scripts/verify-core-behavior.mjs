@@ -274,6 +274,21 @@ assert.match(mainRuntime, /beginLiveCapture\(\)/)
 // and throttles timers to 1Hz, which freezes the capture loop that decides
 // when speech ended. Closing the window must not break dictation.
 assert.equal((mainRuntime.match(/backgroundThrottling: false/g) || []).length, 2, 'both windows must opt out of background throttling')
+// A capture that never receives audio, or a dead renderer, used to leave the
+// app stuck in the recording state where the hotkey silently did nothing.
+assert.match(mainRuntime, /render-process-gone/)
+assert.match(mainRuntime, /unresponsive/)
+assert.match(mainRuntime, /MAX_RECOVERY_ATTEMPTS/)
+assert.match(mainRuntime, /keeps failing; giving up/)
+assert.match(mainRuntime, /captureWatchdog = setTimeout/)
+assert.match(mainRuntime, /getLastAudioChunkAt\(\) >= recordingStartTime/)
+assert.match(mainRuntime, /MAX_RECORDING_MS/)
+
+const injectorRuntime = fs.readFileSync(path.join(projectDir, 'src', 'main', 'injector.ts'), 'utf8')
+// Two dictations in quick succession must not let the older restore timer
+// overwrite the newer paste with the clipboard from before it.
+assert.match(injectorRuntime, /injectionGeneration/)
+assert.match(injectorRuntime, /generation !== injectionGeneration/)
 
 const shortcutRuntime = fs.readFileSync(path.join(projectDir, 'src', 'main', 'shortcuts.ts'), 'utf8')
 assert.match(shortcutRuntime, /registerToggle\(bindings\.shortcut, 'normal'/)

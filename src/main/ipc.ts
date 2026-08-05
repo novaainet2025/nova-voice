@@ -28,6 +28,17 @@ let transcriptionController: AbortController | null = null
 let settingsPath: string | null = null
 let verificationPcmDelayMs = 0
 let activeInputMode: VoiceInputMode | null = null
+let lastAudioChunkAt = 0
+
+/**
+ * When the last streamed PCM chunk arrived. The recording watchdog uses this to
+ * tell a working capture apart from one where the renderer never obtained the
+ * microphone — in that state the app looks like it is recording but no audio is
+ * flowing and nothing will ever complete.
+ */
+export function getLastAudioChunkAt(): number {
+  return lastAudioChunkAt
+}
 
 type LoginItemStatus = {
   supported: boolean
@@ -271,6 +282,7 @@ export function setupIPC(mainWindow: BrowserWindow): void {
   // Streamed while the user is still speaking so the STT server can decode the
   // utterance in place of doing it all after the recording stops.
   ipcMain.on('audio:pcm-chunk', (_event, chunk: ArrayBuffer | ArrayBufferView) => {
+    lastAudioChunkAt = Date.now()
     try {
       pushLiveAudio(toBuffer(chunk))
     } catch (error) {

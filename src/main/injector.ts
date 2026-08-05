@@ -4,6 +4,13 @@ import { promisify } from 'util'
 
 const execFile = promisify(execFileCb)
 
+// The clipboard is borrowed for the paste and handed back afterwards. Two
+// dictations in quick succession used to race: the older restore timer fired
+// after the newer one had already loaded its text, so the newer paste inserted
+// the *previous* clipboard contents. Only the newest injection may restore.
+const CLIPBOARD_RESTORE_DELAY_MS = 3_000
+let injectionGeneration = 0
+
 function escapeAppleScript(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
@@ -45,6 +52,7 @@ export async function injectText(text: string, targetApp?: string, bundleId?: st
 
   if (process.platform === 'darwin') {
     // ── Step 1: Save clipboard, set inject text ──────────────────────────────
+    const generation = ++injectionGeneration
     const prevClip = clipboard.readText()
     clipboard.writeText(text)
     let injected = false
@@ -101,8 +109,14 @@ export async function injectText(text: string, targetApp?: string, bundleId?: st
       if (injected) {
         // Restore only after a confirmed paste. On failure, keep STT text in clipboard.
         setTimeout(() => {
+          // A newer dictation now owns the clipboard; restoring here would
+          // replace its text with content from before the previous paste.
+          if (generation !== injectionGeneration) {
+            console.log('[Inject] Skipping clipboard restore — a newer injection owns it')
+            return
+          }
           try { clipboard.writeText(prevClip) } catch { /* ignore */ }
-        }, 3000)
+        }, CLIPBOARD_RESTORE_DELAY_MS)
       }
     }
 

@@ -13,6 +13,7 @@ import {
 import { closeDB, initDB } from './db'
 import {
   cancelCurrentTranscription,
+  getLastAudioChunkAt,
   getRecordingState,
   getSettings,
   setActiveInputMode,
@@ -20,7 +21,7 @@ import {
   setupIPC,
 } from './ipc'
 import { shutdownLocalAiMetaPrompt } from './local-ai-meta-prompt'
-import { getMainLogPath, logError, logInfo } from './logger'
+import { getMainLogPath, logError, logInfo, logWarn } from './logger'
 import { registerShortcuts, unregisterAll } from './shortcuts'
 import { startSttServer, stopSttServer } from './stt-server'
 import { createTray, destroyTray, hideMainWindow, showMainWindow, updateTrayIcon, updateTrayMenu } from './tray'
@@ -37,6 +38,27 @@ let durationTimer: ReturnType<typeof setInterval> | null = null
 let recordingRequestVersion = 0
 let activeRecordingMode: VoiceInputMode = 'normal'
 let isQuitting = false
+let captureWatchdog: ReturnType<typeof setTimeout> | null = null
+let maxDurationTimer: ReturnType<typeof setTimeout> | null = null
+
+// A capture that never receives audio leaves the app looking like it is
+// recording forever: the hotkey then stops instead of starting, so the next
+// press appears to do nothing. Both timers below reset that state on their own.
+const CAPTURE_START_TIMEOUT_MS = 5_000
+const MAX_RECOVERY_ATTEMPTS = 3
+const RECOVERY_WINDOW_MS = 60_000
+const MAX_RECORDING_MS = 180_000
+
+function clearRecordingTimers(): void {
+  if (captureWatchdog) {
+    clearTimeout(captureWatchdog)
+    captureWatchdog = null
+  }
+  if (maxDurationTimer) {
+    clearTimeout(maxDurationTimer)
+    maxDurationTimer = null
+  }
+}
 let launchedAtLogin = false
 const isE2eVerification = process.argv.includes('--nova-voice-e2e')
 
@@ -48,6 +70,46 @@ function wasOpenedAtLogin(): boolean {
     logError('[LoginItem] Failed to detect login launch', error)
     return false
   }
+}
+
+/**
+ * Brings a renderer back after a crash or a hang instead of leaving the app
+ * running with a dead window. A recording in flight is cancelled first so the
+ * app does not stay stuck in the recording state with nothing feeding it.
+ */
+function attachRendererRecovery(win: BrowserWindow, label: string): void {
+  // A renderer that crashes on load would otherwise be reloaded forever. After
+  // a few failures in quick succession the window is left down and logged, so
+  // the cause stays visible instead of being hidden by a reload storm.
+  const recentCrashes: number[] = []
+  const mayReload = (): boolean => {
+    const now = Date.now()
+    while (recentCrashes.length && now - recentCrashes[0] > RECOVERY_WINDOW_MS) recentCrashes.shift()
+    recentCrashes.push(now)
+    if (recentCrashes.length > MAX_RECOVERY_ATTEMPTS) {
+      logError(`[Recovery] ${label} renderer keeps failing; giving up`, {
+        attempts: recentCrashes.length,
+        windowMs: RECOVERY_WINDOW_MS,
+      })
+      return false
+    }
+    return true
+  }
+  const recover = (reason: string, detail?: unknown) => {
+    logError(`[Recovery] ${label} renderer ${reason}`, detail)
+    if (getRecordingState()) cancelRecording()
+    if (win.isDestroyed() || isQuitting || !mayReload()) return
+    win.reload()
+    logInfo(`[Recovery] ${label} renderer reloaded`)
+  }
+
+  win.webContents.on('render-process-gone', (_event, details) => recover('gone', details))
+  win.on('unresponsive', () => recover('is unresponsive'))
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    // -3 is ERR_ABORTED, which a normal in-app navigation also reports.
+    if (errorCode === -3) return
+    logError(`[Recovery] ${label} renderer failed to load`, { errorCode, errorDescription, validatedURL })
+  })
 }
 
 function createMainWindow(): BrowserWindow {
@@ -88,6 +150,11 @@ function createMainWindow(): BrowserWindow {
   win.webContents.on('console-message', (_event, _level, message) => {
     if (message.startsWith('[Recorder]')) console.log(message)
   })
+
+  // This renderer holds the microphone and the capture loop. If it dies or
+  // wedges there is nothing left to stop a recording or start the next one, so
+  // it is brought back rather than left in a state where the hotkey does nothing.
+  attachRendererRecovery(win, 'main')
 
   win.on('close', (event) => {
     if (!isQuitting) {
@@ -137,6 +204,8 @@ function createOverlayWindow(): BrowserWindow {
     },
   })
 
+  attachRendererRecovery(win, 'overlay')
+
   if (process.platform === 'darwin') win.setIgnoreMouseEvents(true, { forward: true })
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 
@@ -153,6 +222,7 @@ function finishRecording(cancelled = false): void {
   recordingRequestVersion += 1
   if (!getRecordingState()) return
   setRecordingState(false)
+  clearRecordingTimers()
   if (durationTimer) {
     clearInterval(durationTimer)
     durationTimer = null
@@ -206,6 +276,29 @@ async function startRecording(mode?: VoiceInputMode): Promise<void> {
   durationTimer = setInterval(() => {
     overlayWindow?.webContents.send('recording:duration', (Date.now() - recordingStartTime) / 1000)
   }, 100)
+
+  clearRecordingTimers()
+  captureWatchdog = setTimeout(() => {
+    captureWatchdog = null
+    if (!getRecordingState()) return
+    if (getLastAudioChunkAt() >= recordingStartTime) return
+    logError('[Recovery] No audio arrived after the recording started; resetting state', {
+      waitedMs: CAPTURE_START_TIMEOUT_MS,
+      lastChunkAt: getLastAudioChunkAt(),
+      recordingStartTime,
+    })
+    cancelRecording()
+    // The renderer owns the microphone; reloading it re-runs permission and
+    // device acquisition from scratch.
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload()
+  }, CAPTURE_START_TIMEOUT_MS)
+  maxDurationTimer = setTimeout(() => {
+    maxDurationTimer = null
+    if (!getRecordingState()) return
+    logWarn('[Recovery] Recording hit the maximum duration; stopping it', { maxMs: MAX_RECORDING_MS })
+    finishRecording()
+  }, MAX_RECORDING_MS)
+
   updateTrayMenu(mainWindow, true)
   updateTrayIcon(true)
 }
